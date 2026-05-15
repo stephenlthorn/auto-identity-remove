@@ -1,0 +1,35 @@
+{
+  "_comment": "Copy this file to config.json and fill in your details. Run `node setup.js` to be guided interactively.",
+
+  "person": {
+    "firstName": "Jane",
+    "lastName": "Doe",
+    "fullName": "Jane Doe",
+    "aliases": ["Jan Doe", "Jane M Doe"],
+    "city": "Austin",
+    "state": "TX",
+    "zip": "73301",
+    "email": "jane.doe@example.com",
+    "phone": "5125550000",
+    "phoneFormatted": "(512) 555-0000"
+  },
+
+  "capsolver": {
+    "_comment": "Sign up free at capsolver.com — pay-as-you-go, costs pennies/month for this use case",
+    "apiKey": "CAP-YOUR_KEY_HERE"
+  },
+
+  "accounts": {
+    "_comment": "For sites that require a login. Leave password blank — setup.js will prompt you to create the account once, then store credentials here.",
+    "spokeo":       { "email": "", "password": "" },
+    "beenverified": { "email": "", "password": "" },
+    "mylife":       { "email": "", "password": "" }
+  },
+
+  "notify": {
+    "_comment": "iMessage number to text results to. Leave blank to disable.",
+    "textTo": "+15125550000"
+  },
+
+  "profileDir": "/Users/YOUR_USERNAME/.config/auto-identity-remove"
+}
