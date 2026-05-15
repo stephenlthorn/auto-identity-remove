@@ -393,9 +393,11 @@ function buildSummary() {
 async function main() {
   const brokers = require('./brokers');
 
+  const { runGenericBrokers } = require('./generic-runner');
+
   console.log('\n🔒 auto-identity-remove — starting run');
   console.log(`📅 ${new Date().toLocaleString()}`);
-  console.log(`📋 ${brokers.length} brokers | re-check window: ${RECHECK_DAYS} days\n`);
+  console.log(`📋 ${brokers.length} explicit brokers + 500+ generic | re-check window: ${RECHECK_DAYS} days\n`);
 
   // Email opt-outs (no browser needed)
   console.log('── Email opt-outs ─────────────────────────────────────────');
@@ -415,11 +417,22 @@ async function main() {
     .filter(b => b.method !== 'email')
     .sort((a, b) => (a.priority || 9) - (b.priority || 9));
 
-  console.log('\n── Browser opt-outs ───────────────────────────────────────');
+  console.log('\n── Explicit broker opt-outs ───────────────────────────────');
   for (const broker of sorted) {
     process.stdout.write(`\n[${stamp()}] ${broker.name}… `);
     await processBroker(context, broker);
   }
+
+  // Build the set of explicit broker hostnames so generic-runner can skip them
+  const explicitHosts = new Set(
+    brokers.map(b => {
+      try {
+        return new URL(b.optOutUrl || b.searchUrl || '').hostname.replace(/^www\./, '');
+      } catch(_) { return ''; }
+    }).filter(Boolean)
+  );
+
+  await runGenericBrokers(context, explicitHosts, state, logResult, recordSuccess);
 
   await context.close().catch(() => {});
 
@@ -444,9 +457,10 @@ async function main() {
   console.log(`💾 State: ${STATE_PATH}\n`);
 
   // iMessage
-  const short = `🔒 Privacy Watcher (${new Date().toLocaleDateString()}):\n✅ Removed: ${results.succeeded.length}\n⏭  Skipped: ${results.skipped.length}\n📋 Manual: ${results.captchaFailed.length + results.manual.length}`;
+  const totalProcessed = results.succeeded.length + results.skipped.length + results.notFound.length + results.captchaFailed.length + results.manual.length + results.errors.length;
+  const short = `🔒 Privacy Watcher (${new Date().toLocaleDateString()}):\n✅ Removed: ${results.succeeded.length}\n⏭  Skipped: ${results.skipped.length}\n📋 Manual: ${results.captchaFailed.length + results.manual.length}\n📊 Total: ${totalProcessed} brokers checked`;
   sendText(short);
-  macNotify('Privacy Watcher', `Done — ${results.succeeded.length} removed, ${results.captchaFailed.length + results.manual.length} need manual action`);
+  macNotify('Privacy Watcher', `Done — ${results.succeeded.length} removed, ${results.captchaFailed.length + results.manual.length} need manual action (${totalProcessed} total)`);
 }
 
 main().catch(err => {

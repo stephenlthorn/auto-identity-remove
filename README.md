@@ -1,6 +1,6 @@
 # auto-identity-remove
 
-Automated data broker opt-out runner for macOS. Removes your personal information from 30+ people-search sites and data broker databases on a monthly schedule — with CAPTCHA solving, persistent state tracking (so completed opt-outs aren't resubmitted every run), and an iMessage notification when done.
+Automated data broker opt-out runner for macOS. Removes your personal information from **500+ people-search sites and data broker databases** on a monthly schedule — with CAPTCHA solving, persistent state tracking (so completed opt-outs aren't resubmitted every run), and an iMessage notification when done.
 
 ## What it does
 
@@ -159,6 +159,23 @@ On each run you'll see:
 | **ZoomInfo** | Direct form (B2B professional data) |
 | **Clearbit** | Direct form (B2B enrichment data) |
 | Pipl | Email opt-out via Mail.app |
+
+### Generic — 500+ additional brokers (auto-detected)
+
+`generic-runner.js` handles the remaining ~470 brokers from two public datasets:
+
+| Dataset | Source | Count |
+|---------|--------|-------|
+| [The Markup's data broker list](https://themarkup.org/privacy/2023/01/26/which-data-brokers-offer-opt-outs) | Journalism research, 494 opt-out URLs | ~494 |
+| [BADBOOL](https://github.com/yaelwrites/Big-Ass-Data-Broker-Opt-Out-List) | Community-maintained people-search list | ~27 extra |
+
+For each site it tries four strategies in order:
+1. Click a "Do Not Sell My Personal Information" button
+2. Opt out via OneTrust / TrustArc / Osano privacy manager
+3. Fill any generic opt-out form (email, name, state) and submit
+4. Find and record a DSAR / data request link for manual follow-up
+
+Sites requiring manual action are opened in your browser automatically.
 
 ### Manual (opened in browser for you)
 

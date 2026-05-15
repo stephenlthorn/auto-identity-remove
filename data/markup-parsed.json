@@ -1,0 +1,3460 @@
+[
+  {
+    "name": "Explorium Inc.",
+    "hostname": "www.explorium.ai",
+    "urlFinal": "https://www.explorium.ai/platform-privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "M1 Data & Analytics, LLC",
+    "hostname": "www.m1-data.com",
+    "urlFinal": "https://m1-data.com/disclosures/",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "Sabio, Inc.",
+    "hostname": "sabio.inc",
+    "urlFinal": "https://www.sabioctv.com/do-not-sell-my-info",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "AppScience",
+    "hostname": "www.appscience.ai",
+    "urlFinal": "https://www.appscience.ai/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "LexisNexis",
+    "hostname": "www.lexisnexis.com",
+    "urlFinal": "https://www.lexisnexis.com/en-us/terms/us-privacy-notice.page",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Lotame Solutions, Inc.",
+    "hostname": "www.lotame.com",
+    "urlFinal": "https://www.lotame.com/privacy/information-privacy-choices-services/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "CITYDATA Inc.",
+    "hostname": "citydata.ai",
+    "urlFinal": "https://citydata.ai/privacy/do_not_sell_personal_information/",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "Unearth Campaigns, LLC",
+    "hostname": "www.unearthcampaigns.com",
+    "urlFinal": "https://www.unearthcampaigns.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Censia, In.",
+    "hostname": "www.censia.com",
+    "urlFinal": "https://www.censia.com/ccpa/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "DecisionLinks",
+    "hostname": "www.decisionlinks.com",
+    "urlFinal": "https://www.decisionlinks.com/get-in-touch",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "MULTIMEDIA LISTS, INC.",
+    "hostname": "www.multimedialists.com",
+    "urlFinal": "https://multimedialists.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Nexxen Inc.",
+    "hostname": "yourdata.nexxen.com",
+    "urlFinal": "https://yourdata.nexxen.com/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Predictive Pop, Inc.",
+    "hostname": "www.audigent.com",
+    "urlFinal": "https://audigent.com/privacy-center/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Monevo, Inc.",
+    "hostname": "app.monevo.us",
+    "urlFinal": "https://app.monevo.us/california-privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Malvern Media Inc.",
+    "hostname": "privacyportal.privacypillar.com",
+    "urlFinal": "https://privacyportal.privacypillar.com/dsar/form?orgid=369c8ff9-8ffb-4308-8362-f01691e77db8&propid=64c8904f-8bac-4dd9-8e6c-d052be1918a2&formid=6e6ff4b8-2296-4589-ae7f-563fa743ec2d&status=publish",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Grassroots Analytics",
+    "hostname": "www.grassrootsanalytics.com",
+    "urlFinal": "https://www.grassrootsanalytics.com/california-consumer-privacy-act-ccpa",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Stirista, LLC",
+    "hostname": "www.stirista.com",
+    "urlFinal": "https://www.stirista.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Swarm Holdings, Inc.",
+    "hostname": "www.theswarm.com",
+    "urlFinal": "https://www.theswarm.com/privacy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "PrivCo Media LLC",
+    "hostname": "www.privco.com",
+    "urlFinal": "https://www.privco.com/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Mobilewalla, Inc.",
+    "hostname": "www.mobilewalla.com",
+    "urlFinal": "https://www.mobilewalla.com/california-residents-do-not-sell-my-personal-information",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "Slashdot Media, LLC",
+    "hostname": "www.slashdotmedia.com",
+    "urlFinal": "https://slashdotmedia.com/privacy-statement/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Blue Hill Marketing Solutions, Inc",
+    "hostname": "liftbasedata.com",
+    "urlFinal": "https://www.liftbasedata.com/request-to-know/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "FinThrive Healthcare, Inc.",
+    "hostname": "www.finthrive.com",
+    "urlFinal": "https://finthrive.com/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Merkle Inc.",
+    "hostname": "www.merkle.com",
+    "urlFinal": "https://www.merkle.com/en/privacy-policy.html",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "DATONICS LLC",
+    "hostname": "www.datonics.com",
+    "urlFinal": "https://www.datonics.com/privacy/privacy-choices",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "FlashIntel",
+    "hostname": "www.flashintel.ai",
+    "urlFinal": "https://www.flashintel.ai/privacy-statement-us",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Intent IQ LLC",
+    "hostname": "intentiq.com",
+    "urlFinal": "https://www.intentiq.com/opt-out/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "WINR Data B.V.",
+    "hostname": "www.winrdata.com",
+    "urlFinal": "https://www.winrdata.com/privacy-policy-us/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Redmob LLC",
+    "hostname": "www.redmob.io",
+    "urlFinal": "https://redmob.io/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Visual Visitor L.L.C.",
+    "hostname": "www.visualvisitor.com",
+    "urlFinal": "https://www.visualvisitor.com/opt-out/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "True Blue Analytics LLC",
+    "hostname": "www.trueblueanalytics.org",
+    "urlFinal": "https://trueblueanalytics.org/privacy-policy",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "DealerSocket, LLC",
+    "hostname": "www.dealersocket.com",
+    "urlFinal": "https://dealersocket.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Throtle, Inc",
+    "hostname": "privacyportal.privacypillar.com",
+    "urlFinal": "https://privacyportal.privacypillar.com/dsar/form?orgid=04a4ea97-ff37-4031-9719-c1963511d70f&propid=72c016a3-81ac-4b8e-b078-2e70940eb18f&formid=33f8dff1-312d-4c66-b12b-64b16b7d47d9",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Cuebiq Group, LLC",
+    "hostname": "www.cuebiq.com",
+    "urlFinal": "https://cuebiq.com/privacy-policy/",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "People Data Labs, Inc.",
+    "hostname": "privacy.peopledatalabs.com",
+    "urlFinal": "https://privacy.peopledatalabs.com/policies?name=privacy-center#people-data-labs-privacy-center",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Warmly, Inc",
+    "hostname": "www.warmly.ai",
+    "urlFinal": "https://www.warmly.ai/p/privacy-policy#your-choices",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "Connext Digital, LLC",
+    "hostname": "www.connextdigital.com",
+    "urlFinal": "https://connextdigital.com/ccpa/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Outward Media, Inc.",
+    "hostname": "outwardmedia.com",
+    "urlFinal": "https://outwardmedia.com/do-not-sell",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Magnite Inc",
+    "hostname": "www.magnite.com",
+    "urlFinal": "https://www.magnite.com/legal/user-choice-portal/",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "Minerva BI Inc",
+    "hostname": "realtors.minervadata.xyz",
+    "urlFinal": "https://pages.minerva.io/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Nativo, Inc.",
+    "hostname": "www.nativo.com",
+    "urlFinal": "https://www.nativo.com/legal/interest-based-ads#your-rights",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Precisely Software Incorporated",
+    "hostname": "www.precisely.com",
+    "urlFinal": "https://www.precisely.com/your-privacy-choices/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "DealerX Partners LLC",
+    "hostname": "www.dealerx.com",
+    "urlFinal": "https://dealerx.com/privacy-options/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Anchor Computer Inc.",
+    "hostname": "www.anchorcomputer.com",
+    "urlFinal": "https://www.anchorcomputer.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Wunderkind Corporation",
+    "hostname": "www.wunderkind.co",
+    "urlFinal": "https://www.wunderkind.co/privacy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Clearview AI, Inc.",
+    "hostname": "www.clearview.ai",
+    "urlFinal": "https://www.clearview.ai/privacy-and-requests",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "NC Vnetures, LLC",
+    "hostname": "www.ncsolutions.com",
+    "urlFinal": "https://ncsolutions.com/services-privacy-statement/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "xAd, Inc.",
+    "hostname": "www.groundtruth.com",
+    "urlFinal": "https://www.groundtruth.com/privacy-policy/",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "LiveRamp, Inc.",
+    "hostname": "www.liveramp.com",
+    "urlFinal": "https://liveramp.com/privacy/my-privacy-choices/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "NFocus Consulting, Inc.",
+    "hostname": "www.n-focus.com",
+    "urlFinal": "https://www.n-focus.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Datasys Group, Inc.",
+    "hostname": "www.datasys.com",
+    "urlFinal": "https://datasys.com/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "HireTeamMate, Inc.",
+    "hostname": "app.hireez.com",
+    "urlFinal": "https://app.hireez.com/ownyourdata",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Tagis, Inc.",
+    "hostname": "amplemarket.com",
+    "urlFinal": "https://www.amplemarket.com/legal/privacy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "ModFx Labs Pvt Ltd",
+    "hostname": "www.modfxlabs.com",
+    "urlFinal": "https://modfxlabs.com/privacy",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "LeadIQ, Inc",
+    "hostname": "www.leadiq.com",
+    "urlFinal": "https://www.leadiq.com/privacy-center",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Azira LLC",
+    "hostname": "www.azira.com",
+    "urlFinal": "https://azira.com/privacy-policy",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "DT Client Services, LLC",
+    "hostname": "www.thedatatrust.com",
+    "urlFinal": "https://thedatatrust.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Matchbook Data, LLC",
+    "hostname": "www.matchbookdata.com",
+    "urlFinal": "https://www.matchbookdata.com/privacy-policy/",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "Outlogic, LLC",
+    "hostname": "www.outlogic.io",
+    "urlFinal": "https://outlogic.io/privacy-policy/",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "MarketOps LLC",
+    "hostname": "marketops.com",
+    "urlFinal": "https://marketops.com/privacy-options/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Dstillery, Inc",
+    "hostname": "www.dstillery.com",
+    "urlFinal": "https://dstillery.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "TechTarget, Inc.",
+    "hostname": "www.techtarget.com",
+    "urlFinal": "https://www.informatechtarget.com/ccpa-privacy-notice/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "RampedUp, LLC.",
+    "hostname": "basic.rampedup.io",
+    "urlFinal": "https://basic.rampedup.io/app/donotsell",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Leidos Digital Solutions, Inc.",
+    "hostname": "www.leidosiq.com",
+    "urlFinal": "https://leidosiq.com/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "DTN, LLC",
+    "hostname": "www.dtn.com",
+    "urlFinal": "https://www.dtn.com/do-not-sell-my-information-form/",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "Epsilon Data Management, LLC",
+    "hostname": "legal.epsilon.com",
+    "urlFinal": "https://legal.epsilon.com/dsr/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Simio Cloud, LLC",
+    "hostname": "www.simiocloud.com",
+    "urlFinal": "https://simiocloud.com/simiocloud-products-services-privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Blackbaud, Inc",
+    "hostname": "www.blackbaud.com",
+    "urlFinal": "https://www.blackbaud.com/company/data-subject-rights-request",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Lookify, LLC",
+    "hostname": "www.lookify.io",
+    "urlFinal": "https://lookify.io/opt-out",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Demand Science US, LLC",
+    "hostname": "www.demandscience.com",
+    "urlFinal": "https://demandscience.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Affinity Solutions",
+    "hostname": "www.affinity.solutions",
+    "urlFinal": "https://www.affinity.solutions/data-privacy-notice/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Clay Labs, Inc",
+    "hostname": "privacy.clay.com",
+    "urlFinal": "https://privacy.clay.com/policies",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Quad/Graphics, Inc.",
+    "hostname": "www.quad.com",
+    "urlFinal": "https://www.quad.com/legal/privacy-policy",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "Innovative Database Solutions, Inc.",
+    "hostname": "www.idatabasesolutions.com",
+    "urlFinal": "https://idatabasesolutions.com/ccpa/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Infinite Media Concepts Inc",
+    "hostname": "www.mailinglists.com",
+    "urlFinal": "https://mailinglists.com/about/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "BeenVerified, Inc. and its subsidiaries and affiliates",
+    "hostname": "beenverified.com",
+    "urlFinal": "https://beenverified.com/svc/optout/search/comprehensive_optouts",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "AnalyticsIQ, Inc.",
+    "hostname": "privacyportal.onetrust.com",
+    "urlFinal": "https://privacyportal.onetrust.com/webform/f6a59500-f900-4652-b030-0cd51afe15a5/87ca07e4-e06c-4ad8-9aa6-ccbbaa8750c1",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Labels & Lists, Inc",
+    "hostname": "l2-data.com",
+    "urlFinal": "https://www.l2-data.com/california-privacy-rights-for-california-residents-only/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Aristotle International, Inc.",
+    "hostname": "www.aristotle.com",
+    "urlFinal": "https://www.aristotle.com/privacy/addendum-for-california-residents/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "J.D. Power",
+    "hostname": "www.jdpower.com",
+    "urlFinal": "https://www.jdpower.com/privacy/california",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Realeflow LLC",
+    "hostname": "cdn.realeflow.com",
+    "urlFinal": "https://cdn.realeflow.com/privacy-policy.pdf",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "CoStar Group",
+    "hostname": "www.costar.com",
+    "urlFinal": "https://www.costar.com/about/privacy-notice",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Fideo Intelligence, Inc.",
+    "hostname": "app.fideo.ai",
+    "urlFinal": "https://app.fideo.ai/your-privacy-choices",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "OpenX Technologies, Inc.",
+    "hostname": "www.openx.com",
+    "urlFinal": "https://www.openx.com/privacy-center/ad-exchange-privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Catalina Marketing Corporation",
+    "hostname": "www.catalina.com",
+    "urlFinal": "https://www.catalina.com/legal#privacy-notice",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Lead Me Media, LLC",
+    "hostname": "policy.leadmemedia.com",
+    "urlFinal": "https://policy.leadmemedia.com/States/privacyrequestform.html",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Valassis Communications, Inc.",
+    "hostname": "www.rrd.com",
+    "urlFinal": "https://www.rrd.com/privacy-policy/valassis",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "Audience Acuity LLC",
+    "hostname": "www.audienceacuity.com",
+    "urlFinal": "https://audienceacuity.com/california/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "InfoPay, Inc",
+    "hostname": "www.infopay.com",
+    "urlFinal": "https://www.infopay.com/privacy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "HealthWise Data",
+    "hostname": "www.healthwisedata.com",
+    "urlFinal": "https://healthwisedata.com/privacy-policy/",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "PropertyRadar, Inc.",
+    "hostname": "www.propertyradar.com",
+    "urlFinal": "https://www.propertyradar.com/privacy-policy",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "Crimson Hexagon",
+    "hostname": "www.brandwatch.com",
+    "urlFinal": "https://www.brandwatch.com/confirmation/legal-data/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Site Impact, Inc",
+    "hostname": "www.siteimpact.com",
+    "urlFinal": "https://www.siteimpact.com/privacypolicy.php",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "A Direct Marketing Inc",
+    "hostname": "www.bookyourdata.com",
+    "urlFinal": "https://www.bookyourdata.com/ccpa-ready",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "MaxMind, Inc.",
+    "hostname": "www.maxmind.com",
+    "urlFinal": "https://www.maxmind.com/en/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Paramount Lists, Inc.",
+    "hostname": "www.paramountdirectmarketing.com",
+    "urlFinal": "https://www.paramountdirectmarketing.com/privacy-policy.php",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Edvisors Network, Inc.",
+    "hostname": "www.edvisors.com",
+    "urlFinal": "https://www.edvisors.com/delete-request/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Real Intent Inc.",
+    "hostname": "www.realintent.co",
+    "urlFinal": "https://www.realintent.co/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Acxiom LLC",
+    "hostname": "www.acxiom.com",
+    "urlFinal": "https://www.acxiom.com/privacy/",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "Austin Consolidated Holdings, Inc.",
+    "hostname": "www.equifax.com",
+    "urlFinal": "https://www.equifax.com/personal/my-privacy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Buildertrend Solutions, Inc.",
+    "hostname": "www.buildertrend.com",
+    "urlFinal": "https://buildertrend.com/additional-state-disclosures/",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "Revelio Labs, Inc.",
+    "hostname": "www.reveliolabs.com",
+    "urlFinal": "https://www.reveliolabs.com/notice-to-california-residents/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Crunchbase, Inc.",
+    "hostname": "preferences.crunchbase.com",
+    "urlFinal": "https://preferences.crunchbase.com/form/opt_out",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Unacast, Inc.",
+    "hostname": "www.unacast.com",
+    "urlFinal": "https://www.unacast.com/privacy-policy",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "Intelius, LLC",
+    "hostname": "www.intelius.com",
+    "urlFinal": "https://www.intelius.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Venntel, Inc.",
+    "hostname": "venntel.com",
+    "urlFinal": "https://venntel.com/privacy-policy",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "TruthFinder, LLC",
+    "hostname": "www.truthfinder.com",
+    "urlFinal": "https://www.truthfinder.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Instant Checkmate, LLC",
+    "hostname": "www.instantcheckmate.com",
+    "urlFinal": "https://www.instantcheckmate.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "NextRoll, Inc",
+    "hostname": "www.nextroll.com",
+    "urlFinal": "https://www.nextroll.com/privacy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "GetEmails LLC",
+    "hostname": "www.retention.com",
+    "urlFinal": "https://www.retention.com/article-update-privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Opensend Inc",
+    "hostname": "www.opensend.com",
+    "urlFinal": "https://www.opensend.com/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Pacific East Research Inc",
+    "hostname": "www.pacificeast.com",
+    "urlFinal": "https://www.pacificeast.com/contact-us-privacy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Taboola, Inc.",
+    "hostname": "accessrequest.taboola.com",
+    "urlFinal": "https://accessrequest.taboola.com/access",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Claritas LLC.",
+    "hostname": "www.claritas.com",
+    "urlFinal": "https://www.claritas.com/privacy-legal/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Narvar, Inc.",
+    "hostname": "corp.narvar.com",
+    "urlFinal": "https://corp.narvar.com/legal/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "iSpot.tv, Inc.",
+    "hostname": "www.ispot.tv",
+    "urlFinal": "https://www.ispot.tv/privacy",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "DataDelivers LLC",
+    "hostname": "www.datadelivers.com",
+    "urlFinal": "https://datadelivers.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Great Lakes List, Inc.",
+    "hostname": "www.greatlakeslists.com",
+    "urlFinal": "https://www.greatlakeslists.com/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Veeva Systems Inc.",
+    "hostname": "www.veeva.com",
+    "urlFinal": "https://www.veeva.com/privacy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Dataline, Inc.",
+    "hostname": "datalinedata.com",
+    "urlFinal": "https://datalinedata.com/privacy-portal/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Redi-Data Inc.",
+    "hostname": "www.redidata.com",
+    "urlFinal": "https://www.redidata.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Path2Response LLC",
+    "hostname": "privacyportal-cdn.onetrust.com",
+    "urlFinal": "https://privacyportal-cdn.onetrust.com/dsarwebform/2de26f06-de6f-45a7-8e1d-7d1148a3f301/draft/7a5dc7d1-cc7e-43a8-9f24-702807deb65b.html",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Brooks Integrated Marketing, LLC",
+    "hostname": "www.brooksim.com",
+    "urlFinal": "https://www.brooksim.com/privacy-form",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Mobile Technology Corporation",
+    "hostname": "www.onspotdata.com",
+    "urlFinal": "https://www.onspotdata.com/privacy-policy/",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "J2 Global Canada, Inc.",
+    "hostname": "www.fullcontact.com",
+    "urlFinal": "https://www.fullcontact.com/privacy/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Cision US, Inc",
+    "hostname": "privacyportal-uk.onetrust.com",
+    "urlFinal": "https://privacyportal-uk.onetrust.com/webform/d2cb5e2f-e4f8-4ada-be9f-38f2e699fd45/3216c7cb-cf10-465b-84f8-867628ba5273",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "MediaWallah Inc",
+    "hostname": "www.mediawallah.com",
+    "urlFinal": "https://mediawallah.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Integrated Direct Marketing, LLC",
+    "hostname": "www.idm.us.com",
+    "urlFinal": "https://www.idm.us.com/do-not-sell-my-personal-information/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "ACH, Address Clearing House",
+    "hostname": "www.achcoop.com",
+    "urlFinal": "https://www.achcoop.com/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Blis Global Ltd",
+    "hostname": "www.blis.com",
+    "urlFinal": "https://blis.com/privacy-centre/",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "Altair Data Resources, Inc.",
+    "hostname": "www.altairdata.com",
+    "urlFinal": "https://www.altairdata.com/altair-consumer-info/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Belardi Ostroy",
+    "hostname": "www.belardiwong.com",
+    "urlFinal": "https://belardiwong.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "BH MARKETING GROUP LLC",
+    "hostname": "www.usmarketinggrp.com",
+    "urlFinal": "https://usmarketinggrp.com/privacy-policy/#CCPA",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Message Digital LLC",
+    "hostname": "www.messagedigital.com",
+    "urlFinal": "https://www.messagedigital.com/my-data",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Above Data, Inc.",
+    "hostname": "www.abovedata.io",
+    "urlFinal": "https://www.abovedata.io/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Adstra LLC",
+    "hostname": "www.adstradata.com",
+    "urlFinal": "https://adstradata.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Dresden Direct, Inc.",
+    "hostname": "www.dresdendirect.com",
+    "urlFinal": "https://www.dresdendirect.com/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Kloudend, Inc.",
+    "hostname": "www.ipapi.co",
+    "urlFinal": "https://ipapi.co/donotsell/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "PaeDae, Inc.",
+    "hostname": "www.infillion.com",
+    "urlFinal": "https://infillion.com/legal/privacy-policy/",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "L.S Mobile Apps Holdings Ltd",
+    "hostname": "www.lsmapps.com",
+    "urlFinal": "https://www.lsmapps.com/privacy-center",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Collective Data Solutions",
+    "hostname": "www.collectivedata.io",
+    "urlFinal": "https://www.collectivedata.io/website-visitor-privacy-policy/",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "Alliant Cooperative Data Solutions, LLC",
+    "hostname": "www.alliantinsight.com",
+    "urlFinal": "https://alliantinsight.com/alliant-privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "CTAM LeadShare Corp.",
+    "hostname": "www.smartmove.us",
+    "urlFinal": "https://www.smartmove.us/company/privacy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "CO2 Ventures, LLC",
+    "hostname": "www.oncoreleads.com",
+    "urlFinal": "https://oncoreleads.com/california-privacy-rights/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Seamless Contacts, Inc.",
+    "hostname": "login.seamless.ai",
+    "urlFinal": "https://login.seamless.ai/personalDataRequest",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Salutary Data LLC.",
+    "hostname": "www.salutarydata.com",
+    "urlFinal": "https://salutarydata.com/privacy-opt-out-and-disclosure-form/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Moody's Corporation",
+    "hostname": "www.moodys.com",
+    "urlFinal": "https://www.moodys.com/web/en/us/legal/privacy-policy.html",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Wiland, Inc.",
+    "hostname": "www.wiland.com",
+    "urlFinal": "https://wiland.com/privacy-choices/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Foo Monk LLC",
+    "hostname": "www.instantly.ai",
+    "urlFinal": "https://instantly.ai/privacy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Rich Media LLC",
+    "hostname": "www.richmediallc.com",
+    "urlFinal": "https://richmediallc.com/do-not-sell-my-personal-information/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Lead Intelligence, Inc.",
+    "hostname": "marketing.verisk.com",
+    "urlFinal": "https://marketing.verisk.com/privacy-center/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Insightbridge LLC",
+    "hostname": "www.mylife.com",
+    "urlFinal": "https://www.mylife.com/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "JDM LIST SERVICES, LLC",
+    "hostname": "www.jdmlistservices.com",
+    "urlFinal": "https://jdmlistservices.com/do-not-sell-my-info",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Versium Analytics Inc.",
+    "hostname": "www.versium.com",
+    "urlFinal": "https://versium.com/ccpa-privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Webbula, LLC",
+    "hostname": "www.webbula.com",
+    "urlFinal": "https://webbula.com/privacy-center/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "First Direct, Inc.",
+    "hostname": "compliance.firstdirectmarketing.com",
+    "urlFinal": "https://compliance.firstdirectmarketing.com/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Focus USA, Inc",
+    "hostname": "www.focus-usa.com",
+    "urlFinal": "https://www.focus-usa.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "LeadPost LLC",
+    "hostname": "www.leadpost.com",
+    "urlFinal": "https://leadpost.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "33Across, Inc.",
+    "hostname": "33across.com",
+    "urlFinal": "https://33across.com/privacy-policy/ccpa-notice/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Nuwber Inc",
+    "hostname": "www.nuwber.com",
+    "urlFinal": "https://nuwber.com/policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Anteriad, LLC",
+    "hostname": "privacyportal.onetrust.com",
+    "urlFinal": "https://anteriad.com/privacy-center",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "AWL Holdings, LLC",
+    "hostname": "www.awl.com",
+    "urlFinal": "https://awl.com/privacy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Enigma Technologies, Inc.",
+    "hostname": "www.enigma.com",
+    "urlFinal": "https://www.enigma.com/company/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Spokeo, Inc.",
+    "hostname": "www.spokeo.com",
+    "urlFinal": "https://www.spokeo.com/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Buxton Company, LLC",
+    "hostname": "www.buxtonco.com",
+    "urlFinal": "https://www.buxtonco.com/privacy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Lead411 Corporation",
+    "hostname": "www.lead411.com",
+    "urlFinal": "https://www.lead411.com/your-privacy-choices/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Round Sky, Inc.",
+    "hostname": "www.roundsky.com",
+    "urlFinal": "https://www.roundsky.com/supplemental-privacy-notice/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Whitepages, Inc",
+    "hostname": "www.whitepages.com",
+    "urlFinal": "https://www.whitepages.com/privacy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "adsquare GmbH",
+    "hostname": "www.adsquare.com",
+    "urlFinal": "https://adsquare.com/privacy/us_privacy_supplement/#goto-contact-us",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "Lusha Systems, Inc.",
+    "hostname": "www.lusha.com",
+    "urlFinal": "https://www.lusha.com/legal/ccpa/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Ray CDP, Inc.",
+    "hostname": "www.rayinsights.com",
+    "urlFinal": "https://www.rayinsights.com/privacy-notice/consumer-choice-portal/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "EAB Global, Inc.",
+    "hostname": "www.eab.com",
+    "urlFinal": "https://eab.app.box.com/s/ig1xoav1pag3q3af1k812bdthzfyhcwn",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "GRIN Technologies Inc.",
+    "hostname": "www.grin.co",
+    "urlFinal": "https://grin.co/privacy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Lionshare Marketing, Inc",
+    "hostname": "www.lionsharemarketing.com",
+    "urlFinal": "https://www.lionsharemarketing.com/privacy-policy/",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "Beeswax",
+    "hostname": "www.beeswax.com",
+    "urlFinal": "https://www.beeswax.com/privacy/#what-information",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "Pipl, Inc.",
+    "hostname": "www.pipl.com",
+    "urlFinal": "https://pipl.com/resources/privacy-documents/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "OWMN, LTD.",
+    "hostname": "www.thebridgecorp.com",
+    "urlFinal": "https://www.thebridgecorp.com/california-residents-ccpa/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "ZipStorm, Inc.",
+    "hostname": "www.seekout.com",
+    "urlFinal": "https://www.seekout.com/privacy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Snovio Inc",
+    "hostname": "www.snov.io",
+    "urlFinal": "https://snov.io/do-not-sell-my-personal-information",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "AtData, LLC",
+    "hostname": "www.atdata.com",
+    "urlFinal": "https://privacyportal-cdn.onetrust.com/dsarwebform/b38ccfa3-c14a-451e-bf1d-974d1e278b7c/6214ac53-9059-474d-a847-800250556e9d.html",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "VRTCAL Markets Inc",
+    "hostname": "www.vrtcal.com",
+    "urlFinal": "https://www.vrtcal.com/docs/PrivacyPolicy-Advertising.pdf",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "Data Partners Inc.",
+    "hostname": "datapartners.com",
+    "urlFinal": "https://datapartners.com/donotsellmyinformation/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Foursquare Labs, Inc.",
+    "hostname": "location.foursquare.com",
+    "urlFinal": "https://foursquare.com/legal/privacy-center/#media_and_text-v1-a322121e-92c0-497b-85ae-e6c4672842ed",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "Samba TV, Inc.",
+    "hostname": "www.samba.tv",
+    "urlFinal": "https://www.samba.tv/users/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Rooftop Digital, LLC",
+    "hostname": "www.rooftopdigital.com",
+    "urlFinal": "https://www.rooftopdigital.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "TSG Holdco, Inc.",
+    "hostname": "www.finthrive.com",
+    "urlFinal": "https://finthrive.com/privacy-notice-for-california-residents",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Date Detective Inc",
+    "hostname": "www.date-detective.app",
+    "urlFinal": "https://www.date-detective.app/agreements/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Forager.ai, LLC",
+    "hostname": "www.forager.ai",
+    "urlFinal": "https://www.forager.ai/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Share Local Media, Inc",
+    "hostname": "www.sharelocalmedia.com",
+    "urlFinal": "https://www.sharelocalmedia.com/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "PublicNSA LLC",
+    "hostname": "optout.bigdbm.com",
+    "urlFinal": "https://optout.bigdbm.com/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Semasio GmbH",
+    "hostname": "www.semasio.com",
+    "urlFinal": "https://www.semasio.com/legal/semasio-privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "StackAdapt Inc.",
+    "hostname": "www.stackadapt.com",
+    "urlFinal": "https://www.stackadapt.com/legal-document-centre/platform-and-services-privacy-policy",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "Roq.ad Inc.",
+    "hostname": "www.roq.ad",
+    "urlFinal": "https://www.roq.ad/privacy-policy-roqad/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Digital Safety Products, LLC.",
+    "hostname": "www.spyfly.com",
+    "urlFinal": "https://www.spyfly.com/help-center/privacy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Telesign Corporation",
+    "hostname": "www.telesign.com",
+    "urlFinal": "https://www.telesign.com/privacy-requests",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Carry Technologies Inc.",
+    "hostname": "www.hightouch.com",
+    "urlFinal": "https://preferences.hightouch.com/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "VentiveIQ LLC",
+    "hostname": "www.ventiveiq.com",
+    "urlFinal": "https://ventiveiq.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "HealthLink Dimensions, LLC",
+    "hostname": "www.healthlinkdimensions.com",
+    "urlFinal": "https://healthlinkdimensions.com/consumerprivacyrights",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "01Advertising Inc.",
+    "hostname": "www.01advertising.com",
+    "urlFinal": "https://www.01advertising.com/legal/",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "Resonate",
+    "hostname": "www.resonate.com",
+    "urlFinal": "https://www.resonate.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "The Nielsen Company",
+    "hostname": "www.nielsen.com",
+    "urlFinal": "https://www.nielsen.com/legal/privacy-principles/nielsen-marketing-cloud-services-privacy-statement/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Complete Medical Lists, Inc.",
+    "hostname": "www.completemedicallists.com",
+    "urlFinal": "https://www.completemedicallists.com/privacy.php",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Accurate Append Inc.",
+    "hostname": "clients.accurateappend.com",
+    "urlFinal": "https://clients.accurateappend.com/public/optout/capture",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Vendelux",
+    "hostname": "www.vendelux.com",
+    "urlFinal": "https://vendelux.com/privacy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "RocketReach LLC",
+    "hostname": "www.rocketreach.co",
+    "urlFinal": "https://rocketreach.co/privacy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Economic Modeling, LLC",
+    "hostname": "www.lightcast.io",
+    "urlFinal": "https://lightcast.io/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Bridg, a division of Cardlytics, Inc.",
+    "hostname": "www.bridg.com",
+    "urlFinal": "https://www.bridg.com/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "RecruitBot, Inc.",
+    "hostname": "www.recruitbot.com",
+    "urlFinal": "https://recruitbot.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "PubMatic. Inc.",
+    "hostname": "www.pubmatic.com",
+    "urlFinal": "https://pubmatic.com/legal/ccpa-privacy-policy/",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "RevContent",
+    "hostname": "www.revcontent.com",
+    "urlFinal": "https://www.revcontent.com/policy/privacy-policy#residents-of-the-state-of-california",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Sterling Data Company LLC",
+    "hostname": "www.sterling.ai",
+    "urlFinal": "https://sterling.ai/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Affinity Answers Corporation",
+    "hostname": "www.affinityanswers.com",
+    "urlFinal": "https://www.affinityanswers.com/your-privacy-choices/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Kargo Global LLC",
+    "hostname": "www.kargo.com",
+    "urlFinal": "https://www.kargo.com/ccpa",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "LeadsMarket.com LLC",
+    "hostname": "www.leadsmarket.com",
+    "urlFinal": "https://www.leadsmarket.com/ccpa-notice",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Guidestar Direct, Corp.",
+    "hostname": "www.carneydirect.com",
+    "urlFinal": "https://www.carneydirect.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "AlikeAudience, Inc.",
+    "hostname": "www.alikeaudience.com",
+    "urlFinal": "https://www.alikeaudience.com/privacy-policy/",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "Leadspace Inc",
+    "hostname": "www.leadspace.com",
+    "urlFinal": "https://www.leadspace.com/do-not-sell-form/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Black Pearl Group Limited",
+    "hostname": "blackpearl.com",
+    "urlFinal": "https://www.blackpearl.com/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Interactive Data, LLC",
+    "hostname": "www.ididata.com",
+    "urlFinal": "https://www.ididata.com/idis-privacy-statement/#privacy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "FOREWARN, LLC",
+    "hostname": "www.forewarn.com",
+    "urlFinal": "https://www.forewarn.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Exact Opco, LLC",
+    "hostname": "www.remodelyourhome.com",
+    "urlFinal": "https://remodelyourhome.com/PrivacyRequest.aspx",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Asset International, Inc.",
+    "hostname": "www.issgovernance.com",
+    "urlFinal": "https://www.issgovernance.com/privacy-legal/ccpa/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Key Marketing Advantage, LLC",
+    "hostname": "www.keymarketingcorp.com",
+    "urlFinal": "https://www.keymarketingcorp.com/do_not_use_my_personal_information",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Uplead LLC",
+    "hostname": "www.uplead.com",
+    "urlFinal": "https://www.uplead.com/privacy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "RateGain Adara, Inc.",
+    "hostname": "www.adara.com",
+    "urlFinal": "https://adara.com/privacy-promise/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Biointelli corporation",
+    "hostname": "www.biointelli.com",
+    "urlFinal": "https://www.biointelli.com/Account/PrivacyPolicy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Choreograph LLP",
+    "hostname": "www.choreograph.com",
+    "urlFinal": "https://www.choreograph.com/ccpa",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "Electronic Voice Services, Inc.",
+    "hostname": "www.evs7.com",
+    "urlFinal": "https://www.evs7.com/privacy-notice-for-residents-of-california",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Fifty Technology Limited",
+    "hostname": "www.fifty.io",
+    "urlFinal": "https://fifty.io/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Pop Acta Media, LLC",
+    "hostname": "www.popacta.com",
+    "urlFinal": "https://popacta.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Bombora, Inc",
+    "hostname": "www.bombora.com",
+    "urlFinal": "https://bombora.com/privacy-philosophy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Terminus Software, Inc.",
+    "hostname": "www.terminus.com",
+    "urlFinal": "https://demandscience.com/privacy-policy?utm_campaign=terminus-redirect",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "6sense Insights, Inc.",
+    "hostname": "www.6sense.com",
+    "urlFinal": "https://6sense.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Hunt Club Inc",
+    "hostname": "www.exploreatlas.io",
+    "urlFinal": "https://www.exploreatlas.io/privacy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Teads Holding Co.",
+    "hostname": "my.outbrain.com",
+    "urlFinal": "https://dsr.outbrain.com/recommendations-settings/home/en",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Apollo Interactive, LLC",
+    "hostname": "www.apollointeractive.com",
+    "urlFinal": "https://www.apollointeractive.com/privacy-policy.php",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "360 Media Direct",
+    "hostname": "360-media-direct.privacy.saymine.io",
+    "urlFinal": "https://360-media-direct.privacy.saymine.io/360_Media_Direct",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "We Inform LLC",
+    "hostname": "www.weinform.org",
+    "urlFinal": "https://www.weinform.org/optOut/name/landing",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "The Alesco Group LLC",
+    "hostname": "www.mydataprivacy.com",
+    "urlFinal": "https://www.mydataprivacy.com/upload-csv",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "BB Direct Inc",
+    "hostname": "www.bbdirect.com",
+    "urlFinal": "https://www.bbdirect.com/about/privacy-compliance.html",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "eXelate Inc.",
+    "hostname": "www.nielsen.com",
+    "urlFinal": "https://www.nielsen.com/legal/privacy-principles/nielsen-marketing-cloud-services-privacy-statement/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Truth Now LLC",
+    "hostname": "www.checksecrets.com",
+    "urlFinal": "https://www.checksecrets.com/optOut/name/landing",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "USPEOPLESEARCH.COM, LLC",
+    "hostname": "www.uspeoplesearch.com",
+    "urlFinal": "https://uspeoplesearch.com/purge-my-data/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Consumerbase, LLC",
+    "hostname": "www.data-axle.com",
+    "urlFinal": "https://www.data-axle.com/do-not-sell-my-data/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Datafy LLC",
+    "hostname": "www.datafy.com",
+    "urlFinal": "https://www.datafy.com/opt-out",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "National Data Analytics, LLC",
+    "hostname": "www.publicdatacheck.com",
+    "urlFinal": "https://www.publicdatacheck.com/help-center/privacy-requests",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Reklaim Ltd.",
+    "hostname": "www.reklaimyours.com",
+    "urlFinal": "https://www.reklaimyours.com/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Infomatics LLC",
+    "hostname": "www.privatereports.com",
+    "urlFinal": "https://www.privatereports.com/optOut/name/landing",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "PwC Product Sales LLC",
+    "hostname": "www.pwc.com",
+    "urlFinal": "https://www.pwc.com/us/en/site/california-privacy.html",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Private Records LLC",
+    "hostname": "www.privaterecords.net",
+    "urlFinal": "https://www.privaterecords.net/optOut/name/landing",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "The People Searchers LLC",
+    "hostname": "www.peoplesearcher.com",
+    "urlFinal": "https://www.peoplesearcher.com/optOut/name/landing",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Information Data Resources, LLC",
+    "hostname": "www.publicinfoservices.com",
+    "urlFinal": "https://www.publicinfoservices.com/help-center/privacy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Trestle Solutions, Inc.",
+    "hostname": "www.trestleiq.com",
+    "urlFinal": "https://trestleiq.com/privacy-policy-2022/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Connected Investors, LLC",
+    "hostname": "www.connectedinvestors.com",
+    "urlFinal": "https://connectedinvestors.com/content/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Quadrant Global Pte. Ltd.",
+    "hostname": "www.quadrant.io",
+    "urlFinal": "https://www.quadrant.io/",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "Indiemark LLC",
+    "hostname": "www.blackbox.email",
+    "urlFinal": "https://blackbox.email/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "LoopMe Limited",
+    "hostname": "legal.loopme.com",
+    "urlFinal": "https://legal.loopme.com/privacy-center",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "West Publishing Corporation",
+    "hostname": "www.thomsonreuters.com",
+    "urlFinal": "https://www.thomsonreuters.com/en/privacy-statement#california",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Demandbase, Inc.",
+    "hostname": "www.demandbase.com",
+    "urlFinal": "https://www.demandbase.com/privacy-center.html?ketch_preferences_tab=rightsTab",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "USADATA, Inc.",
+    "hostname": "www.usadata.com",
+    "urlFinal": "https://www.usadata.com/ccpa",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Venpath, Inc.",
+    "hostname": "www.venpath.net",
+    "urlFinal": "https://www.venpath.net/legal/privacy-notice",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "CareerBuilder, LLC",
+    "hostname": "www.careerbuilder.com",
+    "urlFinal": "https://www.careerbuilder.com/privacy_policy",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "ZS Associates, Inc.",
+    "hostname": "www.zs.com",
+    "urlFinal": "https://www.zs.com/data-request",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "SheerID, Inc.",
+    "hostname": "www.sheerid.com",
+    "urlFinal": "https://www.sheerid.com/global-privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Delivr.ai Inc",
+    "hostname": "dsrp.pii.ai",
+    "urlFinal": "https://dsrp.pii.ai/p/7886d230-6f28-42d6-ba95-7d141f0a6520/submit.html",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "BDEX, LLC",
+    "hostname": "www.bdex.com",
+    "urlFinal": "https://www.bdex.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "4C Insights Inc.",
+    "hostname": "www.mediaocean.com",
+    "urlFinal": "https://www.mediaocean.com/privacy-policy-closedecosystems",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Civil Data Research, LLC",
+    "hostname": "www.searchpublicrecords.com",
+    "urlFinal": "https://www.searchpublicrecords.com/help-center/privacy-requests",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "CheckPeople, LLC",
+    "hostname": "www.checkpeople.com",
+    "urlFinal": "https://checkpeople.com/do-not-sell-info",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "US Data Corporation",
+    "hostname": "www.usdatacorporation.com",
+    "urlFinal": "https://www.usdatacorporation.com/opt-out",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "JMR Media Consulting, Inc.",
+    "hostname": "www.jmr-media.com",
+    "urlFinal": "https://jmr-media.com/privacy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "EL TORO.COM, LLC",
+    "hostname": "www.eltoro.com",
+    "urlFinal": "https://eltoro.com/your-privacy-choices/",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "Definitive Healthcare LLC",
+    "hostname": "www.definitivehc.com",
+    "urlFinal": "https://www.definitivehc.com/privacy-center",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "LocateSmarter LLC",
+    "hostname": "www.locatesmarter.com",
+    "urlFinal": "https://www.locatesmarter.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Information.com, LLC",
+    "hostname": "www.information.com",
+    "urlFinal": "https://information.com/remove-my-info/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Inbound Insight, LLC",
+    "hostname": "www.inboundinsight.com",
+    "urlFinal": "https://www.inboundinsight.com/ccpa/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Unmask, LLC",
+    "hostname": "www.unmask.com",
+    "urlFinal": "https://unmask.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "FIRST ORION CORP",
+    "hostname": "www.firstorion.com",
+    "urlFinal": "https://firstorion.com/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "FreePeopleSearch.com, LLC",
+    "hostname": "www.freepeoplesearch.com",
+    "urlFinal": "https://freepeoplesearch.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "ProdPro Inc",
+    "hostname": "app.prodpro.com",
+    "urlFinal": "https://app.prodpro.com/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "T-Mobile USA, Inc.",
+    "hostname": "www.t-mobile.com",
+    "urlFinal": "https://www.t-mobile.com/privacy-center",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "PitchBook Data, Inc",
+    "hostname": "www.pitchbook.com",
+    "urlFinal": "https://pitchbook.com/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Sharethrough Inc.",
+    "hostname": "www.privacy-center.sharethrough.com",
+    "urlFinal": "https://privacy-center.sharethrough.com/en/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Komodo Health, Inc.",
+    "hostname": "www.komodohealth.com",
+    "urlFinal": "https://www.komodohealth.com/privacy-notice/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Traackr, Inc.",
+    "hostname": "www.traackr.com",
+    "urlFinal": "https://www.traackr.com/infl-privacy-notice",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Findem, Inc.",
+    "hostname": "www.findem.ai",
+    "urlFinal": "https://www.findem.ai/do-not-sell-or-share-my-personal-information",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Azerion US Inc.",
+    "hostname": "www.hybridtheory.com",
+    "urlFinal": "https://www.hybridtheory.com/privacy-notice/",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "Specialists Marketing Services, Inc.",
+    "hostname": "www.sms-inc.com",
+    "urlFinal": "https://sms-inc.com/privacy-notice/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Marriott International, Inc.",
+    "hostname": "www.marriott.com",
+    "urlFinal": "https://www.marriott.com/about/your-privacy-rights.mi",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "Disco Technology Inc.",
+    "hostname": "www.disconetwork.com",
+    "urlFinal": "https://www.disconetwork.com/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "RevOptimal, LLC",
+    "hostname": "revoptimal.com",
+    "urlFinal": "https://revoptimal.com/privacy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Trans Union LLC",
+    "hostname": "www.transunion.com",
+    "urlFinal": "https://www.transunion.com/consumer-privacy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Informa USA Inc.",
+    "hostname": "www.informa.com",
+    "urlFinal": "https://privacy.informa.com/policies/en/",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "Sovrn, Inc.",
+    "hostname": "www.sovrn.com",
+    "urlFinal": "https://www.sovrn.com/privacy-policy/policy-center/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Fraiser LLC",
+    "hostname": "www.fraiser.org",
+    "urlFinal": "https://www.fraiser.org/ccpa",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Captify Technologies",
+    "hostname": "captifytechnologies.com",
+    "urlFinal": "https://captifytechnologies.com/data-subject-rights-request/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Data Decisions Group, LLC",
+    "hostname": "www.datadecisionsgroup.com",
+    "urlFinal": "https://datadecisionsgroup.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "UPS Capital Corporation",
+    "hostname": "www.upscapital.com",
+    "urlFinal": "https://www.upscapital.com/privacy-notice",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Deloitte Consulting LLP",
+    "hostname": "www2.deloitte.com",
+    "urlFinal": "https://www.deloitte.com/us/en/legal/privacy/predictrisk-privacy-notice.html",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Decide Technologies, Inc.",
+    "hostname": "www.decide.co",
+    "urlFinal": "https://decide.co/privacy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Compact Information Systems, LLC",
+    "hostname": "www.deepsync.com",
+    "urlFinal": "https://deepsync.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Start.io Inc.",
+    "hostname": "www.start.io",
+    "urlFinal": "https://www.start.io/policy/privacy-policy-site/",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "Semcasting, Inc.",
+    "hostname": "www.semcasting.com",
+    "urlFinal": "https://www.semcasting.com/privacy-choice",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "Speedeon Data LLC",
+    "hostname": "www.speedeondata.com",
+    "urlFinal": "https://speedeondata.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "American City Business Journals. Inc.",
+    "hostname": "www.acbj.com",
+    "urlFinal": "https://www.acbj.com/privacy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Clickagy LLC",
+    "hostname": "www.clickagy.com",
+    "urlFinal": "https://www.clickagy.com/privacy-center/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Datanyze LLC",
+    "hostname": "www.datanyze.com",
+    "urlFinal": "https://www.datanyze.com/privacy-center",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Hivestack Inc.",
+    "hostname": "www.hivestack.com",
+    "urlFinal": "https://perion.com/ccpa/",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "PulsePoint, Inc.",
+    "hostname": "www.pulsepoint.com",
+    "urlFinal": "https://www.pulsepoint.com/legal/platform-privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "ZoomInfo Technologies, LLC",
+    "hostname": "www.zoominfo.com",
+    "urlFinal": "https://www.zoominfo.com/trust-center/your-privacy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Famous Birthdays LLC",
+    "hostname": "www.famousbirthdays.com",
+    "urlFinal": "https://www.famousbirthdays.com/privacy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "M&R Strategic Services",
+    "hostname": "www.mrss.com",
+    "urlFinal": "https://www.mrss.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "33 Mile Radius LLC",
+    "hostname": "www.33mileradius.com",
+    "urlFinal": "https://www.33mileradius.com/privacy-policy/",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "Keyword Connects LLC",
+    "hostname": "www.keywordconnects.com",
+    "urlFinal": "https://keywordconnects.com/privacy-policy/",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "Scalable Commerce, LLC",
+    "hostname": "www.kidslivesafe.com",
+    "urlFinal": "https://www.kidslivesafe.com/help-center/privacy-requests",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Summit Resources, LLC",
+    "hostname": "www.clientcommand.com",
+    "urlFinal": "https://clientcommand.com/client-command-privacy-notice/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "KB Synergy Inc",
+    "hostname": "kbsynergy.com",
+    "urlFinal": "https://kbsynergy.com/privacy-policy-ccpa-do-not-sell-my-information/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Andrews Wharton, Inc.",
+    "hostname": "www.andrewswharton.com",
+    "urlFinal": "https://www.andrewswharton.com/",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "Complete Mailing Lists LLC",
+    "hostname": "www.completemailinglists.com",
+    "urlFinal": "https://completemailinglists.com/do-not-sell-my-information",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Windfall Data, Inc.",
+    "hostname": "www.windfall.com",
+    "urlFinal": "https://www.windfall.com/your-privacy-choices",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "VideoAmp, Inc.",
+    "hostname": "www.videoamp.com",
+    "urlFinal": "https://www.videoamp.com/us-privacy-notice/",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "Remodeling.com, LLC",
+    "hostname": "www.remodeling.com",
+    "urlFinal": "https://remodeling.com/privacy-policy/",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "Dataskip",
+    "hostname": "www.dataskip.io",
+    "urlFinal": "https://dataskip.io/product/start-order/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Cadent, LLC",
+    "hostname": "www.cadent.tv",
+    "urlFinal": "https://www.cadent.com/your-privacy-choices",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "Scanbuy, Inc.",
+    "hostname": "www.scanbuy.com",
+    "urlFinal": "https://www.scanbuy.com/rights/data",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "iWave",
+    "hostname": "www.kindsight.io",
+    "urlFinal": "https://kindsight.io/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Veraset",
+    "hostname": "www.veraset.com",
+    "urlFinal": "https://www.veraset.com/ca-privacy-policy",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "Jigyasa Analytics LLC",
+    "hostname": "www.jigyasaanalytics.com",
+    "urlFinal": "https://jigyasaanalytics.com/contact-us",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Growbots Inc.",
+    "hostname": "growbots.com",
+    "urlFinal": "https://www.growbots.com/do-not-sell-my-info/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Similarweb Ltd.",
+    "hostname": "www.similarweb.com",
+    "urlFinal": "https://www.similarweb.com/corp/legal/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Preqin Limited",
+    "hostname": "www.preqin.com",
+    "urlFinal": "https://www.preqin.com/policies/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "DealerDirect LLC",
+    "hostname": "www.forddirectprivacy.com",
+    "urlFinal": "https://www.forddirect.com/privacy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "RealSource, Inc",
+    "hostname": "www.realsourcedata.com",
+    "urlFinal": "https://www.realsourcedata.com/do-not-sell-my-personal-information",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "NeuStar, Inc.",
+    "hostname": "privacychoices.home.neustar",
+    "urlFinal": "https://privacychoices.home.neustar/?t=#/login",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "The Data Group",
+    "hostname": "thedatagroup.com",
+    "urlFinal": "https://thedatagroup.com/california-consumer-privacy-act/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Catalist LLC",
+    "hostname": "www.catalist.us",
+    "urlFinal": "https://catalist.us/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Evorra Ltd",
+    "hostname": "www.evorra.com",
+    "urlFinal": "https://evorra.com/privacy-data-policies/product-privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "StatSocial, Inc",
+    "hostname": "www.statsocial.com",
+    "urlFinal": "https://www.statsocial.com/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Civis Analytics, Inc.",
+    "hostname": "www.civisanalytics.com",
+    "urlFinal": "https://www.civisanalytics.com/legal-pages/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Source Path Digital",
+    "hostname": "www.sourcepathdigital.com",
+    "urlFinal": "https://sourcepathdigital.com/california-consumer-portal/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "FourLeaf LLC",
+    "hostname": "www.fourleafdata.com",
+    "urlFinal": "https://www.fourleafdata.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "All Good Media, LLC",
+    "hostname": "www.attribits.com",
+    "urlFinal": "https://www.attribits.com/do-not-sell",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Ekata, Inc.",
+    "hostname": "www.ekata.com",
+    "urlFinal": "https://ekata.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Reveal Mobile, Inc.",
+    "hostname": "www.revealmobile.com",
+    "urlFinal": "https://revealmobile.com/ccpa/",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "i360, LLC",
+    "hostname": "www.i-360.com",
+    "urlFinal": "https://www.i-360.com/ccpa/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "HealthCare, Inc., a Delaware corporation",
+    "hostname": "www.healthcare.com",
+    "urlFinal": "https://www.healthcare.com/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "ONLINE MEDIA GROUP INC.",
+    "hostname": "omginc.xyz",
+    "urlFinal": "https://omginc.xyz/privacy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Zeta Global Corp.",
+    "hostname": "www.zetaglobal.com",
+    "urlFinal": "https://zetaglobal.com/privacy-choices/",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "WealthFeed, Inc.",
+    "hostname": "www.wealthfeed.com",
+    "urlFinal": "https://www.wealthfeed.com/privacy-choices/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Disqus, Inc.",
+    "hostname": "www.disqus.com",
+    "urlFinal": "https://disqus.com/data-sharing-settings/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Media.net Advertising FZ, LLC",
+    "hostname": "www.media.net",
+    "urlFinal": "https://www.media.net/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Commercial Real Estate Exchange, Inc.",
+    "hostname": "www.crexi.com",
+    "urlFinal": "https://www.crexi.com/privacy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "ClearCompany, LLC",
+    "hostname": "www.clearcompany.com",
+    "urlFinal": "https://www.clearcompany.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "PossibleNOW, Inc.",
+    "hostname": "www.possiblenow.com",
+    "urlFinal": "https://www.possiblenow.com/privacy-statement",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Mogean, Inc.",
+    "hostname": "www.mogean.com",
+    "urlFinal": "https://www.mogean.com/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Adept ID, Inc.",
+    "hostname": "www.adept-id.com",
+    "urlFinal": "https://www.adept-id.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Jun Group Productions, LLC",
+    "hostname": "www.jungroup.com",
+    "urlFinal": "https://jungroup.com/optout",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "PureCars Technologies, LLC",
+    "hostname": "www.docs.google.com",
+    "urlFinal": "https://docs.google.com/forms/d/e/1FAIpQLSdXAQsI4b0angLCONbwT4B4YSFiPyVMMLzizCuBSnPZmsTp_g/viewform",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Demyst Data, Ltd",
+    "hostname": "www.demyst.com",
+    "urlFinal": "https://www.demyst.com/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "BDO GCI, LLC (f.k.a. BDO USA, P.C., Global Corporate Intelligence group)",
+    "hostname": "www.bdo.com",
+    "urlFinal": "https://www.bdo.com/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "HubSpot, Inc.",
+    "hostname": "legal.hubspot.com",
+    "urlFinal": "https://legal.hubspot.com/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Randall-Reilly, LLC",
+    "hostname": "privacyportal.onetrust.com",
+    "urlFinal": "https://privacyportal.onetrust.com/webform/49a9a972-547e-4c49-b23c-4cc77554cacb/3aab0bde-ec0c-4ce9-8e6f-cf12a9a950a5",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "PeopleWhiz",
+    "hostname": "www.peoplewhiz.com",
+    "urlFinal": "https://www.peoplewhiz.com/remove-my-info",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Datamentors, LLC",
+    "hostname": "www.porchgroupmedia.com",
+    "urlFinal": "https://porchgroupmedia.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "FreeWheel Media Inc",
+    "hostname": "www.freewheel.com",
+    "urlFinal": "https://www.freewheel.com/privacy-policy#tab2_section2_6",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "ZenLeads Inc.",
+    "hostname": "www.apollo.io",
+    "urlFinal": "https://www.apollo.io/company/privacy-center",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Viant US LLC",
+    "hostname": "ccpa.viantinc.com",
+    "urlFinal": "https://privacyportal.onetrust.com/webform/18c06089-a9ec-473c-a6d8-23d20fea46af/43201dea-88d7-44cd-9142-e5b4f485e428",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Melissa Data Corpoation",
+    "hostname": "www.melissa.com",
+    "urlFinal": "https://www.melissa.com/california-privacy-notice",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Tapad, Inc.",
+    "hostname": "crportal.tapad.com",
+    "urlFinal": "https://crportal.tapad.com/#/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Helix Campaigns LLC",
+    "hostname": "www.helixcampaigns.com",
+    "urlFinal": "https://www.helixcampaigns.com/privacy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Aidentified, Inc.",
+    "hostname": "www.aidentified.com",
+    "urlFinal": "https://www.aidentified.com/privacy--policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "DSPolitical, LLC",
+    "hostname": "www.winwithoptimal.com",
+    "urlFinal": "https://www.winwithoptimal.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Cognism, Inc.",
+    "hostname": "www.cognism.com",
+    "urlFinal": "https://cognism.privacy.saymine.io/cognism",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "CRISIL Irevna US LLC",
+    "hostname": "www.crisil.com",
+    "urlFinal": "https://www.crisil.com/content/crisilcom/en/home/crisil-privacy-notice.html",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Meltwater News US Inc.",
+    "hostname": "www.meltwater.com",
+    "urlFinal": "https://www.meltwater.com/en/privacy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "ID5 Technology Ltd",
+    "hostname": "www.id5.io",
+    "urlFinal": "https://id5.io/platform-privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "OnAudience LTD",
+    "hostname": "www.onaudience.com",
+    "urlFinal": "https://onaudience.com/internet-advertising-privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "IQVIA Digital Inc.",
+    "hostname": "www.iqvia.com",
+    "urlFinal": "https://www.iqvia.com/about-us/privacy/ccpa/do-not-sell",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "FourthWall Media, Inc.",
+    "hostname": "www.fourthwall.tv",
+    "urlFinal": "https://www.fourthwall.tv/donotsellorshare-fourthwall",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Market Force Corporation",
+    "hostname": "www.marketforcecorp.com",
+    "urlFinal": "https://www.marketforcecorp.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Intalytics, Inc.",
+    "hostname": "www.kalibrate.com",
+    "urlFinal": "https://kalibrate.com/data-subject-access-request-form/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Vistar Media, Inc.",
+    "hostname": "www.vistarmedia.com",
+    "urlFinal": "https://www.vistarmedia.com/privacy-choices",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "New Gold Ventures LLC",
+    "hostname": "www.thinkdatagroup.com",
+    "urlFinal": "https://www.thinkdatagroup.com/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "4Eyes.ai, Inc.",
+    "hostname": "www.4-eyes.ai",
+    "urlFinal": "https://4-eyes.ai/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "National Opinion Institute, LLC",
+    "hostname": "www.nationalopinioninstitute.com",
+    "urlFinal": "https://nationalopinioninstitute.com/ca-privacy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Effyis, Inc.",
+    "hostname": "socialgist.com",
+    "urlFinal": "https://www.socialgist.ai/privacy-and-terms",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "North American Media LLC",
+    "hostname": "www.namericanmedia.com",
+    "urlFinal": "https://namericanmedia.com/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Xcelerated Data LLC",
+    "hostname": "www.xcelerated.com",
+    "urlFinal": "https://www.xcelerated.com/general-5",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "MedPro Systems",
+    "hostname": "www.medprosystems.com",
+    "urlFinal": "https://www.medprosystems.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Steppingblocks, Inc.",
+    "hostname": "www.steppingblocks.com",
+    "urlFinal": "https://www.steppingblocks.com/privacy-ccpa",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "PostPilot, Inc.",
+    "hostname": "www.postpilot.com",
+    "urlFinal": "https://www.postpilot.com/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Property Reach LP",
+    "hostname": "www.propertyreach.com",
+    "urlFinal": "https://www.propertyreach.com/privacy",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "AGR Marketing Solutions LLC",
+    "hostname": "www.agrmarketingsolutions.com",
+    "urlFinal": "https://agrmarketingsolutions.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Hunter Web Services, Inc.",
+    "hostname": "www.hunter.io",
+    "urlFinal": "https://hunter.io/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Astoria Company Marketing LLC",
+    "hostname": "www.astoriacompany.com",
+    "urlFinal": "https://astoriacompany.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Giant Partners, Inc.",
+    "hostname": "www.giantpartners.com",
+    "urlFinal": "https://giantpartners.com/privacy-policy/",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "e.Republic, LLC",
+    "hostname": "www.erepublic.com",
+    "urlFinal": "https://www.erepublic.com/privacy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Statara Solutions LLC",
+    "hostname": "www.statara.com",
+    "urlFinal": "https://statara.com/privacy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Virtual Marketing LLC",
+    "hostname": "www.fusion92.com",
+    "urlFinal": "https://www.fusion92.com/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Swordfish AI Inc.",
+    "hostname": "www.swordfish.ai",
+    "urlFinal": "https://swordfish.ai/policy-ccpa",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Heartbeat.AI Inc",
+    "hostname": "www.heartbeat.ai",
+    "urlFinal": "https://heartbeat.ai/policy-ccpa",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Koddi Inc.",
+    "hostname": "www.koddi.com",
+    "urlFinal": "https://koddi.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Digital Media Solutions, LLC",
+    "hostname": "dmsunsub.io",
+    "urlFinal": "https://dms-privacy.my.onetrust.com/webform/506f8b15-11ff-4f18-95fa-48ff903e623f/4268d0f0-bd98-4afb-b33a-a7a922ae182a",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "PMG Worldwide, LLC",
+    "hostname": "www.pmg.com",
+    "urlFinal": "https://www.pmg.com/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "MH Sub I, LLC",
+    "hostname": "www.internetbrands.com",
+    "urlFinal": "https://www.internetbrands.com/privacy/privacy-main",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Cengage Learning, Inc.",
+    "hostname": "www.cengagegroup.com",
+    "urlFinal": "https://www.cengagegroup.com/privacy/",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "Experian Marketing Solutions, LLC",
+    "hostname": "www.experian.com",
+    "urlFinal": "https://www.experian.com/privacy/us-consumer-data-privacy-policy",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "Comscore, Inc.",
+    "hostname": "www.comscore.com",
+    "urlFinal": "https://www.comscore.com/About/Privacy-Policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "TargetSmart Communications LLC",
+    "hostname": "privacy.targetsmart.com",
+    "urlFinal": "https://privacy.targetsmart.com/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "LeadCrunch",
+    "hostname": "www.getrev.ai",
+    "urlFinal": "https://getrev.ai/privacy-policy/#notice-to-residents-of-california",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "5X5 US, LLC",
+    "hostname": "5x5coop.com",
+    "urlFinal": "https://5x5data.com/dsr-out/",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "ExlService.com LLC",
+    "hostname": "www.exlservice.com",
+    "urlFinal": "https://www.exlservice.com/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "GrayHair Software LLC",
+    "hostname": "www.grayhairsoftware.com",
+    "urlFinal": "https://grayhairsoftware.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Peoplefinders LLC",
+    "hostname": "www.peoplefinders.com",
+    "urlFinal": "https://www.peoplefinders.com/about/privacy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Predactiv",
+    "hostname": "www.predactiv.com",
+    "urlFinal": "https://predactiv.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Convex Labs, Inc.",
+    "hostname": "www.convex.com",
+    "urlFinal": "https://www.convex.com/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Qualfon",
+    "hostname": "www.qualfon.com",
+    "urlFinal": "https://www.qualfon.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Next Wave Marketing Strategies, Inc",
+    "hostname": "www.agedleadstore.com",
+    "urlFinal": "https://agedleadstore.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Kontext Data",
+    "hostname": "kontextdata.com",
+    "urlFinal": "https://kontextdata.com/privacy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "BV Insights LLC",
+    "hostname": "www.big-village.com",
+    "urlFinal": "https://big-village.com/do-not-sell-or-share-my-personal-information/",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "Diablo Media",
+    "hostname": "www.diablomedia.com",
+    "urlFinal": "https://diablomedia.com/privacy-request/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "TrueData Solutions, Inc.",
+    "hostname": "www.truedata.co",
+    "urlFinal": "https://www.truedata.co/home/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "LiveIntent",
+    "hostname": "privacy.liveintent.com",
+    "urlFinal": "https://privacy.liveintent.com/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "TripleLift, Inc.",
+    "hostname": "www.triplelift.com",
+    "urlFinal": "https://triplelift.com/user-rights-policy-and-opt-out/",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "Infinite Knot Inc.",
+    "hostname": "www.contacts411.com",
+    "urlFinal": "https://www.contacts411.com/data-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Orgio, Inc.",
+    "hostname": "www.theorg.com",
+    "urlFinal": "https://theorg.com/privacy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Knower Tech USA, LLC",
+    "hostname": "www.rbarrel.com",
+    "urlFinal": "https://www.rbarrel.com/opt-out",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "SBFE, LLC",
+    "hostname": "www.sbfe.org",
+    "urlFinal": "https://www.sbfe.org/connect/ccpa",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Postie, Inc",
+    "hostname": "www.postie.com",
+    "urlFinal": "https://postie.com/your-privacy-choices/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Enformion LLC",
+    "hostname": "www.enformion.com",
+    "urlFinal": "https://www.enformion.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Anne Lewis Strategies, LLC",
+    "hostname": "www.missionwired.com",
+    "urlFinal": "https://missionwired.com/privacy-policy/#caprivacy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Plunge, LLC",
+    "hostname": "www.plungedigital.com",
+    "urlFinal": "https://www.plungedigital.com/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Buyerlink Inc.",
+    "hostname": "www.buyerlink.com",
+    "urlFinal": "https://www.buyerlink.co/privacy",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "AutoWeb, Inc.",
+    "hostname": "www.autoweb.com",
+    "urlFinal": "https://www.autoweb.com/privacy",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "AdvisorTarget, LLC",
+    "hostname": "www.finsum.com",
+    "urlFinal": "https://www.finsum.com/index.php/what-we-do/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Intentsify, LLC",
+    "hostname": "www.intentsify.io",
+    "urlFinal": "https://intentsify.io/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Direct Marketing Solutions, Inc.",
+    "hostname": "www.teamdms.com",
+    "urlFinal": "https://teamdms.com/opt-out",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "SpyCloud, Inc.",
+    "hostname": "www.spycloud.com",
+    "urlFinal": "https://spycloud.com/legal/privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Experian Health, Inc.",
+    "hostname": "consumerprivacy.experian.com",
+    "urlFinal": "https://consumerprivacy.experian.com/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Alphonso Inc.",
+    "hostname": "www.alphonso.tv",
+    "urlFinal": "https://alphonso.tv/privacy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Digital Viking Media Inc",
+    "hostname": "www.digitalvikingmedia.com",
+    "urlFinal": "https://www.digitalvikingmedia.com/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Inmar-OIQ, LLC",
+    "hostname": "owneriq.com",
+    "urlFinal": "https://www.inmar.com/about/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "LIZDEV INC.",
+    "hostname": "www.lizdev.com",
+    "urlFinal": "https://lizdev.com/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Tunnl, LLC",
+    "hostname": "www.tunnldata.com",
+    "urlFinal": "https://www.tunnldata.com/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Deep Root Analytics, LLC",
+    "hostname": "www.deeprootanalytics.com",
+    "urlFinal": "https://www.deeprootanalytics.com/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "InMarket Media, LLC",
+    "hostname": "www.inmarket.com",
+    "urlFinal": "https://inmarket.com/privacy/",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "Dun & Bradstreet, Inc.",
+    "hostname": "submit-irm.trustarc.eu",
+    "urlFinal": "https://submit-irm.trustarc.eu/services/validation/ba81b98f-997d-4216-b4cc-d64cf261b082",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "LexisNexis Risk Solutions FL Inc.",
+    "hostname": "consumer.risk.lexisnexis.com",
+    "urlFinal": "https://consumer.risk.lexisnexis.com/california",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "True Opulence Corporation",
+    "hostname": "www.trueopulence.com",
+    "urlFinal": "https://trueopulence.com/en/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Social Catfish, LLC",
+    "hostname": "www.socialcatfish.com",
+    "urlFinal": "https://socialcatfish.com/opt-out/?id=request_optout",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Cross Pixel Media, Inc.",
+    "hostname": "privacy.crsspxl.com",
+    "urlFinal": "https://privacy.crsspxl.com/optout",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "EproDirect LLC",
+    "hostname": "www.eprodirect.com",
+    "urlFinal": "https://www.eprodirect.com/do-not-sell-my-personal-information/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "MadHive, Inc.",
+    "hostname": "www.madhive.com",
+    "urlFinal": "https://www.madhive.com/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Eyeota Pte Ltd",
+    "hostname": "www.eyeota.com",
+    "urlFinal": "https://www.eyeota.com/how-to-opt-out",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Swoop.com, Inc.",
+    "hostname": "www.swoop.com",
+    "urlFinal": "https://swoop.com/privacy-notice/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Place Exchange, Inc.",
+    "hostname": "www.placeexchange.com",
+    "urlFinal": "https://www.placeexchange.com/do-not-sell-my-information",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "Irys, Inc",
+    "hostname": "www.irys.us",
+    "urlFinal": "https://irys.us/do-not-sell-ccpa",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "Ownco, LLC",
+    "hostname": "my.monitorbase.com",
+    "urlFinal": "https://my.monitorbase.com/privacypolicy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "PeoplefindersDaaS",
+    "hostname": "www.peoplefindersdaas.com",
+    "urlFinal": "https://peoplefindersdaas.com/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Dice Career Solutions, Inc.",
+    "hostname": "www.dice.com",
+    "urlFinal": "https://www.dice.com/about/ccpa",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Mississippi Tornado Alley LLC",
+    "hostname": "www.fastpeoplesearch.com",
+    "urlFinal": "https://www.fastpeoplesearch.com/privacy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "iLeads.com, LLC",
+    "hostname": "www.ileads.com",
+    "urlFinal": "https://ileads.com/company/privacy-policy/#9",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Faraday, Inc.",
+    "hostname": "www.faraday.ai",
+    "urlFinal": "https://faraday.ai/privacy-options",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "VisitIQ.io",
+    "hostname": "www.visitiq.io",
+    "urlFinal": "https://visitiq.io/opt-out/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Free Data Services, LLC",
+    "hostname": "www.truepeoplesearch.com",
+    "urlFinal": "https://www.truepeoplesearch.com/privacy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Family Tree Now, LLC",
+    "hostname": "www.familytreenow.com",
+    "urlFinal": "https://www.familytreenow.com/privacy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "CDK Global, LLC",
+    "hostname": "www.cdkglobal.com",
+    "urlFinal": "https://www.cdkglobal.com/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Online Advertising Network sp. z o.o.",
+    "hostname": "www.oan.pl",
+    "urlFinal": "https://oan.pl/internet-advertising-privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "IDG Communications Inc.",
+    "hostname": "www.foundryco.com",
+    "urlFinal": "https://foundryco.com/idg-privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Qurium Solutions, Inc.",
+    "hostname": "www.supplier.io",
+    "urlFinal": "https://supplier.io/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Endgame Labs, Inc",
+    "hostname": "www.endgame.io",
+    "urlFinal": "https://www.endgame.io/privacy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Altrata, Inc.",
+    "hostname": "www.altrata.com",
+    "urlFinal": "https://altrata.com/online-privacy-notice",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "AudiencePoint Inc.",
+    "hostname": "www.audiencepoint.com",
+    "urlFinal": "https://audiencepoint.com/cpra/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Converge Direct, LLC",
+    "hostname": "www.convergemarketing.com",
+    "urlFinal": "https://www.convergemarketing.com/compliance/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "LightBox Parent, L.P.",
+    "hostname": "www.lightboxre.com",
+    "urlFinal": "https://www.lightboxre.com/lightbox-individual-data-rights-request/",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "Command Precision, Inc.",
+    "hostname": "www.persistent.id",
+    "urlFinal": "https://persistent.id/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Acronymix LLC",
+    "hostname": "www.acronymix.com",
+    "urlFinal": "https://acronymix.com/privacy-policy/",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "Best Pick Reports, LLC",
+    "hostname": "www.bestpickreports.com",
+    "urlFinal": "https://www.bestpickreports.com/content/privacy-policy",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "Home Contractors Review, LLC",
+    "hostname": "www.fivestarrated.com",
+    "urlFinal": "https://www.fivestarrated.com/privacy-policy",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "Milestone Marketing Solutions",
+    "hostname": "www.milestonemarketingsolutions.com",
+    "urlFinal": "https://www.milestonemarketingsolutions.com/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "B.I Science (2009) Ltd",
+    "hostname": "www.biscience.com",
+    "urlFinal": "https://www.biscience.com/ccpa/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Lob.com, Inc.",
+    "hostname": "www.lob.com",
+    "urlFinal": "https://www.lob.com/privacy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Pludo Inc.",
+    "hostname": "www.cashmereai.com",
+    "urlFinal": "https://www.cashmereai.com/privacy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "OnPoint Data Strategy",
+    "hostname": "www.onpointdatastrategy.com",
+    "urlFinal": "https://onpointdatastrategy.com/opt-out/",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "ListKit LLC",
+    "hostname": "www.listkit.io",
+    "urlFinal": "https://www.listkit.io/privacy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Growing Libraries, LLC",
+    "hostname": "www.growinglibraries.com",
+    "urlFinal": "https://growinglibraries.com/do-not-sell",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Modigie, Inc.",
+    "hostname": "privacyportal.onetrust.com",
+    "urlFinal": "https://privacyportal.onetrust.com/webform/4a8e10dc-2293-42ea-ad06-886bc22167a6/20341940-11c2-4c43-9b64-194e952203fd",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "General Motors LLC",
+    "hostname": "www.gm.com",
+    "urlFinal": "https://www.gm.com/consumer-privacy",
+    "status": "success",
+    "location": "TRUE"
+  },
+  {
+    "name": "Rhetorik Limited",
+    "hostname": "www.rhetorik.com",
+    "urlFinal": "https://rhetorik.com/do-not-sell-my-info/",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Project Affinity, Inc",
+    "hostname": "www.affinity.co",
+    "urlFinal": "https://www.affinity.co/legal/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Upcell, LLC",
+    "hostname": "www.upcell.io",
+    "urlFinal": "https://www.upcell.io/data-claim",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "GetVector, Inc.",
+    "hostname": "www.vector.co",
+    "urlFinal": "https://www.vector.co/legal/privacy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Graze Social PBC",
+    "hostname": "www.graze.social",
+    "urlFinal": "https://www.graze.social/privacy-policy",
+    "status": "success",
+    "location": "FALSE"
+  },
+  {
+    "name": "Airlines Reporting Corporation",
+    "hostname": "www2.arccorp.com",
+    "urlFinal": "https://www2.arccorp.com/site-privacy-policy/",
+    "status": "success",
+    "location": "FALSE"
+  }
+]
