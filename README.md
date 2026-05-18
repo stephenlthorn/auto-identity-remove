@@ -257,6 +257,30 @@ A dated JSON report is saved to `logs/verify-YYYY-MM-DD.json`.
 
 ---
 
+## Maintenance
+
+### Pruning stale / dead URLs
+
+The Markup dataset is years old; many of the ~489 generic opt-out URLs now 404 or fail DNS lookup. These are classified as `💀 Dead (stale URL)` in run output and do **not** count as errors.
+
+After several runs have accumulated in `logs/`, trim permanently-dead hostnames from future runs so they are skipped without any network request:
+
+```bash
+node scripts/prune-dead.js
+```
+
+The script:
+1. Reads every `logs/run-*.json` file
+2. Finds hostnames whose status was `dead` in **every** run they appeared in
+3. Merges them into `data/dead-urls.json` (deduped, sorted)
+4. Prints a summary of how many new hosts were added
+
+The script is **idempotent** — running it twice produces no change. You can add it as a post-run step or run it manually whenever you want to prune the dead list.
+
+`data/dead-urls.json` is committed to the repo so the dead list is shared with all clones.
+
+---
+
 ## Uninstall / disable schedule
 
 ```bash

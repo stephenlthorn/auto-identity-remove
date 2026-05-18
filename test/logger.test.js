@@ -98,3 +98,47 @@ test('resetResults clears every bucket in place and keeps the shared reference',
   }
   assert.equal(typeof logger.results.runAt, 'string');
 });
+
+// ── WP3: dead status ──────────────────────────────────────────────────────────
+
+test('logResult routes dead status to dead bucket', () => {
+  logger.resetResults();
+  logger.logResult('deadsite.com', 'dead', 'HTTP 404');
+  assert.equal(logger.results.dead.length, 1);
+  assert.equal(logger.results.dead[0].broker, 'deadsite.com');
+  assert.equal(logger.results.dead[0].status, 'dead');
+  // Must NOT land in errors
+  assert.equal(logger.results.errors.length, 0);
+});
+
+test('STATUS_BUCKET maps dead to dead bucket', () => {
+  assert.equal(logger.STATUS_BUCKET.dead, 'dead');
+});
+
+test('ICONS has 💀 for dead', () => {
+  assert.equal(logger.ICONS.dead, '💀');
+});
+
+test('resetResults clears the dead bucket', () => {
+  logger.resetResults();
+  logger.logResult('gone.com', 'dead', 'ERR_NAME_NOT_RESOLVED');
+  assert.equal(logger.results.dead.length, 1);
+  logger.resetResults();
+  assert.equal(logger.results.dead.length, 0);
+});
+
+test('buildSummary shows 💀 Dead line and excludes dead from ❌ Errors count', () => {
+  logger.resetResults();
+  logger.logResult('ok.com', 'success');
+  logger.logResult('gone1.com', 'dead', 'HTTP 404');
+  logger.logResult('gone2.com', 'dead', 'ERR_NAME_NOT_RESOLVED');
+  logger.logResult('broken.com', 'error', 'Timeout');
+
+  const s = logger.buildSummary();
+  // Dead line present with correct count
+  assert.match(s, /💀 Dead \(stale URL\):\s+2/);
+  // Errors shows only genuine errors, not dead ones
+  assert.match(s, /❌ Errors:\s+1/);
+  // Sanity-check success
+  assert.match(s, /✅ Removed:\s+1/);
+});

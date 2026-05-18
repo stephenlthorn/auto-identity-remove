@@ -26,11 +26,64 @@ const CONFIG_PATH     = path.join(__dirname, 'config.json');
 const STATE_PATH      = path.join(__dirname, 'state.json');
 const MARKUP_PATH     = path.join(__dirname, 'data', 'markup-parsed.json');
 const BADBOOL_PATH    = path.join(__dirname, 'data', 'badbool-extra.json');
+const DEAD_URLS_PATH  = path.join(__dirname, 'data', 'dead-urls.json');
 
-const config  = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
-const { firstName: F, lastName: L, fullName: N, email: E, state: ST, zip: Z } = config.person;
+// Config is loaded lazily so that modules importing only the pure helpers
+// (classifyNavError, isDeadStatus, loadDeadSet) don't require config.json.
+let _config = null;
+function getConfig() {
+  if (!_config) _config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+  return _config;
+}
 
 const RECHECK_DAYS = 90;
+
+// ─── Dead-URL cache ───────────────────────────────────────────────────────────
+// Loaded once at module init; missing / malformed file treated as empty set.
+
+function loadDeadSet(deadUrlsPath) {
+  try {
+    const raw = JSON.parse(fs.readFileSync(deadUrlsPath, 'utf8'));
+    return new Set(Array.isArray(raw.hosts) ? raw.hosts : []);
+  } catch (_) {
+    return new Set();
+  }
+}
+
+const deadSet = loadDeadSet(DEAD_URLS_PATH);
+
+// ─── Navigation-error classifier (pure, exported for testing) ─────────────────
+
+const DEAD_ERROR_PATTERNS = [
+  'ERR_NAME_NOT_RESOLVED',
+  'ERR_CONNECTION_REFUSED',
+  'ERR_CONNECTION_CLOSED',
+  'ERR_ADDRESS_UNREACHABLE',
+  'ERR_CONNECTION_TIMED_OUT',
+  'ENOTFOUND',
+];
+
+/**
+ * Classify a navigation error message as 'dead' or 'error'.
+ * Returns the short code if dead, or null if it should stay 'error'.
+ * @param {string} message
+ * @returns {string|null}
+ */
+function classifyNavError(message) {
+  for (const pattern of DEAD_ERROR_PATTERNS) {
+    if (message.includes(pattern)) return pattern;
+  }
+  return null;
+}
+
+/**
+ * Returns true when an HTTP status code indicates a dead/gone URL.
+ * @param {number} code
+ * @returns {boolean}
+ */
+function isDeadStatus(code) {
+  return code >= 400;
+}
 
 // ─── Cookie banner + CCPA pop-up dismisser ────────────────────────────────────
 
@@ -120,30 +173,33 @@ async function handlePrivacyManager(page) {
 
 // ─── Generic form filler ──────────────────────────────────────────────────────
 
-const FIELD_MAP = [
-  // email (try first — many sites only need this)
-  { selectors: ['input[type="email"]', 'input[name*="email" i]', 'input[placeholder*="email" i]'], value: E },
-  // first name
-  { selectors: ['input[name="firstName"]', 'input[name*="first" i]', 'input[placeholder*="first name" i]'], value: F },
-  // last name
-  { selectors: ['input[name="lastName"]', 'input[name*="last" i]', 'input[placeholder*="last name" i]'], value: L },
-  // full name
-  { selectors: ['input[name="name"]', 'input[name*="full" i]', 'input[placeholder*="full name" i]', 'input[placeholder*="your name" i]'], value: N },
-  // state
-  { selectors: ['select[name*="state" i]', 'input[name*="state" i]'], value: ST },
-  // zip
-  { selectors: ['input[name*="zip" i]', 'input[name*="postal" i]'], value: Z },
-  // request type — select "Delete" or "Do Not Sell" where applicable
-  {
-    selectors: ['select[name*="request" i]', 'select[name*="type" i]', 'select[id*="request" i]'],
-    value: null,  // handled specially below
-    special: 'selectDeleteOrOptOut',
-  },
-];
+function getFieldMap() {
+  const { firstName: F, lastName: L, fullName: N, email: E, state: ST, zip: Z } = getConfig().person;
+  return [
+    // email (try first — many sites only need this)
+    { selectors: ['input[type="email"]', 'input[name*="email" i]', 'input[placeholder*="email" i]'], value: E },
+    // first name
+    { selectors: ['input[name="firstName"]', 'input[name*="first" i]', 'input[placeholder*="first name" i]'], value: F },
+    // last name
+    { selectors: ['input[name="lastName"]', 'input[name*="last" i]', 'input[placeholder*="last name" i]'], value: L },
+    // full name
+    { selectors: ['input[name="name"]', 'input[name*="full" i]', 'input[placeholder*="full name" i]', 'input[placeholder*="your name" i]'], value: N },
+    // state
+    { selectors: ['select[name*="state" i]', 'input[name*="state" i]'], value: ST },
+    // zip
+    { selectors: ['input[name*="zip" i]', 'input[name*="postal" i]'], value: Z },
+    // request type — select "Delete" or "Do Not Sell" where applicable
+    {
+      selectors: ['select[name*="request" i]', 'select[name*="type" i]', 'select[id*="request" i]'],
+      value: null,  // handled specially below
+      special: 'selectDeleteOrOptOut',
+    },
+  ];
+}
 
 async function fillGenericForm(page) {
   let filledAny = false;
-  for (const field of FIELD_MAP) {
+  for (const field of getFieldMap()) {
     if (field.special === 'selectDeleteOrOptOut') {
       // Try to pick "Delete", "Opt-Out", or "Do Not Sell" from a dropdown
       for (const sel of field.selectors) {
@@ -204,7 +260,7 @@ async function submitForm(page) {
 
 // ─── Process one generic URL ──────────────────────────────────────────────────
 
-async function processGenericUrl(page, broker, state, dryRun = false) {
+async function processGenericUrl(page, broker, state, dryRun = false, injectedDeadSet) {
   const daysAgo = (() => {
     const entry = state.optOuts[broker.name];
     if (!entry?.lastSuccess) return Infinity;
@@ -215,8 +271,19 @@ async function processGenericUrl(page, broker, state, dryRun = false) {
     return { status: 'skipped', detail: `${Math.round(daysAgo)}d ago` };
   }
 
+  // Short-circuit without a network request when the host is known-dead.
+  const activeDeadSet = injectedDeadSet !== undefined ? injectedDeadSet : deadSet;
+  let hostname;
+  try { hostname = new URL(broker.url).hostname.replace(/^www\./, ''); } catch (_) {}
+  if (hostname && activeDeadSet.has(hostname)) {
+    return { status: 'dead', detail: 'cached dead-url, skipped' };
+  }
+
   try {
-    await page.goto(broker.url, { waitUntil: 'domcontentloaded', timeout: 20000 });
+    const response = await page.goto(broker.url, { waitUntil: 'domcontentloaded', timeout: 20000 });
+    if (response && isDeadStatus(response.status())) {
+      return { status: 'dead', detail: `HTTP ${response.status()}` };
+    }
     await page.waitForTimeout(1500);
 
     await dismissBanners(page);
@@ -259,7 +326,12 @@ async function processGenericUrl(page, broker, state, dryRun = false) {
 
     return { status: 'manual', detail: broker.url };
   } catch (err) {
-    const msg = err.message?.includes('Timeout') ? 'Timeout' : err.message?.slice(0, 60) || 'error';
+    const message = err.message || '';
+    const deadCode = classifyNavError(message);
+    if (deadCode) {
+      return { status: 'dead', detail: deadCode };
+    }
+    const msg = message.includes('Timeout') ? 'Timeout' : message.slice(0, 60) || 'error';
     return { status: 'error', detail: msg };
   }
 }
@@ -327,4 +399,4 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
   return brokers.length;
 }
 
-module.exports = { runGenericBrokers, loadGenericBrokers };
+module.exports = { runGenericBrokers, loadGenericBrokers, classifyNavError, isDeadStatus, loadDeadSet, DEAD_URLS_PATH };
