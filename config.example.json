@@ -7,11 +7,16 @@
     "fullName": "Jane Doe",
     "aliases": ["Jan Doe", "Jane M Doe"],
     "city": "Austin",
+    "country": "US",
+    "_country_note": "2-letter country code. US (default), CA, GB, AU, etc. Non-US users: 'state' holds province/region; 'zip' holds postal code (any format, e.g. K1A 0A6 or SW1A 1AA); 'phoneFormatted' is the raw phone number with no US formatting.",
     "state": "TX",
+    "_state_note": "For non-US: province or region (e.g. ON for Ontario, NSW for New South Wales)",
     "zip": "73301",
+    "_zip_note": "For non-US: postal code in your country's format (e.g. K1A 0A6, SW1A 1AA, 2000)",
     "email": "jane.doe@example.com",
     "phone": "5125550000",
-    "phoneFormatted": "(512) 555-0000"
+    "phoneFormatted": "(512) 555-0000",
+    "_phone_note": "For non-US: phoneFormatted equals phone with no reformatting applied"
   },
 
   "capsolver": {

@@ -23,8 +23,10 @@ const STATE_PATH  = path.join(__dirname, 'state.json');
 const PLIST_PATH  = path.join(os.homedir(), 'Library', 'LaunchAgents', 'com.auto-identity-remove.plist');
 
 // ─── Prompt helper ────────────────────────────────────────────────────────────
+// rl is created lazily inside main() so that requiring this module for its
+// exported helpers (regionPrompts, formatPhone) does not open stdin.
 
-const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+let rl;
 const ask = (q, def = '') => new Promise(resolve =>
   rl.question(def ? `${q} [${def}]: ` : `${q}: `, ans => resolve(ans.trim() || def))
 );
@@ -45,9 +47,45 @@ const confirm = async (q) => {
   return ans === 'y' || ans === 'yes';
 };
 
+// ─── International helpers (pure, exported for unit tests) ───────────────────
+
+/**
+ * Return the correct prompt labels for region and postal fields based on country.
+ * US uses "State (2-letter)" and "ZIP code"; all others use "Province/Region"
+ * and "Postal code" (no format coercion).
+ *
+ * @param {string} country  2-letter ISO country code (upper-case)
+ * @returns {{ regionLabel: string, postalLabel: string }}
+ */
+function regionPrompts(country) {
+  if (country === 'US') {
+    return { regionLabel: 'State (2-letter)', postalLabel: 'ZIP code' };
+  }
+  return { regionLabel: 'Province/Region', postalLabel: 'Postal code (any format, e.g. K1A 0A6)' };
+}
+
+/**
+ * Format a phone number for display.
+ * US 10-digit strings are formatted as (xxx) xxx-xxxx.
+ * All other inputs (non-US country or non-10-digit) are returned verbatim.
+ *
+ * @param {string} phone    Raw phone string
+ * @param {string} country  2-letter ISO country code (upper-case)
+ * @returns {string}
+ */
+function formatPhone(phone, country) {
+  if (country === 'US' && phone.length === 10) {
+    return `(${phone.slice(0, 3)}) ${phone.slice(3, 6)}-${phone.slice(6)}`;
+  }
+  return phone;
+}
+
+module.exports = { regionPrompts, formatPhone };
+
 // ─── Main setup ───────────────────────────────────────────────────────────────
 
 async function main() {
+  rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   console.log('\n🔒 auto-identity-remove — Setup\n');
   console.log('This will create config.json with your personal info (gitignored).');
   console.log('Run this once. Re-run anytime to update.\n');
@@ -66,14 +104,14 @@ async function main() {
   const lastName       = await ask('Last name',               p.lastName  || '');
   const aliasInput     = await ask('Aliases (comma-separated, e.g. "Steve Doe, S Doe")', (p.aliases||[]).join(', '));
   const aliases        = aliasInput ? aliasInput.split(',').map(s => s.trim()).filter(Boolean) : [];
-  const city           = await ask('City',                    p.city  || '');
-  const state          = await ask('State (2-letter)',        p.state || '');
-  const zip            = await ask('ZIP code',                p.zip   || '');
+  const city           = await ask('City',                    p.city || '');
+  const country        = (await ask('Country (2-letter ISO, e.g. US, CA, GB, AU)', p.country || 'US')).toUpperCase();
+  const { regionLabel, postalLabel } = regionPrompts(country);
+  const state          = await ask(regionLabel,               p.state || '');
+  const zip            = await ask(postalLabel,               p.zip   || '');
   const email          = await ask('Email address',           p.email || '');
-  const phone          = await ask('Phone (digits only, e.g. 5125550000)', p.phone || '');
-  const phoneFormatted = phone.length === 10
-    ? `(${phone.slice(0,3)}) ${phone.slice(3,6)}-${phone.slice(6)}`
-    : phone;
+  const phone          = await ask('Phone (digits only for US; any format for non-US)', p.phone || '');
+  const phoneFormatted = formatPhone(phone, country);
 
   // ── CapSolver ────────────────────────────────────────────────────────────
   console.log('\n── CAPTCHA Solving ────────────────────────────────────────');
@@ -134,6 +172,7 @@ async function main() {
       fullName: `${firstName} ${lastName}`,
       aliases,
       city,
+      country,
       state,
       zip,
       email,
@@ -218,7 +257,9 @@ async function main() {
   console.log('─'.repeat(54) + '\n');
 }
 
-main().catch(err => {
-  console.error('Setup error:', err.message);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch(err => {
+    console.error('Setup error:', err.message);
+    process.exit(1);
+  });
+}

@@ -33,6 +33,7 @@ module.exports = [
     submitSelector: 'button[type="submit"],input[type="submit"]',
     captchaLikely: false,
     priority: 1,
+    usOnly: true,
   },
 
   {
@@ -45,6 +46,7 @@ module.exports = [
     submitSelector: 'button[type="submit"]',
     captchaLikely: false,
     priority: 1,
+    usOnly: true,
   },
 
   {
@@ -57,6 +59,7 @@ module.exports = [
     submitSelector: 'button[type="submit"]',
     captchaLikely: false,
     priority: 1,
+    usOnly: true,
   },
 
   {
@@ -67,6 +70,7 @@ module.exports = [
     submitSelector: 'button[type="submit"]',
     captchaLikely: false,
     priority: 1,
+    usOnly: true,
   },
 
   {
@@ -79,6 +83,7 @@ module.exports = [
     submitSelector: 'button[type="submit"]',
     captchaLikely: true,
     priority: 1,
+    usOnly: true,
   },
 
   {
@@ -188,6 +193,7 @@ module.exports = [
     submitSelector: 'button[type="submit"]',
     captchaLikely: false,
     priority: 2,
+    usOnly: true,
   },
 
   {
@@ -198,6 +204,7 @@ module.exports = [
     submitSelector: 'input[type="submit"],button[type="submit"]',
     captchaLikely: false,
     priority: 2,
+    usOnly: true,
   },
 
   {

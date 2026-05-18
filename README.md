@@ -239,6 +239,40 @@ rm ~/Library/LaunchAgents/com.auto-identity-remove.plist
 
 ---
 
+## International users
+
+This tool supports non-US users with a few important caveats.
+
+### What works
+
+- `setup.js` will prompt for **Country** (2-letter ISO code, e.g. `CA`, `GB`, `AU`) and then replace the US-centric "State" / "ZIP code" prompts with **Province/Region** and **Postal code** prompts that accept any format (`K1A 0A6`, `SW1A 1AA`, `2000`, etc.) with no coercion.
+- Phone numbers for non-US users are stored verbatim — no `(xxx) xxx-xxxx` reformatting is applied.
+- `lib/forms.js` automatically tries province/postal/postcode HTML field variants (e.g. `input[name*="province"]`, `input[name*="postcode"]`) when filling forms for non-US users, with no change needed in broker definitions.
+- A country `<select>` on opt-out forms is targeted and filled with your 2-letter country code when present.
+- Global brokers (ZoomInfo, Clearbit, Acxiom, Radaris, etc.) are attempted for all users.
+
+### US-only brokers (automatically skipped for non-US users)
+
+The following brokers are flagged `usOnly: true` and are silently skipped when your configured country is not `US`. These sites index US public records, voter data, or phone directories — a non-US person definitionally has no record to remove there:
+
+| Broker | Reason |
+|--------|--------|
+| Spokeo | US people-search (state-keyed search) |
+| WhitePages | US white-pages directory |
+| FastPeopleSearch | US people-search |
+| TruePeopleSearch | US people-search |
+| BeenVerified | US background-check (requires US state) |
+| USPhonebook | US phone directory |
+| PublicDataUSA | US public records |
+
+All other brokers in the list are attempted regardless of country.
+
+### What won't help much
+
+US people-search sites (`Spokeo`, `WhitePages`, etc.) hold records sourced from US public records — if you have never lived in the US, your data is very unlikely to appear on these sites. The script skips them for you automatically.
+
+---
+
 ## Is it safe to submit my info to 500 opt-out forms?
 
 A fair concern raised by some users: aren't you just confirming your data to the brokers by filling out their forms?
