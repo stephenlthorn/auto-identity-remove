@@ -15,6 +15,7 @@ const { STATE_PATH, RECHECK_DAYS, loadConfig, loadState, recordSuccess, setDryRu
 const { results, logResult, buildSummary } = require('./lib/logger');
 const { sendText, desktopNotify, openInBrowser } = require('./lib/notify');
 const brokerRunner = require('./lib/broker-runner');
+const { sendOptOutEmails } = require('./lib/email');
 
 const DRY_RUN = process.argv.includes('--dry-run');
 const VERIFY  = process.argv.includes('--verify');
@@ -61,7 +62,7 @@ async function main() {
   // Email opt-outs (no browser needed — skipped in verify mode)
   if (!VERIFY) {
     console.log('── Email opt-outs ─────────────────────────────────────────');
-    brokerRunner.sendEmailOptOuts(brokers);
+    await sendOptOutEmails(brokers, config);
   }
 
   // Launch persistent browser (reuses profile / saved logins)
