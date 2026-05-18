@@ -6,7 +6,8 @@
   "scripts": {
     "setup": "node setup.js",
     "start": "node watcher.js",
-    "run": "bash run.sh"
+    "run": "bash run.sh",
+    "test": "node --test"
   },
   "dependencies": {
     "axios": "^1.7.2",
