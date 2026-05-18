@@ -31,5 +31,5 @@
     "textTo": "+15125550000"
   },
 
-  "profileDir": "/Users/YOUR_USERNAME/.config/auto-identity-remove"
+  "profileDir": "~/.config/auto-identity-remove"
 }

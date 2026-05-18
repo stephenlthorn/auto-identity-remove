@@ -10,5 +10,13 @@ if [ ! -f config.json ]; then
   exit 1
 fi
 
-PLAYWRIGHT_BROWSERS_PATH="${PLAYWRIGHT_BROWSERS_PATH:-$HOME/Library/Caches/ms-playwright}" \
-  node watcher.js
+# Platform-aware Playwright browsers path
+if [ -z "${PLAYWRIGHT_BROWSERS_PATH}" ]; then
+  if [ "$(uname -s)" = "Darwin" ]; then
+    export PLAYWRIGHT_BROWSERS_PATH="$HOME/Library/Caches/ms-playwright"
+  else
+    export PLAYWRIGHT_BROWSERS_PATH="$HOME/.cache/ms-playwright"
+  fi
+fi
+
+node watcher.js

@@ -6,7 +6,7 @@
  * method:
  *   'search-form'  — search for the person, extract listing URL, submit opt-out
  *   'direct-form'  — go straight to the opt-out URL and fill the form
- *   'email'        — send a removal-request email via Mail.app
+ *   'email'        — send a removal-request email
  *   'manual'       — too complex to automate; added to the printed manual list
  *
  * captchaLikely    — true = pre-attempt CapSolver before submit

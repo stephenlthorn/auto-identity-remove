@@ -13,7 +13,7 @@ const os   = require('os');
 
 const { STATE_PATH, RECHECK_DAYS, loadConfig, loadState, recordSuccess, setDryRun } = require('./lib/config');
 const { results, logResult, buildSummary } = require('./lib/logger');
-const { sendText, macNotify, openInBrowser } = require('./lib/notify');
+const { sendText, desktopNotify, openInBrowser } = require('./lib/notify');
 const brokerRunner = require('./lib/broker-runner');
 
 const DRY_RUN = process.argv.includes('--dry-run');
@@ -32,8 +32,12 @@ try {
   ({ chromium } = require(fallback));
 }
 
+const isMac = process.platform === 'darwin';
+
 if (process.env.PLAYWRIGHT_BROWSERS_PATH === undefined) {
-  process.env.PLAYWRIGHT_BROWSERS_PATH = path.join(os.homedir(), 'Library', 'Caches', 'ms-playwright');
+  process.env.PLAYWRIGHT_BROWSERS_PATH = isMac
+    ? path.join(os.homedir(), 'Library', 'Caches', 'ms-playwright')
+    : path.join(os.homedir(), '.cache', 'ms-playwright');
 }
 
 const LOG_DIR = path.join(__dirname, 'logs');
@@ -113,7 +117,7 @@ async function main() {
   const totalProcessed = results.succeeded.length + results.skipped.length + results.notFound.length + results.captchaFailed.length + results.manual.length + results.errors.length;
   const short = `🔒 Privacy Watcher (${new Date().toLocaleDateString()}):\n✅ Removed: ${results.succeeded.length}\n⏭  Skipped: ${results.skipped.length}\n📋 Manual: ${results.captchaFailed.length + results.manual.length}\n📊 Total: ${totalProcessed} brokers checked`;
   sendText(short, notify);
-  macNotify('Privacy Watcher', `Done — ${results.succeeded.length} removed, ${results.captchaFailed.length + results.manual.length} need manual action (${totalProcessed} total)`);
+  desktopNotify('Privacy Watcher', `Done — ${results.succeeded.length} removed, ${results.captchaFailed.length + results.manual.length} need manual action (${totalProcessed} total)`);
 }
 
 main().catch(err => {

@@ -18,9 +18,10 @@ const os      = require('os');
 const readline = require('readline');
 const { execSync } = require('child_process');
 
+const isMac = process.platform === 'darwin';
+
 const CONFIG_PATH = path.join(__dirname, 'config.json');
 const STATE_PATH  = path.join(__dirname, 'state.json');
-const PLIST_PATH  = path.join(os.homedir(), 'Library', 'LaunchAgents', 'com.auto-identity-remove.plist');
 
 // ─── Prompt helper ────────────────────────────────────────────────────────────
 
@@ -84,8 +85,15 @@ async function main() {
   const capsolverKey = await ask('CapSolver API key', (existing.capsolver||{}).apiKey || '');
 
   // ── Notification ─────────────────────────────────────────────────────────
-  console.log('\n── iMessage Notification ──────────────────────────────────');
-  const textTo = await ask('iMessage number to text results to (e.g. +15125550000)', (existing.notify||{}).textTo || '');
+  let textTo;
+  if (isMac) {
+    console.log('\n── iMessage Notification ──────────────────────────────────');
+    textTo = await ask('iMessage number to text results to (e.g. +15125550000)', (existing.notify||{}).textTo || '');
+  } else {
+    console.log('\n── Desktop Notification ─────────────────────────────────');
+    textTo = (existing.notify||{}).textTo || '';
+    console.log('Desktop notifications will be shown via notify-send.');
+  }
 
   // ── Profile dir ──────────────────────────────────────────────────────────
   const defaultProfileDir = path.join(os.homedir(), '.config', 'auto-identity-remove');
@@ -116,7 +124,7 @@ async function main() {
         continue;
       }
       console.log(`  → Opening ${site.url} in your browser…`);
-      try { execSync(`open "${site.url}"`); } catch(_) {}
+      try { execSync(`${isMac ? 'open' : 'xdg-open'} "${site.url}"`); } catch(_) {}
       console.log('  Create the account, then come back here.\n');
       await ask('  Press Enter when done');
     }
@@ -155,7 +163,7 @@ async function main() {
     console.log('✅ state.json initialized (tracks opt-out history).\n');
   }
 
-  // ── launchd scheduling ───────────────────────────────────────────────────
+  // ── Scheduling ───────────────────────────────────────────────────────────
   console.log('── Monthly Schedule ────────────────────────────────────────');
   const doSchedule = await confirm('Schedule to run automatically on the 1st of every month at 9am?');
   if (doSchedule) {
@@ -163,7 +171,9 @@ async function main() {
     const logDir = path.join(__dirname, 'logs');
     fs.mkdirSync(logDir, { recursive: true });
 
-    const plist = `<?xml version="1.0" encoding="UTF-8"?>
+    if (isMac) {
+      const plistPath = path.join(os.homedir(), 'Library', 'LaunchAgents', 'com.auto-identity-remove.plist');
+      const plist = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
@@ -196,14 +206,61 @@ async function main() {
 </dict>
 </plist>`;
 
-    fs.mkdirSync(path.dirname(PLIST_PATH), { recursive: true });
-    fs.writeFileSync(PLIST_PATH, plist);
+    fs.mkdirSync(path.dirname(plistPath), { recursive: true });
+    fs.writeFileSync(plistPath, plist);
     try {
-      execSync(`launchctl unload "${PLIST_PATH}" 2>/dev/null; launchctl load "${PLIST_PATH}"`);
+      execSync(`launchctl unload "${plistPath}" 2>/dev/null; launchctl load "${plistPath}"`);
       console.log('✅ Scheduled — runs every 1st of the month at 9am.\n');
     } catch(err) {
       console.log(`⚠  launchctl error: ${err.message.slice(0,80)}`);
-      console.log(`   Manually load with: launchctl load "${PLIST_PATH}"\n`);
+      console.log(`   Manually load with: launchctl load "${plistPath}"\n`);
+    }
+  } else {
+    const systemdDir = path.join(os.homedir(), '.config', 'systemd', 'user');
+    fs.mkdirSync(systemdDir, { recursive: true });
+
+    const browsersPath = process.env.PLAYWRIGHT_BROWSERS_PATH
+      || path.join(os.homedir(), '.cache', 'ms-playwright');
+
+    const serviceFile = path.join(systemdDir, 'auto-identity-remove.service');
+    const serviceUnit = `[Unit]
+Description=auto-identity-remove monthly data broker opt-out
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash ${scriptPath}
+Environment=PLAYWRIGHT_BROWSERS_PATH=${browsersPath}
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+StandardOutput=append:${logDir}/systemd.log
+StandardError=append:${logDir}/systemd.error.log
+`;
+
+    const timerFile = path.join(systemdDir, 'auto-identity-remove.timer');
+    const timerUnit = `[Unit]
+Description=auto-identity-remove monthly timer
+Requires=auto-identity-remove.service
+
+[Timer]
+OnCalendar=*-*-01 09:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+`;
+
+    fs.writeFileSync(serviceFile, serviceUnit);
+    fs.writeFileSync(timerFile, timerUnit);
+    try {
+      execSync('systemctl --user daemon-reload 2>/dev/null');
+      execSync('systemctl --user stop auto-identity-remove.timer 2>/dev/null; systemctl --user disable auto-identity-remove.timer 2>/dev/null');
+      execSync('systemctl --user enable auto-identity-remove.timer');
+      execSync('systemctl --user start auto-identity-remove.timer');
+      console.log('✅ Scheduled — runs every 1st of the month at 9am.\n');
+    } catch(err) {
+      console.log(`⚠  systemctl error: ${err.message.slice(0,80)}`);
+      console.log(`   Manually enable with:`);
+      console.log(`     systemctl --user enable --now auto-identity-remove.timer\n`);
+    }
     }
   }
 

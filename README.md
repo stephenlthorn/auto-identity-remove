@@ -1,6 +1,6 @@
 # auto-identity-remove
 
-Automated data broker opt-out runner for macOS. Removes your personal information from **500+ people-search sites and data broker databases** on a monthly schedule — with CAPTCHA solving, persistent state tracking (so completed opt-outs aren't resubmitted every run), and an iMessage notification when done.
+Automated data broker opt-out runner for **macOS and Linux**. Removes your personal information from **500+ people-search sites and data broker databases** on a monthly schedule — with CAPTCHA solving, persistent state tracking (so completed opt-outs aren't resubmitted every run), and a desktop notification when done.
 
 ## What it does
 
@@ -11,16 +11,18 @@ Each month, the script:
 3. **Fills and submits** the opt-out form automatically
 4. **Solves CAPTCHAs** via [CapSolver](https://capsolver.com) (AI-powered, ~$0.001/solve)
 5. **Skips** brokers you were already removed from recently (90-day re-check window)
-6. **Sends you an iMessage** with the results summary
+6. **Notifies you** with the results summary (iMessage on macOS, desktop notification on Linux)
 7. **Opens** any sites that require manual action in your browser
 
 ---
 
 ## Requirements
 
-- macOS (uses launchd for scheduling and Messages for iMessage)
+- **macOS** or **Linux** (Ubuntu, Debian, Fedora, Arch, etc.)
 - Node.js 18+
 - [Playwright](https://playwright.dev) browsers installed
+- (Linux only) `notify-send` for desktop notifications (install `libnotify-bin` on Ubuntu/Debian)
+- (Linux only, for email opt-outs) `sendmail` or `mailutils` package
 
 ```bash
 npx playwright install chromium
@@ -38,10 +40,15 @@ cd auto-identity-remove
 # 2. Install dependencies
 npm install
 
-# 3. Run interactive setup (creates config.json and schedules the monthly job)
+# 3. (Linux only) Install system dependencies
+#    Ubuntu/Debian:  sudo apt install libnotify-bin sendmail
+#    Fedora:         sudo dnf install libnotify msmtp
+#    Arch:           sudo pacman -S libnotify msmtp
+
+# 4. Run interactive setup (creates config.json and schedules the monthly job)
 node setup.js
 
-# 4. Run manually anytime
+# 5. Run manually anytime
 ./run.sh
 ```
 
@@ -57,8 +64,8 @@ node setup.js
 | **Aliases** | Past names or variations (e.g. "Steve Doe") |
 | **CapSolver key** | For CAPTCHA-protected opt-out forms |
 | **One-time accounts** | Creates accounts on sites that require login (stored in `config.json`, gitignored) |
-| **iMessage** | Phone number to text the results summary to |
-| **launchd schedule** | Registers a monthly job to run on the 1st at 9am |
+| **iMessage / Desktop** | Phone number to iMessage results to (macOS), or desktop notification (Linux) |
+| **Schedule** | Registers a monthly job to run on the 1st at 9am (launchd on macOS, systemd timer on Linux) |
 
 **Your personal info never leaves your machine.** `config.json` and `state.json` are both gitignored.
 
@@ -158,7 +165,7 @@ On each run you'll see:
 | **LexisNexis** | Direct form (legal/financial data) |
 | **ZoomInfo** | Direct form (B2B professional data) |
 | **Clearbit** | Direct form (B2B enrichment data) |
-| Pipl | Email opt-out via Mail.app |
+| Pipl | Email opt-out |
 
 ### Generic — 500+ additional brokers (auto-detected)
 
@@ -232,9 +239,18 @@ Or to run in the background and log output:
 
 ## Uninstall / disable schedule
 
+**macOS:**
 ```bash
 launchctl unload ~/Library/LaunchAgents/com.auto-identity-remove.plist
 rm ~/Library/LaunchAgents/com.auto-identity-remove.plist
+```
+
+**Linux:**
+```bash
+systemctl --user stop auto-identity-remove.timer
+systemctl --user disable auto-identity-remove.timer
+rm ~/.config/systemd/user/auto-identity-remove.service
+rm ~/.config/systemd/user/auto-identity-remove.timer
 ```
 
 ---
