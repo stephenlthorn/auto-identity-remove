@@ -13,6 +13,9 @@
     "axios": "^1.7.2",
     "playwright": "^1.44.0"
   },
+  "optionalDependencies": {
+    "nodemailer": "^6.9.0"
+  },
   "engines": {
     "node": ">=18.0.0"
   },

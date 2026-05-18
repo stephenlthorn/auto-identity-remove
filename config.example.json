@@ -27,8 +27,21 @@
   },
 
   "notify": {
-    "_comment": "iMessage number to text results to. Leave blank to disable.",
-    "textTo": "+15125550000"
+    "_comment": "iMessage number to text results to (macOS only). Leave blank to disable.",
+    "textTo": "+15125550000",
+    "_webhook_comment": "Optional webhook URL for notifications on any OS (ntfy.sh, Slack, Discord). Leave blank to disable.",
+    "webhook": ""
+  },
+
+  "email": {
+    "_comment": "Optional SMTP config for sending opt-out emails on Linux/Windows (or as an alternative to Mail.app on macOS). Leave the smtp block absent or empty to use Mail.app on macOS.",
+    "smtp": {
+      "host": "smtp.example.com",
+      "port": 587,
+      "user": "you@example.com",
+      "pass": "YOUR_APP_PASSWORD",
+      "from": "you@example.com"
+    }
   },
 
   "profileDir": "/Users/YOUR_USERNAME/.config/auto-identity-remove"
