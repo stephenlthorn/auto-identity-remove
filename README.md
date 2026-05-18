@@ -228,6 +228,33 @@ Or to run in the background and log output:
 ./run.sh >> logs/manual-run.log 2>&1 &
 ```
 
+### Verifying removals (`--verify`)
+
+Run a read-only spot-check to see whether previous opt-outs are still in effect:
+
+```bash
+node watcher.js --verify
+```
+
+This opens a browser, searches each broker where you have a recorded successful opt-out, and reports what it finds. No forms are submitted, nothing is written to `state.json`.
+
+Output is grouped into three sections:
+
+| Section | Meaning |
+|---------|---------|
+| `VERIFIED CLEAR` | Your name was not found in the broker's search today |
+| `STILL LISTED` | A listing was found — the opt-out may have failed, or your data was re-added |
+| `UNVERIFIABLE` | The broker uses a direct-form, email, or manual method — no automated search signal exists to check |
+
+A dated JSON report is saved to `logs/verify-YYYY-MM-DD.json`.
+
+**Important caveats:**
+
+- Only `search-form` brokers (those with a `searchUrl` and `listingPattern`) can be checked automatically. Direct-form and email opt-outs are always `unverifiable`.
+- "Verified clear" means your name was not found in one search today. It is **not** a legal guarantee of deletion. Brokers routinely re-ingest data from upstream sources.
+- "Still listed" can mean the opt-out failed **or** the broker re-added your data since the last successful opt-out was recorded. Either way, re-running `node watcher.js` will attempt removal again.
+- If the broker's search page is down or slow, the result is classified as `unverifiable` (a timeout is not counted as "still listed").
+
 ---
 
 ## Uninstall / disable schedule

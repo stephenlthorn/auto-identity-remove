@@ -17,6 +17,7 @@ const { sendText, macNotify, openInBrowser } = require('./lib/notify');
 const brokerRunner = require('./lib/broker-runner');
 
 const DRY_RUN = process.argv.includes('--dry-run');
+const VERIFY  = process.argv.includes('--verify');
 setDryRun(DRY_RUN); // makes recordSuccess/saveState no-op-on-disk in dry-run
 const config = loadConfig();
 const { notify, profileDir } = config;
@@ -46,13 +47,16 @@ async function main() {
   const { runGenericBrokers } = require('./generic-runner');
 
   console.log('\n🔒 auto-identity-remove — starting run');
-  if (DRY_RUN) console.log('🧪 DRY RUN — forms will be filled but NOT submitted. No state will be saved.');
+  if (DRY_RUN)  console.log('🧪 DRY RUN — forms will be filled but NOT submitted. No state will be saved.');
+  if (VERIFY)   console.log('🔍 VERIFY — read-only spot-check. No forms submitted. No state saved.');
   console.log(`📅 ${new Date().toLocaleString()}`);
   console.log(`📋 ${brokers.length} explicit brokers + 500+ generic | re-check window: ${RECHECK_DAYS} days\n`);
 
-  // Email opt-outs (no browser needed)
-  console.log('── Email opt-outs ─────────────────────────────────────────');
-  brokerRunner.sendEmailOptOuts(brokers);
+  // Email opt-outs (no browser needed — skipped in verify mode)
+  if (!VERIFY) {
+    console.log('── Email opt-outs ─────────────────────────────────────────');
+    brokerRunner.sendEmailOptOuts(brokers);
+  }
 
   // Launch persistent browser (reuses profile / saved logins)
   fs.mkdirSync(profileDir, { recursive: true });
@@ -63,6 +67,14 @@ async function main() {
     args: ['--no-first-run', '--disable-blink-features=AutomationControlled'],
     ignoreDefaultArgs: ['--enable-automation'],
   });
+
+  // ── Verify mode: read-only spot-check, no opt-out submission ─────────────
+  if (VERIFY) {
+    const { runVerify } = require('./lib/verifier');
+    await runVerify(context, brokers, state);
+    await context.close().catch(() => {});
+    return;
+  }
 
   const sorted = [...brokers]
     .filter(b => b.method !== 'email')
