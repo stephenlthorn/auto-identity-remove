@@ -11,6 +11,7 @@
  *
  * captchaLikely    — true = pre-attempt CapSolver before submit
  * priority         — 1 = highest (most commonly searched / highest risk)
+ * timeoutMs        — optional per-broker navigation timeout in ms (default: 15000)
  *
  * No personal info lives here — all values come from config.json at runtime.
  */
@@ -95,6 +96,7 @@ module.exports = [
     formFields: { 'input[name*="first"],input[placeholder*="first" i]': F, 'input[name*="last"],input[placeholder*="last" i]': L, 'input[type="email"]': E },
     submitSelector: 'button[type="submit"]',
     captchaLikely: false,
+    timeoutMs: 30000,
     priority: 1,
   },
 

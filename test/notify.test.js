@@ -257,3 +257,44 @@ test('dispatchNotify: no webhook and linux with no notify-send available — no 
   childProcess.execSync = orig;
   fetchStub.restore();
 });
+
+// ─── sendWebhook rich payload (WP-S10) ───────────────────────────────────────
+
+test('sendWebhook with string: POSTs {text: message} (legacy string compat)', async () => {
+  const { calls, restore } = stubFetch();
+  await notify.sendWebhook('https://hooks.example.com/test', 'summary text');
+  restore();
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].body, { text: 'summary text' });
+});
+
+test('sendWebhook with object: POSTs payload with text + results passed through', async () => {
+  const { calls, restore } = stubFetch();
+  const payload = {
+    text: 'Run complete: 5 succeeded, 1 failed',
+    results: { succeeded: ['Spokeo', 'Intelius'], errors: ['Radaris'] },
+  };
+  await notify.sendWebhook('https://hooks.example.com/test', payload);
+  restore();
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].body.text, payload.text);
+  assert.deepEqual(calls[0].body.results, payload.results);
+});
+
+test('sendWebhook with object: adds timestamp if missing', async () => {
+  const { calls, restore } = stubFetch();
+  const payload = { text: 'done', results: {} };
+  await notify.sendWebhook('https://hooks.example.com/test', payload);
+  restore();
+  assert.ok(calls[0].body.timestamp, 'timestamp should be added');
+  assert.ok(new Date(calls[0].body.timestamp).getTime() > 0, 'timestamp should be a valid ISO date string');
+});
+
+test('sendWebhook with object: preserves caller-supplied timestamp', async () => {
+  const { calls, restore } = stubFetch();
+  const ts = '2026-05-19T00:00:00.000Z';
+  const payload = { text: 'done', results: {}, timestamp: ts };
+  await notify.sendWebhook('https://hooks.example.com/test', payload);
+  restore();
+  assert.equal(calls[0].body.timestamp, ts, 'caller timestamp should not be overwritten');
+});
