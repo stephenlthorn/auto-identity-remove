@@ -22,6 +22,18 @@ const PREVIEW           = process.argv.includes('--preview');
 const DRY_RUN           = process.argv.includes('--dry-run') || PREVIEW; // --preview implies --dry-run
 const VERIFY            = process.argv.includes('--verify');
 const INSTALL_SCHEDULER = process.argv.includes('--install-scheduler');
+const DOCTOR            = process.argv[2] === 'doctor' || process.argv.includes('--doctor');
+
+// ── --doctor: self-diagnose and exit ─────────────────────────────────────────
+if (DOCTOR) {
+  const { runDoctor } = require('./lib/doctor');
+  runDoctor().then(results => {
+    process.exit(results.exitCode);
+  }).catch(err => {
+    console.error('doctor error:', err.message);
+    process.exit(1);
+  });
+} else {
 
 // --pollute N: submit N fake records to brokers tagged acceptsBogus: true
 const polluteFlagIdx = process.argv.indexOf('--pollute');
@@ -211,3 +223,5 @@ main().catch(err => {
   sendText(`❌ Privacy Watcher crashed: ${err.message.slice(0, 100)}`, notify);
   process.exit(1);
 });
+
+} // end else (not DOCTOR mode)
