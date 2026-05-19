@@ -22,6 +22,32 @@ const enc = s => encodeURIComponent(s);
 
 module.exports = [
 
+  // ═══ Priority 1 — California DELETE Act portal (covers all ~500 CA-registered brokers) ═══
+
+  // Single opt-out under the DELETE Act (SB 362) supersedes individual broker submissions.
+  // August 2025 compliance deadline means all registered CA brokers must honor this request.
+  {
+    name: 'California DELETE Portal',
+    optOutUrl: 'https://privacy.ca.gov/consumer-requests/',
+    method: 'direct-form',
+    priority: 1,
+    confidence: 'untested',
+    usOnly: false,
+    notes: 'Covers all ~500 CA-registered data brokers under the DELETE Act (SB 362). Single opt-out trumps individual site submissions.',
+    formFields: [
+      { selector: 'input[name="firstName"], input[id*="first"], input[placeholder*="First"]', value: `${F}` },
+      { selector: 'input[name="lastName"], input[id*="last"], input[placeholder*="Last"]', value: `${L}` },
+      { selector: 'input[name="email"], input[type="email"]', value: `${E}` },
+      { selector: 'input[name="address"], input[id*="address"], input[placeholder*="address" i]', value: config.person.address || '' },
+      { selector: 'input[name="city"], input[id*="city"]', value: `${C}` },
+      { selector: 'select[name="state"], select[id*="state"]', value: `${ST}` },
+      { selector: 'input[name="zip"], input[id*="zip"], input[name="postalCode"]', value: `${Z}` },
+    ],
+    submitSelector: 'button[type="submit"], input[type="submit"]',
+    captchaLikely: false,
+    timeoutMs: 30000,
+  },
+
   // ═══ Priority 1 — High-traffic people-search sites ═══════════════════════
 
   {

@@ -17,6 +17,7 @@
 
 | Broker | Method | CAPTCHA | Confidence | US-only |
 |---|---|---|---|---|
+| California DELETE Portal | direct-form | no | untested | no |
 | Spokeo | search-form | no | untested | yes |
 | WhitePages | search-form | no | untested | yes |
 | FastPeopleSearch | search-form | no | untested | yes |
