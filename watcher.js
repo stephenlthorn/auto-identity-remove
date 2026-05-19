@@ -17,6 +17,8 @@ const { sendText, desktopNotify, openInBrowser } = require('./lib/notify');
 const brokerRunner = require('./lib/broker-runner');
 const { sendOptOutEmails } = require('./lib/email');
 const lock = require('./lib/lock');
+const { diffResults, loadPreviousLog } = require('./lib/diff');
+const { renderAuditMarkdown, writeAuditFile } = require('./lib/audit');
 
 const PREVIEW           = process.argv.includes('--preview');
 const DRY_RUN           = process.argv.includes('--dry-run') || PREVIEW; // --preview implies --dry-run
@@ -193,6 +195,21 @@ async function _mainBody() {
 
   // Save run log (skipped in dry-run)
   if (!DRY_RUN) fs.writeFileSync(logFile, JSON.stringify(results, null, 2));
+
+  // Diff against previous run + write audit markdown (skipped in dry-run)
+  if (!DRY_RUN) {
+    const prevLog = loadPreviousLog(LOG_DIR, logFile);
+    const diff = diffResults(prevLog, results);
+    console.log(`\n📊 ${diff.summary}`);
+
+    const auditMd = renderAuditMarkdown({
+      person: config.person,
+      timestamp: results.runAt,
+      results,
+    });
+    const auditPath = writeAuditFile(LOG_DIR, auditMd, results.runAt);
+    console.log(`📝 Audit: ${auditPath}`);
+  }
 
   // Open manual-required sites
   const manualUrls = [...results.captchaFailed, ...results.manual]
