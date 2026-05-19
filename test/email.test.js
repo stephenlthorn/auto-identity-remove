@@ -167,6 +167,54 @@ test('_buildBody includes all person fields', () => {
   assert.ok(body.includes('(512) 555-0000'));
 });
 
+// ─── Tests 7-12: GDPR / CCPA template routing ────────────────────────────────
+
+test('_pickTemplate returns GDPR builder for EU country DE', () => {
+  const builder = emailMod._pickTemplate('DE');
+  assert.equal(typeof builder, 'function', '_pickTemplate should return a function');
+  const body = builder(PERSON);
+  assert.ok(body.includes('Article 17'), 'GDPR body should cite Article 17');
+});
+
+test('_pickTemplate returns CCPA builder for US', () => {
+  const builder = emailMod._pickTemplate('US');
+  assert.equal(typeof builder, 'function', '_pickTemplate should return a function');
+  const body = builder(PERSON);
+  assert.ok(body.includes('CCPA'), 'CCPA body should mention CCPA');
+});
+
+test('_pickTemplate returns GDPR builder for GB (UK GDPR)', () => {
+  const builder = emailMod._pickTemplate('GB');
+  const body = builder(PERSON);
+  assert.ok(body.includes('Article 17'), 'GB should get GDPR body citing Article 17');
+});
+
+test('_buildBodyGDPR includes Article 17 and person fields', () => {
+  const body = emailMod._buildBodyGDPR(PERSON);
+  assert.ok(body.includes('Article 17'), 'GDPR body must cite Article 17');
+  assert.ok(body.includes('Jane Doe'), 'GDPR body must include fullName');
+  assert.ok(body.includes('Austin'), 'GDPR body must include city');
+  assert.ok(body.includes('TX'), 'GDPR body must include state');
+  assert.ok(body.includes('jane@example.com'), 'GDPR body must include email');
+  assert.ok(body.includes('(512) 555-0000'), 'GDPR body must include phone');
+});
+
+test('_buildBodyCCPA includes CCPA and person fields', () => {
+  const body = emailMod._buildBodyCCPA(PERSON);
+  assert.ok(body.includes('CCPA'), 'CCPA body must mention CCPA');
+  assert.ok(body.includes('Jane Doe'), 'CCPA body must include fullName');
+  assert.ok(body.includes('Austin'), 'CCPA body must include city');
+  assert.ok(body.includes('TX'), 'CCPA body must include state');
+  assert.ok(body.includes('jane@example.com'), 'CCPA body must include email');
+  assert.ok(body.includes('(512) 555-0000'), 'CCPA body must include phone');
+});
+
+test('_pickTemplate with undefined country falls back to CCPA', () => {
+  const builder = emailMod._pickTemplate(undefined);
+  const body = builder(PERSON);
+  assert.ok(body.includes('CCPA'), 'undefined country should use CCPA template');
+});
+
 // ─── Test 6: macOS + smtp → uses SMTP not Mail.app ───────────────────────────
 
 test('macOS + smtp configured → uses SMTP', async () => {

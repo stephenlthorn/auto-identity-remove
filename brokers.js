@@ -474,4 +474,12 @@ module.exports = [
     priority: 3,
   },
 
+  {
+    name: 'CalPrivacy DROP',
+    method: 'manual',
+    optOutUrl: 'https://cppa.ca.gov/data_broker_registry/',
+    notes: 'California one-stop opt-out: submits to all 4000+ registered CA data brokers. Submit once if you are a CA resident.',
+    priority: 1,
+  },
+
 ];
