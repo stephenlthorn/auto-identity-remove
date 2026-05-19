@@ -11,7 +11,7 @@ const path = require('path');
 const fs   = require('fs');
 const os   = require('os');
 
-const { STATE_PATH, RECHECK_DAYS, loadConfig, loadState, recordSuccess, setDryRun } = require('./lib/config');
+const { STATE_PATH, RECHECK_DAYS, loadConfig, loadState, recordSuccess, setDryRun, getPersonsFromConfig } = require('./lib/config');
 const { results, logResult, buildSummary, setDefunctBrokers } = require('./lib/logger');
 const { findDefunct, DEFUNCT_THRESHOLD } = require('./lib/defunct');
 const { sendText, desktopNotify, openInBrowser } = require('./lib/notify');
@@ -114,7 +114,8 @@ const { notify } = config;
 const profileDir = (config.profileDir || '~/.config/auto-identity-remove')
   .replace(/^~(?=\/|$)/, os.homedir());
 const state = loadState();
-brokerRunner.configure({ dryRun: DRY_RUN, preview: PREVIEW, person: config.person, capsolver: config.capsolver, noCapsolver: NO_CAPSOLVER });
+const persons = getPersonsFromConfig(config);
+brokerRunner.configure({ dryRun: DRY_RUN, preview: PREVIEW, person: persons[0], capsolver: config.capsolver, noCapsolver: NO_CAPSOLVER });
 
 // Detect brokers that have been consistently unreachable across recent runs.
 // Defunct brokers still run — the warning is informational so the user can
@@ -181,12 +182,6 @@ async function _mainBody() {
   console.log(`📅 ${new Date().toLocaleString()}`);
   console.log(`📋 ${brokers.length} explicit brokers + 500+ generic | re-check window: ${RECHECK_DAYS} days\n`);
 
-  // Email opt-outs (no browser needed — skipped in verify mode)
-  if (!VERIFY) {
-    console.log('── Email opt-outs ─────────────────────────────────────────');
-    await sendOptOutEmails(brokers, config);
-  }
-
   // Launch persistent browser (reuses profile / saved logins)
   fs.mkdirSync(profileDir, { recursive: true });
 
@@ -217,62 +212,78 @@ async function _mainBody() {
     }
   }
 
-  const filterOpts = {
-    only:             ONLY_ARG,
-    skip:             SKIP_ARG,
-    retryFailedFromLog,
-  };
+  for (const person of persons) {
+    if (persons.length > 1) {
+      console.log(`\n${'='.repeat(54)}`);
+      console.log(`Running for: ${person.firstName} ${person.lastName}`);
+      console.log('='.repeat(54));
+    }
 
-  const sorted = applyFilter(
-    [...brokers]
-      .filter(b => b.method !== 'email')
-      .sort((a, b) => (a.priority || 9) - (b.priority || 9)),
-    filterOpts
-  );
+    brokerRunner.configure({ dryRun: DRY_RUN, preview: PREVIEW, person, capsolver: config.capsolver, noCapsolver: NO_CAPSOLVER });
 
-  if (ONLY_ARG || SKIP_ARG || RETRY_FAILED) {
-    console.log(`🔎 Filter applied — ${sorted.length} broker(s) will run`);
-  }
+    // Email opt-outs (no browser needed — skipped in verify mode)
+    if (!VERIFY) {
+      console.log('── Email opt-outs ─────────────────────────────────────────');
+      await sendOptOutEmails(brokers, config);
+    }
 
-  console.log('\n── Explicit broker opt-outs ───────────────────────────────');
-  for (const broker of sorted) {
-    process.stdout.write(`\n[${stamp()}] ${broker.name}… `);
-    await brokerRunner.processBroker(context, broker);
-  }
+    const filterOpts = {
+      only:             ONLY_ARG,
+      skip:             SKIP_ARG,
+      retryFailedFromLog,
+    };
 
-  // Build the set of explicit broker hostnames so generic-runner can skip them
-  const explicitHosts = new Set(
-    brokers.map(b => {
-      try {
-        return new URL(b.optOutUrl || b.searchUrl || '').hostname.replace(/^www\./, '');
-      } catch(_) { return ''; }
-    }).filter(Boolean)
-  );
+    const sorted = applyFilter(
+      [...brokers]
+        .filter(b => b.method !== 'email')
+        .sort((a, b) => (a.priority || 9) - (b.priority || 9)),
+      filterOpts
+    );
 
-  // generic-runner.js returns { count, genericStats }; store stats so they
-  // appear in the summary and in the run-log JSON.
-  const genericResult = await runGenericBrokers(context, explicitHosts, state, logResult, recordSuccess, { dryRun: DRY_RUN });
-  if (genericResult && genericResult.genericStats) {
-    results.genericStats = genericResult.genericStats;
-  }
+    if (ONLY_ARG || SKIP_ARG || RETRY_FAILED) {
+      console.log(`🔎 Filter applied — ${sorted.length} broker(s) will run`);
+    }
 
-  // ── Noise / pollution mode (--pollute N) ──────────────────────────────────
-  // Submits N randomly-generated fake records to brokers tagged acceptsBogus.
-  // Off by default (POLLUTE_COUNT === 0). See README for ToS warning.
-  if (POLLUTE_COUNT > 0) {
-    const { generateBogusPerson } = require('./lib/noise');
-    const bogBrokers = brokers.filter(b => b.acceptsBogus === true);
+    console.log('\n── Explicit broker opt-outs ───────────────────────────────');
+    for (const broker of sorted) {
+      process.stdout.write(`\n[${stamp()}] ${broker.name}… `);
+      await brokerRunner.processBroker(context, broker);
+    }
 
-    if (bogBrokers.length === 0) {
-      console.log('\n⚠️  --pollute: no brokers tagged acceptsBogus: true — nothing to do.');
-    } else {
-      console.log(`\n── Noise mode — submitting ${POLLUTE_COUNT} bogus record(s) to ${bogBrokers.length} broker(s) ─`);
-      for (let i = 0; i < POLLUTE_COUNT; i++) {
-        const fakePerson = generateBogusPerson();
-        console.log(`\n   [bogus ${i + 1}/${POLLUTE_COUNT}] ${fakePerson.firstName} ${fakePerson.lastName} (${fakePerson.city}, ${fakePerson.state})`);
-        for (const broker of bogBrokers) {
-          process.stdout.write(`     ${broker.name}… `);
-          await brokerRunner.processBrokerWithPerson(context, broker, fakePerson);
+    // Build the set of explicit broker hostnames so generic-runner can skip them
+    const explicitHosts = new Set(
+      brokers.map(b => {
+        try {
+          return new URL(b.optOutUrl || b.searchUrl || '').hostname.replace(/^www\./, '');
+        } catch(_) { return ''; }
+      }).filter(Boolean)
+    );
+
+    // generic-runner.js returns { count, genericStats }; store stats so they
+    // appear in the summary and in the run-log JSON.
+    const genericResult = await runGenericBrokers(context, explicitHosts, state, logResult, recordSuccess, { dryRun: DRY_RUN });
+    if (genericResult && genericResult.genericStats) {
+      results.genericStats = genericResult.genericStats;
+    }
+
+    // ── Noise / pollution mode (--pollute N) ──────────────────────────────────
+    // Submits N randomly-generated fake records to brokers tagged acceptsBogus.
+    // Off by default (POLLUTE_COUNT === 0). See README for ToS warning.
+    if (POLLUTE_COUNT > 0) {
+      const { generateBogusPerson } = require('./lib/noise');
+      const bogBrokers = brokers.filter(b => b.acceptsBogus === true);
+
+      if (bogBrokers.length === 0) {
+        console.log('\n⚠️  --pollute: no brokers tagged acceptsBogus: true — nothing to do.');
+      } else {
+        console.log(`\n── Noise mode — submitting ${POLLUTE_COUNT} bogus record(s) to ${bogBrokers.length} broker(s) ─`);
+        for (let i = 0; i < POLLUTE_COUNT; i++) {
+          const fakePerson = generateBogusPerson();
+          console.log(`\n   [bogus ${i + 1}/${POLLUTE_COUNT}] ${fakePerson.firstName} ${fakePerson.lastName} (${fakePerson.city}, ${fakePerson.state})`);
+          for (const broker of bogBrokers) {
+            process.stdout.write(`     ${broker.name}… `);
+            await brokerRunner.processBrokerWithPerson(context, broker, fakePerson);
+          }
         }
       }
     }
@@ -290,7 +301,7 @@ async function _mainBody() {
     console.log(`\n📊 ${diff.summary}`);
 
     const auditMd = renderAuditMarkdown({
-      person: config.person,
+      person: persons[0],
       timestamp: results.runAt,
       results,
     });
