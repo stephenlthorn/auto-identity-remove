@@ -11,7 +11,7 @@ const path = require('path');
 const fs   = require('fs');
 const os   = require('os');
 
-const { STATE_PATH, RECHECK_DAYS, loadConfig, loadState, recordSuccess, setDryRun, getPersonsFromConfig } = require('./lib/config');
+const { STATE_PATH, RECHECK_DAYS, loadConfig, loadState, recordSuccess, setDryRun, getPersonsFromConfig, loadCheckpoint, clearCheckpoint } = require('./lib/config');
 const { results, logResult, buildSummary, setDefunctBrokers } = require('./lib/logger');
 const { findDefunct, DEFUNCT_THRESHOLD } = require('./lib/defunct');
 const { sendText, desktopNotify, openInBrowser } = require('./lib/notify');
@@ -38,6 +38,7 @@ const LIST_MODE    = process.argv.includes('--list');
 
 const PENDING_MODE    = process.argv.includes('--pending');
 const NO_CAPSOLVER    = process.argv.includes('--no-capsolver');
+const RESUME          = process.argv.includes('--resume');
 
 // ── --list: print all brokers + status from state.json, then exit ────────────
 if (LIST_MODE) {
@@ -233,12 +234,27 @@ async function _mainBody() {
       retryFailedFromLog,
     };
 
-    const sorted = applyFilter(
+    let sorted = applyFilter(
       [...brokers]
         .filter(b => b.method !== 'email')
         .sort((a, b) => (a.priority || 9) - (b.priority || 9)),
       filterOpts
     );
+
+    if (RESUME) {
+      const ckpt = loadCheckpoint();
+      if (ckpt) {
+        const ckptIdx = sorted.findIndex(b => b.name === ckpt);
+        if (ckptIdx > 0) {
+          console.log(`\n--resume: skipping ${ckptIdx} broker(s) before "${ckpt}"`);
+          sorted = sorted.slice(ckptIdx);
+        } else if (ckptIdx === -1) {
+          console.log(`\n--resume: checkpoint broker "${ckpt}" not found in list, running all`);
+        }
+      } else {
+        console.log('\n--resume: no checkpoint found, running all brokers');
+      }
+    }
 
     if (ONLY_ARG || SKIP_ARG || RETRY_FAILED) {
       console.log(`🔎 Filter applied — ${sorted.length} broker(s) will run`);
@@ -288,6 +304,9 @@ async function _mainBody() {
       }
     }
   }
+
+  // Clear checkpoint now that the run completed successfully
+  clearCheckpoint();
 
   await context.close().catch(() => {});
 
