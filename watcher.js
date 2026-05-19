@@ -21,6 +21,13 @@ const PREVIEW           = process.argv.includes('--preview');
 const DRY_RUN           = process.argv.includes('--dry-run') || PREVIEW; // --preview implies --dry-run
 const VERIFY            = process.argv.includes('--verify');
 const INSTALL_SCHEDULER = process.argv.includes('--install-scheduler');
+
+// --pollute N: submit N fake records to brokers tagged acceptsBogus: true
+const polluteFlagIdx = process.argv.indexOf('--pollute');
+const POLLUTE_COUNT  = polluteFlagIdx !== -1
+  ? Math.max(0, parseInt(process.argv[polluteFlagIdx + 1], 10) || 0)
+  : 0;
+
 setDryRun(DRY_RUN); // makes recordSuccess/saveState no-op-on-disk in dry-run
 
 // ── --install-scheduler: register with OS scheduler and exit ─────────────────
@@ -70,9 +77,10 @@ async function main() {
   const { runGenericBrokers } = require('./generic-runner');
 
   console.log('\n🔒 auto-identity-remove — starting run');
-  if (PREVIEW)  console.log('👀 PREVIEW — field values and target URLs will be printed before submit. No state will be saved.');
+  if (PREVIEW)       console.log('👀 PREVIEW — field values and target URLs will be printed before submit. No state will be saved.');
   else if (DRY_RUN)  console.log('🧪 DRY RUN — forms will be filled but NOT submitted. No state will be saved.');
-  if (VERIFY)   console.log('🔍 VERIFY — read-only spot-check. No forms submitted. No state saved.');
+  if (VERIFY)        console.log('🔍 VERIFY — read-only spot-check. No forms submitted. No state saved.');
+  if (POLLUTE_COUNT) console.log(`⚠️  NOISE MODE — ${POLLUTE_COUNT} bogus record(s) will be submitted to acceptsBogus brokers.`);
   console.log(`📅 ${new Date().toLocaleString()}`);
   console.log(`📋 ${brokers.length} explicit brokers + 500+ generic | re-check window: ${RECHECK_DAYS} days\n`);
 
@@ -124,6 +132,28 @@ async function main() {
   const genericResult = await runGenericBrokers(context, explicitHosts, state, logResult, recordSuccess, { dryRun: DRY_RUN });
   if (genericResult && genericResult.genericStats) {
     results.genericStats = genericResult.genericStats;
+  }
+
+  // ── Noise / pollution mode (--pollute N) ──────────────────────────────────
+  // Submits N randomly-generated fake records to brokers tagged acceptsBogus.
+  // Off by default (POLLUTE_COUNT === 0). See README for ToS warning.
+  if (POLLUTE_COUNT > 0) {
+    const { generateBogusPerson } = require('./lib/noise');
+    const bogBrokers = brokers.filter(b => b.acceptsBogus === true);
+
+    if (bogBrokers.length === 0) {
+      console.log('\n⚠️  --pollute: no brokers tagged acceptsBogus: true — nothing to do.');
+    } else {
+      console.log(`\n── Noise mode — submitting ${POLLUTE_COUNT} bogus record(s) to ${bogBrokers.length} broker(s) ─`);
+      for (let i = 0; i < POLLUTE_COUNT; i++) {
+        const fakePerson = generateBogusPerson();
+        console.log(`\n   [bogus ${i + 1}/${POLLUTE_COUNT}] ${fakePerson.firstName} ${fakePerson.lastName} (${fakePerson.city}, ${fakePerson.state})`);
+        for (const broker of bogBrokers) {
+          process.stdout.write(`     ${broker.name}… `);
+          await brokerRunner.processBrokerWithPerson(context, broker, fakePerson);
+        }
+      }
+    }
   }
 
   await context.close().catch(() => {});

@@ -322,6 +322,29 @@ A dated JSON report is saved to `logs/verify-YYYY-MM-DD.json`.
 
 ---
 
+## Experimental: noise mode
+
+> **WARNING: This feature may violate broker Terms of Service.** Submitting fabricated opt-out requests to data broker sites is ethically questionable and could expose you to legal risk. Use at your own discretion. This feature is **off by default** and is provided only as a research/experimental tool.
+
+The `--pollute N` flag submits `N` randomly-generated fake person records to data brokers that are explicitly tagged `acceptsBogus: true` in `brokers.js`. The goal (inspired by a suggestion on HN) is to flood broker databases with junk records, degrading the accuracy of their search results.
+
+```bash
+# Submit 10 bogus records to each acceptsBogus broker
+node watcher.js --pollute 10
+```
+
+Each fake record uses:
+- A random name from a small fixture list (not real people)
+- A US city/state/zip from a fixture of 50+ valid combos (not your address)
+- A 10-digit phone with an area code valid for the fake state
+- A randomised `firstname.lastname+XXXXXX@gmail.com` email
+
+Only brokers tagged `acceptsBogus: true` in `brokers.js` will receive noise submissions. Currently tagged: ThatsThem, SearchPeopleFree, PeopleSearchNow, InfoTracer, SocialCatfish. These are direct-form brokers with no SSN/DOB gate.
+
+**Regular opt-outs run first** - noise submissions happen after the normal run. The `--pollute` flag has no effect on your real opt-out submissions.
+
+---
+
 ## Maintenance
 
 ### Pruning stale / dead URLs

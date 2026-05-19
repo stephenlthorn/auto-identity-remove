@@ -183,6 +183,8 @@ module.exports = [
     submitSelector: 'button[type="submit"]',
     captchaLikely: false,
     priority: 2,
+    // No SSN/DOB gate — safe to submit arbitrary name/email for noise mode
+    acceptsBogus: true,
   },
 
   {
@@ -225,6 +227,8 @@ module.exports = [
     submitSelector: 'button[type="submit"]',
     captchaLikely: false,
     priority: 2,
+    // No SSN/DOB gate — safe to submit arbitrary name/email for noise mode
+    acceptsBogus: true,
   },
 
   {
@@ -235,6 +239,8 @@ module.exports = [
     submitSelector: 'button[type="submit"]',
     captchaLikely: false,
     priority: 2,
+    // No SSN/DOB gate — safe to submit arbitrary name/email for noise mode
+    acceptsBogus: true,
   },
 
   {
@@ -245,6 +251,8 @@ module.exports = [
     submitSelector: 'button[type="submit"]',
     captchaLikely: false,
     priority: 2,
+    // No SSN/DOB gate — safe to submit arbitrary name/email for noise mode
+    acceptsBogus: true,
   },
 
   {
