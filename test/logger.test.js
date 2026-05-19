@@ -185,6 +185,41 @@ test('DISCLAIMER constant is exported', () => {
   assert.match(logger.DISCLAIMER, /Submitted ≠ confirmed deleted/);
 });
 
+// ── WP3 (this WP): inbox checklist for pending_confirm ───────────────────────
+
+test('buildSummary includes Watch your inbox header when pendingConfirm > 0', () => {
+  logger.resetResults();
+  logger.logResult('Radaris', 'pending_confirm', 'optOutUrl:https://www.radaris.com/optout');
+  logger.logResult('InfoTracer', 'pending_confirm', 'optOutUrl:https://infotracer.com/remove');
+  const s = logger.buildSummary();
+  assert.match(s, /Watch your inbox/);
+});
+
+test('buildSummary lists one bullet per pending broker with sender domain', () => {
+  logger.resetResults();
+  logger.logResult('Radaris', 'pending_confirm', 'optOutUrl:https://www.radaris.com/optout');
+  logger.logResult('InfoTracer', 'pending_confirm', 'optOutUrl:https://infotracer.com/remove');
+  const s = logger.buildSummary();
+  assert.match(s, /• Radaris \(sender: radaris\.com\)/);
+  assert.match(s, /• InfoTracer \(sender: infotracer\.com\)/);
+});
+
+test('buildSummary inbox checklist falls back to broker name when no optOutUrl in detail', () => {
+  logger.resetResults();
+  logger.logResult('SomeDataBroker', 'pending_confirm', 'check your inbox');
+  const s = logger.buildSummary();
+  assert.match(s, /• SomeDataBroker/);
+  // Should not crash; sender fallback uses broker name
+  assert.match(s, /sender: SomeDataBroker/);
+});
+
+test('buildSummary omits Watch your inbox section when pendingConfirm is empty', () => {
+  logger.resetResults();
+  logger.logResult('A', 'success');
+  const s = logger.buildSummary();
+  assert.equal(s.includes('Watch your inbox'), false);
+});
+
 test('buildSummary shows 💀 Dead line and excludes dead from ❌ Errors count', () => {
   logger.resetResults();
   logger.logResult('ok.com', 'success');
