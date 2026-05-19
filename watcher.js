@@ -16,6 +16,7 @@ const { results, logResult, buildSummary } = require('./lib/logger');
 const { sendText, desktopNotify, openInBrowser } = require('./lib/notify');
 const brokerRunner = require('./lib/broker-runner');
 const { sendOptOutEmails } = require('./lib/email');
+const lock = require('./lib/lock');
 
 const PREVIEW           = process.argv.includes('--preview');
 const DRY_RUN           = process.argv.includes('--dry-run') || PREVIEW; // --preview implies --dry-run
@@ -72,7 +73,27 @@ fs.mkdirSync(LOG_DIR, { recursive: true });
 const logFile = path.join(LOG_DIR, `run-${new Date().toISOString().slice(0, 10)}.json`);
 const stamp = () => new Date().toLocaleTimeString();
 
+const LOCK_PATH = STATE_PATH + '.lock';
+
 async function main() {
+  // Acquire process lock to prevent concurrent runs racing on state.json
+  try {
+    lock.acquire(LOCK_PATH);
+  } catch (err) {
+    const pidMatch = err.message.match(/pid (\d+)/);
+    const pid = pidMatch ? pidMatch[1] : '?';
+    console.error(`Another instance is running, pid=${pid}. Exiting.`);
+    process.exit(1);
+  }
+
+  try {
+    return await _mainBody();
+  } finally {
+    lock.release(LOCK_PATH);
+  }
+}
+
+async function _mainBody() {
   const brokers = require('./brokers');
   const { runGenericBrokers } = require('./generic-runner');
 

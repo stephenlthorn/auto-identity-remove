@@ -94,3 +94,106 @@ test('setDryRun is exported and resets cleanly', () => {
   assert.equal(typeof cfg.resetState, 'function');
   cfg.setDryRun(false);
 });
+
+// ── Atomic write tests ────────────────────────────────────────────────────────
+
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+
+/**
+ * Helper: run a saveState with a custom STATE_PATH so we don't touch the real file.
+ * We temporarily monkey-patch the module's STATE_PATH by reloading with a temp dir.
+ */
+function withTempStateDir(fn) {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'config-test-'));
+  const origStatePath = cfg.STATE_PATH;
+  // We need to use the injected path API - override STATE_PATH temporarily
+  // Since config.js reads STATE_PATH from module scope, we patch saveState via
+  // the exported setStatePath if available, or use the test-only override.
+  // Since config.js doesn't export setStatePath yet, we'll use the module cache trick.
+  const configModule = require.cache[require.resolve('../lib/config')];
+  const tmpStatePath = path.join(tmpDir, 'state.json');
+  // Patch exports directly for these tests
+  configModule.exports._testStatePath = tmpStatePath;
+  try {
+    return fn(tmpDir, tmpStatePath);
+  } finally {
+    configModule.exports._testStatePath = undefined;
+    // Cleanup temp dir
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+}
+
+test('saveState atomic: first save writes state.json, no .bak on first write', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'config-atomic-'));
+  const statePath = path.join(tmpDir, 'state.json');
+  const bakPath = statePath + '.bak';
+  const tmpPath = statePath + '.tmp';
+
+  try {
+    cfg.setTestStatePath(statePath);
+    cfg.setDryRun(false);
+
+    cfg.saveState();
+
+    assert.ok(fs.existsSync(statePath), 'state.json should exist after first save');
+    assert.ok(!fs.existsSync(bakPath), 'no .bak on first write (nothing to back up)');
+    assert.ok(!fs.existsSync(tmpPath), '.tmp should be cleaned up (renamed away)');
+  } finally {
+    cfg.setTestStatePath(null);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('saveState atomic: second save creates .bak mirroring previous state.json', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'config-atomic-'));
+  const statePath = path.join(tmpDir, 'state.json');
+  const bakPath = statePath + '.bak';
+
+  try {
+    cfg.setTestStatePath(statePath);
+    cfg.setDryRun(false);
+
+    // First save
+    cfg.saveState();
+    const firstContents = fs.readFileSync(statePath, 'utf8');
+
+    // Mutate state slightly then save again
+    const state = cfg.loadState();
+    state.optOuts['__atomic_test__'] = { lastSuccess: new Date().toISOString(), totalRuns: 1 };
+    cfg.saveState();
+
+    assert.ok(fs.existsSync(bakPath), '.bak should exist after second save');
+    const bakContents = fs.readFileSync(bakPath, 'utf8');
+    assert.equal(bakContents, firstContents, '.bak should mirror the previous state.json');
+
+    // cleanup in-memory
+    delete state.optOuts['__atomic_test__'];
+  } finally {
+    cfg.setTestStatePath(null);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('saveState atomic: dry-run does not write any files', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'config-atomic-'));
+  const statePath = path.join(tmpDir, 'state.json');
+  const bakPath = statePath + '.bak';
+  const tmpPath = statePath + '.tmp';
+
+  try {
+    cfg.setTestStatePath(statePath);
+    cfg.setDryRun(true);
+
+    cfg.saveState();
+
+    assert.ok(!fs.existsSync(statePath), 'state.json must not be written in dry-run');
+    assert.ok(!fs.existsSync(bakPath), '.bak must not be written in dry-run');
+    assert.ok(!fs.existsSync(tmpPath), '.tmp must not be written in dry-run');
+  } finally {
+    cfg.setTestStatePath(null);
+    cfg.setDryRun(false);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
