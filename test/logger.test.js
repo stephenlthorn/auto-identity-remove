@@ -273,3 +273,75 @@ test('buildSummary works normally when genericStats is set to zeros', () => {
   assert.match(s, /0 attempted/);
   logger.results.genericStats = undefined;
 });
+
+// ── WP-S7: drift section ──────────────────────────────────────────────────────
+
+test('buildDriftSection: returns empty string when no drifted brokers', () => {
+  const state = { optOuts: { A: { history: ['success'] } } };
+  const s = logger.buildDriftSection(state);
+  assert.equal(s, '');
+});
+
+test('buildDriftSection: returns drift header when broker is drifted', () => {
+  const state = {
+    optOuts: {
+      Spokeo: { history: ['error', 'error', 'error'], lastSuccess: '2026-02-14T00:00:00.000Z' },
+    },
+  };
+  const s = logger.buildDriftSection(state);
+  assert.match(s, /Drift detected/);
+  assert.match(s, /Spokeo/);
+});
+
+test('buildDriftSection: shows last success date formatted as YYYY-MM-DD', () => {
+  const state = {
+    optOuts: {
+      Spokeo: { history: ['error', 'error', 'error'], lastSuccess: '2026-02-14T12:00:00.000Z' },
+    },
+  };
+  const s = logger.buildDriftSection(state);
+  assert.match(s, /last success: 2026-02-14/);
+});
+
+test('buildDriftSection: shows "never" when no lastSuccess', () => {
+  const state = {
+    optOuts: {
+      MyLife: { history: ['error', 'error', 'error'] },
+    },
+  };
+  const s = logger.buildDriftSection(state);
+  assert.match(s, /last success: never/);
+});
+
+test('buildDriftSection: lists multiple drifted brokers', () => {
+  const state = {
+    optOuts: {
+      Spokeo: { history: ['error', 'error', 'error'], lastSuccess: '2026-02-14T00:00:00.000Z' },
+      MyLife: { history: ['captcha_failed', 'captcha_failed', 'captcha_failed'] },
+    },
+  };
+  const s = logger.buildDriftSection(state);
+  assert.match(s, /Spokeo/);
+  assert.match(s, /MyLife/);
+});
+
+test('setStateForSummary + buildSummary includes drift section', () => {
+  logger.resetResults();
+  const state = {
+    optOuts: {
+      Spokeo: { history: ['error', 'error', 'error'] },
+    },
+  };
+  logger.setStateForSummary(state);
+  const s = logger.buildSummary();
+  assert.match(s, /Drift detected/);
+  assert.match(s, /Spokeo/);
+  logger.setStateForSummary(null); // reset
+});
+
+test('buildSummary with no state set omits drift section (backward-compat)', () => {
+  logger.resetResults();
+  logger.setStateForSummary(null);
+  const s = logger.buildSummary();
+  assert.equal(s.includes('Drift detected'), false);
+});

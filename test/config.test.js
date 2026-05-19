@@ -197,3 +197,104 @@ test('saveState atomic: dry-run does not write any files', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
+
+// ── WP-S7: history tracking ───────────────────────────────────────────────────
+
+test('recordSuccess appends "success" to history and trims to 5', () => {
+  const state = cfg.loadState();
+  const name = '__test_history_success__';
+  const prev = state.optOuts[name];
+  cfg.setDryRun(true); // avoid disk writes
+
+  state.optOuts[name] = { history: ['error', 'error', 'error', 'error', 'error'] };
+  cfg.recordSuccess(name, 'test');
+  assert.deepEqual(state.optOuts[name].history, ['error', 'error', 'error', 'error', 'success']);
+
+  cfg.setDryRun(false);
+  if (prev === undefined) delete state.optOuts[name]; else state.optOuts[name] = prev;
+});
+
+test('recordSuccess starts a fresh history array when none exists', () => {
+  const state = cfg.loadState();
+  const name = '__test_history_fresh__';
+  const prev = state.optOuts[name];
+  cfg.setDryRun(true);
+
+  delete state.optOuts[name];
+  cfg.recordSuccess(name, 'test');
+  assert.deepEqual(state.optOuts[name].history, ['success']);
+
+  cfg.setDryRun(false);
+  if (prev === undefined) delete state.optOuts[name]; else state.optOuts[name] = prev;
+});
+
+test('recordSuccess trims history to 5 entries max', () => {
+  const state = cfg.loadState();
+  const name = '__test_history_trim__';
+  const prev = state.optOuts[name];
+  cfg.setDryRun(true);
+
+  state.optOuts[name] = { history: ['success', 'success', 'success', 'success', 'success'] };
+  cfg.recordSuccess(name);
+  assert.equal(state.optOuts[name].history.length, 5);
+  assert.equal(state.optOuts[name].history[4], 'success');
+
+  cfg.setDryRun(false);
+  if (prev === undefined) delete state.optOuts[name]; else state.optOuts[name] = prev;
+});
+
+test('recordPendingConfirmation appends "pending_confirm" to history', () => {
+  const state = cfg.loadState();
+  const name = '__test_history_pending__';
+  const prev = state.optOuts[name];
+  cfg.setDryRun(true);
+
+  state.optOuts[name] = { history: ['success', 'success'] };
+  cfg.recordPendingConfirmation(name, 'check email');
+  assert.equal(state.optOuts[name].history[state.optOuts[name].history.length - 1], 'pending_confirm');
+
+  cfg.setDryRun(false);
+  if (prev === undefined) delete state.optOuts[name]; else state.optOuts[name] = prev;
+});
+
+test('recordFailure appends the given kind to history', () => {
+  const state = cfg.loadState();
+  const name = '__test_history_failure__';
+  const prev = state.optOuts[name];
+  cfg.setDryRun(true);
+
+  state.optOuts[name] = { history: ['success'] };
+  cfg.recordFailure(name, 'error');
+  assert.equal(state.optOuts[name].history[state.optOuts[name].history.length - 1], 'error');
+
+  cfg.setDryRun(false);
+  if (prev === undefined) delete state.optOuts[name]; else state.optOuts[name] = prev;
+});
+
+test('recordFailure with captcha_failed appends "captcha_failed"', () => {
+  const state = cfg.loadState();
+  const name = '__test_history_captcha__';
+  const prev = state.optOuts[name];
+  cfg.setDryRun(true);
+
+  state.optOuts[name] = {};
+  cfg.recordFailure(name, 'captcha_failed');
+  assert.equal(state.optOuts[name].history[0], 'captcha_failed');
+
+  cfg.setDryRun(false);
+  if (prev === undefined) delete state.optOuts[name]; else state.optOuts[name] = prev;
+});
+
+test('recordFailure trims history to 5 entries', () => {
+  const state = cfg.loadState();
+  const name = '__test_history_fail_trim__';
+  const prev = state.optOuts[name];
+  cfg.setDryRun(true);
+
+  state.optOuts[name] = { history: ['error', 'error', 'error', 'error', 'error'] };
+  cfg.recordFailure(name, 'error');
+  assert.equal(state.optOuts[name].history.length, 5);
+
+  cfg.setDryRun(false);
+  if (prev === undefined) delete state.optOuts[name]; else state.optOuts[name] = prev;
+});
