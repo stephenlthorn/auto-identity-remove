@@ -30,6 +30,7 @@ const DEAD_URLS_PATH  = path.join(__dirname, 'data', 'dead-urls.json');
 
 const { detectConfirmationRequired } = require('./lib/confirm');
 const { CONFIRM_RECHECK_DAYS } = require('./lib/config');
+const { withRetry } = require('./lib/retry');
 
 // Config is loaded lazily so that modules importing only the pure helpers
 // (classifyNavError, isDeadStatus, loadDeadSet) don't require config.json.
@@ -291,7 +292,7 @@ async function processGenericUrl(page, broker, state, dryRun = false, injectedDe
   }
 
   try {
-    const response = await page.goto(broker.url, { waitUntil: 'domcontentloaded', timeout: 20000 });
+    const response = await withRetry(() => page.goto(broker.url, { waitUntil: 'domcontentloaded', timeout: 20000 }));
     if (response && isDeadStatus(response.status())) {
       return { status: 'dead', detail: `HTTP ${response.status()}` };
     }
