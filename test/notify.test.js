@@ -118,6 +118,46 @@ test('_webhookPost: swallows fetch errors silently', async () => {
   global.fetch = orig;
 });
 
+// ─── sendText platform guard ─────────────────────────────────────────────────
+
+test('sendText: returns false on non-Mac without crashing', () => {
+  const { calls, restore } = stubExecSync();
+  const result = notify.sendText('hello', { textTo: '+1' }, 'linux');
+  restore();
+  assert.equal(result, false, 'should return false on linux');
+  assert.equal(calls.length, 0, 'should not call osascript on linux');
+});
+
+test('sendText: returns false on windows without crashing', () => {
+  const { calls, restore } = stubExecSync();
+  const result = notify.sendText('hello', { textTo: '+1' }, 'win32');
+  restore();
+  assert.equal(result, false, 'should return false on windows');
+  assert.equal(calls.length, 0, 'should not call osascript on windows');
+});
+
+// ─── sendWebhook (public API) ─────────────────────────────────────────────────
+
+test('sendWebhook: POSTs JSON with text field to the given URL', async () => {
+  const { calls, restore } = stubFetch();
+  await notify.sendWebhook('https://hooks.example.com/test', 'my message');
+  restore();
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, 'https://hooks.example.com/test');
+  assert.equal(calls[0].body.text, 'my message');
+});
+
+test('sendWebhook: swallows errors silently and does not throw', async () => {
+  const orig = global.fetch;
+  global.fetch = async () => { throw new Error('network error'); };
+  await assert.doesNotReject(() => notify.sendWebhook('https://bad.url', 'x'));
+  global.fetch = orig;
+});
+
+test('sendWebhook: is exported as a top-level function (not just _webhookPost)', () => {
+  assert.equal(typeof notify.sendWebhook, 'function');
+});
+
 // ─── dispatchNotify ───────────────────────────────────────────────────────────
 
 test('dispatchNotify: on macos with no webhook calls iMessage + macNotify but NOT fetch', async () => {

@@ -80,6 +80,51 @@ Some opt-out forms have reCAPTCHA. Without CapSolver, those sites go to your man
 
 ---
 
+## Running with Docker
+
+The included `Dockerfile` uses the official Playwright image, so Chromium and
+all system dependencies are pre-installed. No Mac required.
+
+```bash
+# Build the image (once)
+docker build -t auto-identity-remove .
+
+# Dry-run (no opt-out forms submitted, no network calls)
+docker run --rm \
+  -v $(pwd)/config.json:/app/config.json \
+  -v $(pwd)/state.json:/app/state.json \
+  auto-identity-remove node watcher.js --dry-run
+
+# Full run
+docker run --rm \
+  -v $(pwd)/config.json:/app/config.json \
+  -v $(pwd)/state.json:/app/state.json \
+  auto-identity-remove
+```
+
+**Persistent state:** mount `state.json` so completed opt-outs are remembered
+between container runs. If the file does not exist yet, create an empty one
+first: `echo '{}' > state.json`.
+
+### Webhook notifications (any OS)
+
+When running headless or in Docker you won't have iMessage or a desktop — use
+a webhook instead. Set `notify.webhook` in `config.json` to any ntfy.sh,
+Slack incoming-webhook, or Discord webhook URL:
+
+```json
+"notify": {
+  "textTo": "",
+  "webhook": "https://ntfy.sh/my-private-channel"
+}
+```
+
+The tool POSTs `{"text": "<summary>"}` after every run. Works on macOS, Linux,
+and Windows — the webhook fires in addition to (not instead of) any platform
+notification that is available.
+
+---
+
 ## Files
 
 ```
