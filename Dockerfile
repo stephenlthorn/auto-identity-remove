@@ -11,7 +11,7 @@
 # Tip: pass --dry-run to preview without submitting anything:
 #   docker run --rm ... auto-identity-remove node watcher.js --dry-run
 
-FROM mcr.microsoft.com/playwright:v1.44.0-focal
+FROM mcr.microsoft.com/playwright:v1.52.0-noble
 
 WORKDIR /app
 
@@ -20,6 +20,9 @@ COPY package.json package-lock.json ./
 
 # Install Node dependencies (Playwright browsers already in base image)
 RUN npm ci --omit=dev
+
+# Playwright browsers are bundled in the base image at /ms-playwright
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 # Copy application source
 COPY . .

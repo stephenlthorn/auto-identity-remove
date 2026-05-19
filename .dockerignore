@@ -1,0 +1,10 @@
+node_modules
+logs
+*.log
+state.json
+.git
+.github
+config.json
+*.md
+test/
+docs/

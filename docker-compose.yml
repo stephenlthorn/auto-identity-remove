@@ -1,0 +1,12 @@
+version: "3.9"
+services:
+  watcher:
+    build: .
+    volumes:
+      - ./config.json:/app/config.json:ro
+      - ./logs:/app/logs
+      - ./state.json:/app/state.json
+    environment:
+      - NODE_ENV=production
+    # Run once on `docker compose run watcher`
+    # For scheduled runs, use cron on the host or a separate scheduler container
