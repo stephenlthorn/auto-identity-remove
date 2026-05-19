@@ -138,6 +138,7 @@ test('broker-runner exports processBrokerWithPerson function', () => {
         shouldSkip: () => null,
         recordSuccess: () => {},
         recordPendingConfirmation: () => {},
+        saveCheckpoint: () => {},
       };
       if (request === './logger') return { logResult: () => {} };
       if (request === './forms')   return { fillForm: async () => {}, findListingUrl: async () => null };

@@ -24,6 +24,7 @@ const configMock = {
   recordSuccess: () => {},
   recordPendingConfirmation: () => {},
   loadState: () => ({ optOuts: {} }),
+  saveCheckpoint: () => {},
 };
 
 // Patch logger before require

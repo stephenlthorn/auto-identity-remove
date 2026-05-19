@@ -28,6 +28,7 @@ const configMock = {
   recordSuccess: (name, detail) => recorded.success.push({ name, detail }),
   recordPendingConfirmation: (name, detail) => recorded.pending.push({ name, detail }),
   loadState: () => ({ optOuts: {} }),
+  saveCheckpoint: () => {},
 };
 
 function patchedLoad(request, parent, isMain) {
