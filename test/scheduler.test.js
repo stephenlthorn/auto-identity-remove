@@ -50,6 +50,7 @@ const {
   pickScheduler,
   buildPlist,
   buildSystemdUnits,
+  buildWindowsSchtasksCmd,
 } = require('../lib/scheduler');
 
 // ─── buildPlist ──────────────────────────────────────────────────────────────
@@ -334,4 +335,124 @@ test('Windows branch returns method=manual when schtasks throws', () => {
 
   assert.equal(result.method, 'manual', 'falls back to manual on schtasks error');
   assert.match(result.detail, /manually/, 'detail explains manual step');
+});
+
+// ─── buildWindowsSchtasksCmd (pure helper) ───────────────────────────────────
+
+test('buildWindowsSchtasksCmd returns a string containing schtasks /Create', () => {
+  const cmd = buildWindowsSchtasksCmd('/path/to/node.exe', '/path/to/watcher.js');
+  assert.equal(typeof cmd, 'string', 'returns a string');
+  assert.match(cmd, /schtasks \/Create/, 'starts with schtasks /Create');
+});
+
+test('buildWindowsSchtasksCmd includes /SC MONTHLY /D 1', () => {
+  const cmd = buildWindowsSchtasksCmd('node.exe', 'watcher.js');
+  assert.match(cmd, /\/SC MONTHLY/, 'monthly schedule');
+  assert.match(cmd, /\/D 1/, 'day=1');
+});
+
+test('buildWindowsSchtasksCmd default time is /ST 09:00', () => {
+  const cmd = buildWindowsSchtasksCmd('node.exe', 'watcher.js');
+  assert.match(cmd, /\/ST 09:00/, 'default time 09:00');
+});
+
+test('buildWindowsSchtasksCmd honours custom {hour, minute}', () => {
+  const cmd = buildWindowsSchtasksCmd('node.exe', 'watcher.js', { hour: 3, minute: 30 });
+  assert.match(cmd, /\/ST 03:30/, 'custom time 03:30');
+});
+
+test('buildWindowsSchtasksCmd includes /TN "auto-identity-remove"', () => {
+  const cmd = buildWindowsSchtasksCmd('node.exe', 'watcher.js');
+  assert.match(cmd, /\/TN "auto-identity-remove"/, 'task name quoted');
+});
+
+test('buildWindowsSchtasksCmd wraps paths with spaces in double quotes', () => {
+  const cmd = buildWindowsSchtasksCmd(
+    'C:\\Program Files\\nodejs\\node.exe',
+    'C:\\My Documents\\watcher.js'
+  );
+  assert.match(cmd, /"C:\\Program Files\\nodejs\\node\.exe"/, 'node path quoted');
+  assert.match(cmd, /"C:\\My Documents\\watcher\.js"/, 'watcher path quoted');
+});
+
+test('buildWindowsSchtasksCmd includes /F flag to overwrite existing task', () => {
+  const cmd = buildWindowsSchtasksCmd('node.exe', 'watcher.js');
+  assert.match(cmd, /\/F/, '/F flag present');
+});
+
+// ─── --install-scheduler flag routing ────────────────────────────────────────
+
+test('installScheduleForPlatform routes macos to launchd', () => {
+  const { installScheduleForPlatform } = require('../lib/scheduler');
+  const childProcess = require('child_process');
+  const realExecSync = childProcess.execSync;
+  const realHomedir = os.homedir;
+
+  const executed = [];
+  childProcess.execSync = (cmd) => { executed.push(cmd); return ''; };
+  os.homedir = () => tmpDir;
+
+  let result;
+  try {
+    result = installScheduleForPlatform({
+      platform: 'macos',
+      scriptPath: path.join(tmpDir, 'run.sh'),
+      logDir: path.join(tmpDir, 'logs'),
+    });
+  } finally {
+    childProcess.execSync = realExecSync;
+    os.homedir = realHomedir;
+  }
+
+  assert.equal(result.method, 'launchd', 'macos routes to launchd');
+});
+
+test('installScheduleForPlatform routes linux to systemd or crontab', () => {
+  const { installScheduleForPlatform } = require('../lib/scheduler');
+  const childProcess = require('child_process');
+  const realExecSync = childProcess.execSync;
+  const realHomedir = os.homedir;
+
+  const executed = [];
+  childProcess.execSync = (cmd) => { executed.push(cmd); return ''; };
+  os.homedir = () => tmpDir;
+
+  let result;
+  try {
+    result = installScheduleForPlatform({
+      platform: 'linux',
+      scriptPath: path.join(tmpDir, 'run.sh'),
+      logDir: path.join(tmpDir, 'logs'),
+    });
+  } finally {
+    childProcess.execSync = realExecSync;
+    os.homedir = realHomedir;
+  }
+
+  assert.ok(
+    result.method === 'systemd' || result.method === 'crontab',
+    `linux routes to systemd or crontab, got: ${result.method}`
+  );
+});
+
+test('installScheduleForPlatform routes windows to schtasks', () => {
+  const { installScheduleForPlatform } = require('../lib/scheduler');
+  const childProcess = require('child_process');
+  const realExecSync = childProcess.execSync;
+
+  const executed = [];
+  childProcess.execSync = (cmd) => { executed.push(cmd); return ''; };
+
+  let result;
+  try {
+    result = installScheduleForPlatform({
+      platform: 'windows',
+      scriptPath: path.join(tmpDir, 'run.sh'),
+      logDir: path.join(tmpDir, 'logs'),
+    });
+  } finally {
+    childProcess.execSync = realExecSync;
+  }
+
+  assert.equal(result.method, 'schtasks', 'windows routes to schtasks');
 });

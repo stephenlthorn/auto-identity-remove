@@ -17,9 +17,24 @@ const { sendText, desktopNotify, openInBrowser } = require('./lib/notify');
 const brokerRunner = require('./lib/broker-runner');
 const { sendOptOutEmails } = require('./lib/email');
 
-const DRY_RUN = process.argv.includes('--dry-run');
-const VERIFY  = process.argv.includes('--verify');
+const DRY_RUN          = process.argv.includes('--dry-run');
+const VERIFY           = process.argv.includes('--verify');
+const INSTALL_SCHEDULER = process.argv.includes('--install-scheduler');
 setDryRun(DRY_RUN); // makes recordSuccess/saveState no-op-on-disk in dry-run
+
+// ── --install-scheduler: register with OS scheduler and exit ─────────────────
+if (INSTALL_SCHEDULER) {
+  const { installScheduleForPlatform } = require('./lib/scheduler');
+  const { getPlatform } = require('./lib/platform');
+  const scriptPath = path.join(__dirname, 'run.sh');
+  const logDir     = path.join(__dirname, 'logs');
+  const platform   = getPlatform();
+  const result     = installScheduleForPlatform({ platform, scriptPath, logDir });
+  console.log(`\nScheduler installed via ${result.method}:`);
+  console.log(`  ${result.detail}\n`);
+  process.exit(0);
+}
+
 const config = loadConfig();
 const { notify } = config;
 const profileDir = (config.profileDir || '~/.config/auto-identity-remove')
