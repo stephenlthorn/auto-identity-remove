@@ -12,7 +12,8 @@ const fs   = require('fs');
 const os   = require('os');
 
 const { STATE_PATH, RECHECK_DAYS, loadConfig, loadState, recordSuccess, setDryRun } = require('./lib/config');
-const { results, logResult, buildSummary } = require('./lib/logger');
+const { results, logResult, buildSummary, setDefunctBrokers } = require('./lib/logger');
+const { findDefunct, DEFUNCT_THRESHOLD } = require('./lib/defunct');
 const { sendText, desktopNotify, openInBrowser } = require('./lib/notify');
 const brokerRunner = require('./lib/broker-runner');
 const { sendOptOutEmails } = require('./lib/email');
@@ -112,6 +113,17 @@ const profileDir = (config.profileDir || '~/.config/auto-identity-remove')
   .replace(/^~(?=\/|$)/, os.homedir());
 const state = loadState();
 brokerRunner.configure({ dryRun: DRY_RUN, preview: PREVIEW, person: config.person, capsolver: config.capsolver });
+
+// Detect brokers that have been consistently unreachable across recent runs.
+// Defunct brokers still run — the warning is informational so the user can
+// prune stale entries from brokers.js if the site is truly gone.
+const defunctNames = findDefunct(state.optOuts || {});
+if (defunctNames.length > 0) {
+  setDefunctBrokers(defunctNames);
+  console.log(`\n⚰️  ${defunctNames.length} broker(s) flagged as defunct (${DEFUNCT_THRESHOLD}+ consecutive unreachable errors):`);
+  console.log(`   ${defunctNames.join(', ')}`);
+  console.log('   These will still run. Remove from brokers.js if site is gone.\n');
+}
 
 // Try local node_modules first, then fall back to global openclaw install
 let chromium;
