@@ -119,9 +119,12 @@ async function main() {
     }).filter(Boolean)
   );
 
-  // generic-runner.js signature left as-is (non-trivial to change cleanly);
-  // watcher passes the imported logResult/recordSuccess into it.
-  await runGenericBrokers(context, explicitHosts, state, logResult, recordSuccess, { dryRun: DRY_RUN });
+  // generic-runner.js returns { count, genericStats }; store stats so they
+  // appear in the summary and in the run-log JSON.
+  const genericResult = await runGenericBrokers(context, explicitHosts, state, logResult, recordSuccess, { dryRun: DRY_RUN });
+  if (genericResult && genericResult.genericStats) {
+    results.genericStats = genericResult.genericStats;
+  }
 
   await context.close().catch(() => {});
 

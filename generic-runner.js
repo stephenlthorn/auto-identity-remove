@@ -394,18 +394,71 @@ function loadGenericBrokers(explicitBrokerHosts) {
 
 // ─── Main export ──────────────────────────────────────────────────────────────
 
+/**
+ * Map a processGenericUrl status to a genericStats outcome bucket key.
+ *
+ * Outcome buckets (WP5):
+ *   submitted        — form found and submitted (success / pending_confirm)
+ *   no_form_found    — page loaded but nothing automatable (manual / dead)
+ *   error            — exception during processing
+ *   dry-run-skipped  — submit deferred because dryRun=true
+ *   skipped-recent   — site visited recently, skipped by recheck window
+ */
+function classifyOutcome(status, detail) {
+  switch (status) {
+    case 'success':
+    case 'pending_confirm':
+      return 'submitted';
+    case 'manual':
+    case 'dead':
+      return 'no_form_found';
+    case 'error':
+      return 'error';
+    case 'skipped':
+      // Distinguish dry-run skips from recently-visited skips via detail text
+      if (detail && detail.includes('dry-run')) return 'dry-run-skipped';
+      return 'skipped-recent';
+    default:
+      return 'error';
+  }
+}
+
 async function runGenericBrokers(context, explicitBrokerHosts, state, logResult, recordSuccess, opts = {}) {
   const dryRun = !!opts.dryRun;
-  const brokers = loadGenericBrokers(explicitBrokerHosts);
+  // Allow tests to inject a custom broker list and/or process function.
+  const brokers = opts.injectedBrokers !== undefined
+    ? opts.injectedBrokers
+    : loadGenericBrokers(explicitBrokerHosts);
+  const processFn = opts.injectedProcessFn || processGenericUrl;
+
   console.log(`\n── Generic brokers (${brokers.length} from Markup CSV + BADBOOL)${dryRun ? ' [DRY RUN]' : ''} ──`);
 
   const page = await context.newPage();
 
+  const stats = {
+    attempted: 0,
+    submitted: 0,
+    no_form_found: 0,
+    error: 0,
+    'dry-run-skipped': 0,
+    'skipped-recent': 0,
+    dead: 0,
+  };
+
   for (const broker of brokers) {
     process.stdout.write(`\n  [${broker.name.slice(0,40)}]… `);
-    const result = await processGenericUrl(page, broker, state, dryRun);
+    const result = await processFn(page, broker, state, dryRun);
 
     logResult(broker.name, result.status, result.detail || '');
+
+    stats.attempted++;
+    const bucket = classifyOutcome(result.status, result.detail || '');
+    // dead is stored separately; re-map no_form_found subdivisions
+    if (result.status === 'dead') {
+      stats.dead++;
+    } else {
+      stats[bucket] = (stats[bucket] || 0) + 1;
+    }
 
     if (result.status === 'success') {
       recordSuccess(broker.name, result.detail || '');
@@ -418,7 +471,19 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
   }
 
   await page.close().catch(() => {});
-  return brokers.length;
+
+  return {
+    count: brokers.length,
+    genericStats: {
+      attempted: stats.attempted,
+      submitted: stats.submitted,
+      no_form_found: stats.no_form_found,
+      error: stats.error,
+      'dry-run-skipped': stats['dry-run-skipped'],
+      'skipped-recent': stats['skipped-recent'],
+      dead: stats.dead,
+    },
+  };
 }
 
-module.exports = { runGenericBrokers, loadGenericBrokers, classifyNavError, isDeadStatus, loadDeadSet, DEAD_URLS_PATH };
+module.exports = { runGenericBrokers, loadGenericBrokers, classifyNavError, classifyOutcome, isDeadStatus, loadDeadSet, DEAD_URLS_PATH };

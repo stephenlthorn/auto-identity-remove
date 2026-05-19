@@ -235,3 +235,41 @@ test('buildSummary shows 💀 Dead line and excludes dead from ❌ Errors count'
   // Sanity-check success
   assert.match(s, /✅ Submitted \(form accepted\):\s+1/);
 });
+
+// ── WP5: genericStats in summary ─────────────────────────────────────────────
+
+test('buildSummary omits generic stats line when genericStats is not set', () => {
+  logger.resetResults();
+  logger.logResult('A', 'success');
+  const s = logger.buildSummary();
+  assert.equal(s.includes('Generic runner'), false, 'no generic stats line without genericStats');
+});
+
+test('buildSummary includes generic stats line when genericStats is set', () => {
+  logger.resetResults();
+  logger.results.genericStats = { attempted: 487, submitted: 312, no_form_found: 142, error: 33 };
+  logger.logResult('A', 'success');
+  const s = logger.buildSummary();
+  assert.match(s, /Generic runner:/);
+  assert.match(s, /487 attempted/);
+  assert.match(s, /312 submitted/);
+  assert.match(s, /142 no-form-found/);
+  assert.match(s, /33 error/);
+  logger.results.genericStats = undefined;
+});
+
+test('resetResults clears genericStats', () => {
+  logger.resetResults();
+  logger.results.genericStats = { attempted: 5, submitted: 3, no_form_found: 1, error: 1 };
+  logger.resetResults();
+  assert.equal(logger.results.genericStats, undefined, 'genericStats cleared after reset');
+});
+
+test('buildSummary works normally when genericStats is set to zeros', () => {
+  logger.resetResults();
+  logger.results.genericStats = { attempted: 0, submitted: 0, no_form_found: 0, error: 0 };
+  const s = logger.buildSummary();
+  assert.match(s, /Generic runner:/);
+  assert.match(s, /0 attempted/);
+  logger.results.genericStats = undefined;
+});
