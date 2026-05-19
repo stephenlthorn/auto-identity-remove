@@ -71,7 +71,7 @@ node setup.js
 Some opt-out forms have reCAPTCHA. Without CapSolver, those sites go to your manual list instead of being handled automatically.
 
 1. Sign up at [capsolver.com](https://capsolver.com) - free, pay-as-you-go
-2. Add $1–2 of credits (enough for months of use at ~$0.001/solve)
+2. Add $1-2 of credits (enough for months of use at ~$0.001/solve)
 3. Paste your API key when `setup.js` asks, or add it to `config.json`:
 
 ```json
@@ -79,6 +79,10 @@ Some opt-out forms have reCAPTCHA. Without CapSolver, those sites go to your man
   "apiKey": "CAP-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 }
 ```
+
+> **CapSolver is optional.** Without it, CAPTCHA-protected sites are flagged as
+> manual and opened in your browser for completion. Pass `--no-capsolver` to skip
+> them entirely rather than opening the browser.
 
 ---
 

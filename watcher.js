@@ -36,7 +36,8 @@ const SKIP_ARG  = skipIdx !== -1 ? (process.argv[skipIdx + 1] || '') : null;
 const RETRY_FAILED = process.argv.includes('--retry-failed');
 const LIST_MODE    = process.argv.includes('--list');
 
-const PENDING_MODE = process.argv.includes('--pending');
+const PENDING_MODE    = process.argv.includes('--pending');
+const NO_CAPSOLVER    = process.argv.includes('--no-capsolver');
 
 // ── --list: print all brokers + status from state.json, then exit ────────────
 if (LIST_MODE) {
@@ -112,7 +113,7 @@ const { notify } = config;
 const profileDir = (config.profileDir || '~/.config/auto-identity-remove')
   .replace(/^~(?=\/|$)/, os.homedir());
 const state = loadState();
-brokerRunner.configure({ dryRun: DRY_RUN, preview: PREVIEW, person: config.person, capsolver: config.capsolver });
+brokerRunner.configure({ dryRun: DRY_RUN, preview: PREVIEW, person: config.person, capsolver: config.capsolver, noCapsolver: NO_CAPSOLVER });
 
 // Detect brokers that have been consistently unreachable across recent runs.
 // Defunct brokers still run — the warning is informational so the user can
