@@ -26,6 +26,7 @@ const { buildStealthScript } = require('./lib/stealth');
 const PREVIEW           = process.argv.includes('--preview');
 const DRY_RUN           = process.argv.includes('--dry-run') || PREVIEW; // --preview implies --dry-run
 const VERIFY            = process.argv.includes('--verify');
+const SERP_SCAN         = process.argv.includes('--serp-scan');
 const INSTALL_SCHEDULER = process.argv.includes('--install-scheduler');
 const DOCTOR            = process.argv[2] === 'doctor' || process.argv.includes('--doctor');
 
@@ -40,6 +41,17 @@ const LIST_MODE    = process.argv.includes('--list');
 const PENDING_MODE    = process.argv.includes('--pending');
 const NO_CAPSOLVER    = process.argv.includes('--no-capsolver');
 const RESUME          = process.argv.includes('--resume');
+const SNAPSHOT        = process.argv.includes('--snapshot');
+
+// ── --confirm-emails [dir]: auto-click confirmation links in .eml files ───────
+const confirmEmailsIdx = process.argv.indexOf('--confirm-emails');
+const CONFIRM_EMAILS = confirmEmailsIdx !== -1;
+// Optional dir argument: next argv element if it doesn't start with '--'
+const confirmEmailsDir = (() => {
+  if (!CONFIRM_EMAILS) return './inbox/confirms';
+  const next = process.argv[confirmEmailsIdx + 1];
+  return (next && !next.startsWith('--')) ? next : './inbox/confirms';
+})();
 
 // ── --list: print all brokers + status from state.json, then exit ────────────
 if (LIST_MODE) {
@@ -79,6 +91,58 @@ if (PENDING_MODE) {
   process.exit(0);
 }
 
+// ── --confirm-emails [dir]: process .eml files and auto-click confirm links ───
+if (CONFIRM_EMAILS) {
+  const brokers = require('./brokers');
+  const { processConfirmationEmails } = require('./lib/imap-confirm');
+
+  // Launch a minimal headless browser context just for navigating confirm links
+  let chromiumForConfirm;
+  try {
+    ({ chromium: chromiumForConfirm } = require('playwright'));
+  } catch (_) {
+    const fallback = path.join(os.homedir(), '.openclaw', 'plugins', 'node_modules', 'playwright');
+    ({ chromium: chromiumForConfirm } = require(fallback));
+  }
+
+  const profileDirForConfirm = (loadConfig().profileDir || '~/.config/auto-identity-remove')
+    .replace(/^~(?=\/|$)/, os.homedir());
+
+  (async () => {
+    console.log(`\nProcessing confirmation emails from: ${confirmEmailsDir}`);
+    const context = await chromiumForConfirm.launchPersistentContext(profileDirForConfirm, {
+      headless: true,
+      viewport: { width: 1280, height: 900 },
+    });
+
+    try {
+      const result = await processConfirmationEmails(context, brokers, {
+        dir: confirmEmailsDir,
+        dryRun: DRY_RUN,
+      });
+
+      for (const entry of result.processed) {
+        console.log(`  confirmed: ${entry.broker.name} -> ${entry.url}`);
+      }
+      for (const entry of result.unmatched) {
+        console.log(`  unmatched (${entry.reason}): ${entry.file}`);
+      }
+      for (const entry of result.failed) {
+        console.log(`  failed: ${entry.broker.name} -> ${entry.error}`);
+      }
+
+      const total = result.processed.length + result.unmatched.length + result.failed.length;
+      console.log(`\nDone: ${result.processed.length} confirmed, ${result.unmatched.length} unmatched, ${result.failed.length} failed (${total} .eml files)\n`);
+    } finally {
+      await context.close().catch(() => {});
+    }
+    process.exit(0);
+  })().catch(err => {
+    console.error('confirm-emails error:', err.message);
+    process.exit(1);
+  });
+} else {
+
 // ── --doctor: self-diagnose and exit ─────────────────────────────────────────
 if (DOCTOR) {
   const { runDoctor } = require('./lib/doctor');
@@ -117,7 +181,7 @@ const profileDir = (config.profileDir || '~/.config/auto-identity-remove')
   .replace(/^~(?=\/|$)/, os.homedir());
 const state = loadState();
 const persons = getPersonsFromConfig(config);
-brokerRunner.configure({ dryRun: DRY_RUN, preview: PREVIEW, person: persons[0], capsolver: config.capsolver, noCapsolver: NO_CAPSOLVER });
+brokerRunner.configure({ dryRun: DRY_RUN, preview: PREVIEW, person: persons[0], capsolver: config.capsolver, noCapsolver: NO_CAPSOLVER, snapshot: SNAPSHOT });
 
 // Detect brokers that have been consistently unreachable across recent runs.
 // Defunct brokers still run — the warning is informational so the user can
@@ -206,11 +270,68 @@ async function _mainBody() {
   });
   await context.addInitScript(buildStealthScript());
 
-  // ── Verify mode: read-only spot-check, no opt-out submission ─────────────
+  // ── Verify mode: T+7 post-submit verification loop ───────────────────────
   if (VERIFY) {
-    const { runVerify } = require('./lib/verifier');
-    await runVerify(context, brokers, state);
+    const { runVerify } = require('./lib/verify-loop');
+    const result = await runVerify(context, brokers, persons, { state });
     await context.close().catch(() => {});
+
+    // Print summary
+    console.log('\n' + '='.repeat(54));
+    console.log('Verification results — ' + new Date().toLocaleString());
+    console.log('='.repeat(54));
+    console.log(`  verified_clear : ${result.verified_clear.length}`);
+    console.log(`  still_listed   : ${result.still_listed.length}`);
+    console.log(`  unverifiable   : ${result.unverifiable.length}`);
+    console.log(`  skipped        : ${result.skipped.length}`);
+    if (result.still_listed.length > 0) {
+      console.log('\nStill listed (opt-out may have failed or data was re-added):');
+      for (const e of result.still_listed) {
+        const name = e.person ? `${e.person.firstName} ${e.person.lastName}` : '';
+        console.log(`  - ${e.broker}${name ? ` (${name})` : ''}`);
+      }
+    }
+    console.log('='.repeat(54) + '\n');
+    return;
+  }
+
+  // ── SERP scan mode: search-engine broker visibility audit ────────────────
+  if (SERP_SCAN) {
+    const { runSerpScan } = require('./lib/serp-scan');
+    console.log('\n🔎 SERP scan — checking broker visibility in search engines');
+    console.log('   DDG first, then Bing, then Google (may be blocked).\n');
+    const summary = await runSerpScan(context, persons, brokers);
+    await context.close().catch(() => {});
+
+    const pad = (s, n) => String(s).padEnd(n);
+    console.log('\n' + '='.repeat(62));
+    console.log('SERP Scan Results — ' + new Date().toLocaleString());
+    console.log('='.repeat(62));
+
+    if (summary.blocked.length > 0) {
+      console.log(`\n  Blocked engines (bot-detection triggered): ${summary.blocked.join(', ')}`);
+    }
+
+    console.log(`\n  Brokers appearing in search results: ${summary.total_brokers_appearing}`);
+
+    if (summary.total_brokers_appearing > 0) {
+      console.log('');
+      console.log(
+        '  ' + pad('Broker', 32) + pad('DDG', 8) + pad('Bing', 8) + 'Google'
+      );
+      console.log('  ' + '-'.repeat(56));
+      for (const { broker, ranks } of summary.results) {
+        const r = n => (n === null ? '-' : String(n));
+        console.log(
+          '  ' + pad(broker, 32) + pad(r(ranks.ddg), 8) + pad(r(ranks.bing), 8) + r(ranks.google)
+        );
+      }
+    } else {
+      console.log('\n  No broker domains found in the top search results.');
+      console.log('  Your opt-outs appear to be effective at the SERP level.');
+    }
+
+    console.log('\n' + '='.repeat(62) + '\n');
     return;
   }
 
@@ -233,7 +354,7 @@ async function _mainBody() {
       console.log('='.repeat(54));
     }
 
-    brokerRunner.configure({ dryRun: DRY_RUN, preview: PREVIEW, person, capsolver: config.capsolver, noCapsolver: NO_CAPSOLVER });
+    brokerRunner.configure({ dryRun: DRY_RUN, preview: PREVIEW, person, capsolver: config.capsolver, noCapsolver: NO_CAPSOLVER, snapshot: SNAPSHOT });
 
     // Email opt-outs (no browser needed — skipped in verify mode)
     if (!VERIFY) {
@@ -372,3 +493,5 @@ main().catch(err => {
 });
 
 } // end else (not DOCTOR mode)
+
+} // end else (not --confirm-emails mode)
