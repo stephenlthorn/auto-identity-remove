@@ -1,5 +1,18 @@
 # Broker Status
 
+> **Reality check:** Every broker entry here is labeled `untested` until manually verified against the live site. The selectors compile and the test suite verifies their internal structure, but no end-to-end verification has been performed in the current run window. Many of these sites change their DOM frequently - selectors decay.
+>
+> **What "untested" means:** the broker entry is structurally valid but has not been hand-verified against the live site recently. The opt-out attempt will be made but may silently fail if the site has changed its form.
+>
+> **Brokers known to be dead or moved as of late 2025:**
+> - **NationalPublicData**: defunct (Aug 2024 SSN breach + Oct 2024 bankruptcy). Listing kept for historical reference; opt-out flow does not work.
+> - **Clearbit**: acquired by HubSpot (Nov 2023). Opt-out moved to hubspot.com/data-privacy/data-rights-form.
+> - **Acxiom**: live but requires multi-step identity verification at acxiom.com/about-us/privacy/. Single-form POST will fail.
+> - **LexisNexis Risk Solutions**: requires a fillable PDF mailed/faxed + a separate portal at consumer.risk.lexisnexis.com. Single-form POST will fail.
+> - **ZoomInfo**: opt-out is at privacy.zoominfo.com/profile/edit-or-delete behind email verification.
+>
+> If you encounter a broker that has changed its form, please file a GitHub issue with the broker name and the new form layout.
+
 **Last updated:** auto-generated table - re-run `node scripts/generate-status.js` after editing `brokers.js`.
 
 ## How to read this
@@ -39,13 +52,13 @@
 | PeopleSearchNow | direct-form | no | untested | no |
 | InfoTracer | direct-form | no | untested | no |
 | SocialCatfish | direct-form | no | untested | no |
-| NationalPublicData | direct-form | no | untested | no |
+| NationalPublicData | direct-form | no | defunct | no |
 | ClustrMaps | direct-form | no | untested | no |
 | PrivateRecords | direct-form | no | untested | no |
-| Acxiom | direct-form | no | untested | no |
-| LexisNexis | direct-form | no | untested | no |
-| ZoomInfo | direct-form | no | untested | no |
-| Clearbit | direct-form | no | untested | no |
+| Acxiom | direct-form | no | defunct | no |
+| LexisNexis | direct-form | no | defunct | no |
+| ZoomInfo | direct-form | no | defunct | no |
+| Clearbit | direct-form | no | defunct | no |
 | PeekYou | direct-form | no | untested | no |
 | Addresses.com | direct-form | no | untested | yes |
 | AnyWho | direct-form | no | untested | yes |
