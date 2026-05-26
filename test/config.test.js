@@ -125,7 +125,7 @@ function withTempStateDir(fn) {
   }
 }
 
-test('saveState atomic: first save writes state.json, no .bak on first write', () => {
+test('saveState atomic: first save writes state.json and .bak copy', () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'config-atomic-'));
   const statePath = path.join(tmpDir, 'state.json');
   const bakPath = statePath + '.bak';
@@ -138,7 +138,8 @@ test('saveState atomic: first save writes state.json, no .bak on first write', (
     cfg.saveState();
 
     assert.ok(fs.existsSync(statePath), 'state.json should exist after first save');
-    assert.ok(!fs.existsSync(bakPath), 'no .bak on first write (nothing to back up)');
+    // .bak is created as a copy of the new state immediately after each save
+    assert.ok(fs.existsSync(bakPath), '.bak should exist after first save (copy of current state)');
     assert.ok(!fs.existsSync(tmpPath), '.tmp should be cleaned up (renamed away)');
   } finally {
     cfg.setTestStatePath(null);
@@ -146,7 +147,7 @@ test('saveState atomic: first save writes state.json, no .bak on first write', (
   }
 });
 
-test('saveState atomic: second save creates .bak mirroring previous state.json', () => {
+test('saveState atomic: second save updates .bak to mirror current state.json', () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'config-atomic-'));
   const statePath = path.join(tmpDir, 'state.json');
   const bakPath = statePath + '.bak';
@@ -157,16 +158,17 @@ test('saveState atomic: second save creates .bak mirroring previous state.json',
 
     // First save
     cfg.saveState();
-    const firstContents = fs.readFileSync(statePath, 'utf8');
 
     // Mutate state slightly then save again
     const state = cfg.loadState();
     state.optOuts['__atomic_test__'] = { lastSuccess: new Date().toISOString(), totalRuns: 1 };
     cfg.saveState();
+    const secondContents = fs.readFileSync(statePath, 'utf8');
 
     assert.ok(fs.existsSync(bakPath), '.bak should exist after second save');
     const bakContents = fs.readFileSync(bakPath, 'utf8');
-    assert.equal(bakContents, firstContents, '.bak should mirror the previous state.json');
+    // bak is a copy of the CURRENT state.json (made right after the atomic rename)
+    assert.equal(bakContents, secondContents, '.bak should mirror the current state.json');
 
     // cleanup in-memory
     delete state.optOuts['__atomic_test__'];
