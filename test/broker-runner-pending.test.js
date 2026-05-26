@@ -18,6 +18,8 @@ const originalLoad = Module._load.bind(Module);
 const logged = [];
 const recorded = { success: [], pending: [] };
 let confirmReturn = { pending: false, snippet: '' };
+// Controllable classify outcome - default 'success' to preserve the test's original intent
+let classifyReturn = { outcome: 'success', snippet: 'Your request was received.' };
 
 const configMock = {
   RECHECK_DAYS: 90,
@@ -36,10 +38,14 @@ function patchedLoad(request, parent, isMain) {
   if (request === './config') return configMock;
   if (request === './logger') return {
     logResult: (name, status, detail) => logged.push({ name, status, detail }),
+    STATUS_BUCKET: {},
   };
   if (request === './forms') return { fillForm: async () => {}, findListingUrl: async () => null };
   if (request === './captcha') return { detectAndSolveCaptcha: async () => true };
   if (request === './confirm') return { detectConfirmationRequired: async () => confirmReturn };
+  if (request === './success') return { classifyPostSubmit: () => classifyReturn };
+  if (request === './retry') return { withRetry: fn => fn() };
+  if (request === './timing') return { jitterSleep: async () => {} };
   return originalLoad(request, parent, isMain);
 }
 
@@ -49,11 +55,12 @@ delete require.cache[brokerRunnerPath];
 const { configure, processBroker } = require('../lib/broker-runner');
 Module._load = originalLoad;
 
-// Minimal Playwright stub — supports newPage / page.goto / page.locator / page.close.
+// Minimal Playwright stub — supports newPage / page.goto / page.locator / page.close / page.evaluate.
 function makeContext() {
   return {
     newPage: async () => ({
       goto: async () => ({}),
+      evaluate: async () => 'Your request was received.',
       locator: () => ({
         first: () => ({
           fill: async () => {},
