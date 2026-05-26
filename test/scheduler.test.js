@@ -142,13 +142,13 @@ test('macOS installer writes a plist file and returns method=launchd', () => {
   // Since PLIST_PATH is module-level, we test via the exported function
   // indirectly — we just verify the plist XML ends up in the right place.
 
-  // Call the macOS installer obtained via pickScheduler
-  const { installSchedule } = require('../lib/scheduler');
+  // Use the platform-injectable variant so the test passes on Linux CI runners
+  const { installScheduleForPlatform } = require('../lib/scheduler');
   const { scriptPath, logDir } = makePaths();
 
   let result;
   try {
-    result = installSchedule({ scriptPath, logDir });
+    result = installScheduleForPlatform({ platform: 'macos', scriptPath, logDir });
   } finally {
     childProcess.execSync = realExecSync;
     os.homedir = realHomedir;
