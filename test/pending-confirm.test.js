@@ -34,13 +34,15 @@ test('CONFIRM_RECHECK_DAYS is exported and equals 14', () => {
   assert.equal(cfg.CONFIRM_RECHECK_DAYS, 14);
 });
 
-test('recordPendingConfirmation stores pendingConfirmation flag + lastAttempt', () => {
+test('recordPendingConfirmation stores pendingConfirm object + lastAttempt', () => {
   withCleanState((state) => {
     cfg.setDryRun(true); // do not pollute state.json on disk
     cfg.recordPendingConfirmation(N, 'check your email to confirm');
     cfg.setDryRun(false);
     const e = state.optOuts[N];
-    assert.equal(e.pendingConfirmation, true);
+    assert.ok(e.pendingConfirm, 'pendingConfirm object should be set');
+    assert.equal(typeof e.pendingConfirm.since, 'string', 'pendingConfirm.since must be a string');
+    assert.equal(e.pendingConfirm.snippet, 'check your email to confirm');
     assert.equal(typeof e.lastAttempt, 'string');
     assert.equal(e.detail, 'check your email to confirm');
     assert.equal(e.totalRuns, 1);
@@ -59,7 +61,7 @@ test('recordPendingConfirmation increments totalRuns on repeat', () => {
 
 test('isPendingConfirmation: true for pending entries, false otherwise', () => {
   withCleanState((state) => {
-    state.optOuts[N] = { pendingConfirmation: true, lastAttempt: new Date().toISOString() };
+    state.optOuts[N] = { pendingConfirm: { since: new Date().toISOString(), snippet: '' }, lastAttempt: new Date().toISOString() };
     assert.equal(cfg.isPendingConfirmation(N), true);
     state.optOuts[N] = { lastSuccess: new Date().toISOString() };
     assert.equal(cfg.isPendingConfirmation(N), false);
@@ -71,7 +73,7 @@ test('isPendingConfirmation: true for pending entries, false otherwise', () => {
 test('shouldSkip: pending entry within 14d window → skip with reason', () => {
   withCleanState((state) => {
     state.optOuts[N] = {
-      pendingConfirmation: true,
+      pendingConfirm: { since: new Date(Date.now() - 3 * 86400000).toISOString(), snippet: '' },
       lastAttempt: new Date(Date.now() - 3 * 86400000).toISOString(), // 3 days ago
     };
     const out = cfg.shouldSkip(N);
@@ -84,7 +86,7 @@ test('shouldSkip: pending entry within 14d window → skip with reason', () => {
 test('shouldSkip: pending entry older than 14d → null (re-attempt)', () => {
   withCleanState((state) => {
     state.optOuts[N] = {
-      pendingConfirmation: true,
+      pendingConfirm: { since: new Date(Date.now() - 20 * 86400000).toISOString(), snippet: '' },
       lastAttempt: new Date(Date.now() - 20 * 86400000).toISOString(), // 20d ago
     };
     assert.equal(cfg.shouldSkip(N), null);
