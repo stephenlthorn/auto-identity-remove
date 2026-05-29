@@ -108,6 +108,17 @@ if (CONFIRM_EMAILS) {
   const profileDirForConfirm = (loadConfig().profileDir || '~/.config/auto-identity-remove')
     .replace(/^~(?=\/|$)/, os.homedir());
 
+  // Acquire the same process lock as main() - processConfirmationEmails calls
+  // recordSuccess -> saveState, so it must not race a concurrent normal run.
+  const CONFIRM_LOCK_PATH = STATE_PATH + '.lock';
+  try {
+    lock.acquire(CONFIRM_LOCK_PATH);
+  } catch (err) {
+    const pidMatch = err.message.match(/pid (\d+)/);
+    console.error(`Another instance is running, pid=${pidMatch ? pidMatch[1] : '?'}. Exiting.`);
+    process.exit(1);
+  }
+
   (async () => {
     console.log(`\nProcessing confirmation emails from: ${confirmEmailsDir}`);
     const context = await chromiumForConfirm.launchPersistentContext(profileDirForConfirm, {
@@ -135,9 +146,11 @@ if (CONFIRM_EMAILS) {
       console.log(`\nDone: ${result.processed.length} confirmed, ${result.unmatched.length} unmatched, ${result.failed.length} failed (${total} .eml files)\n`);
     } finally {
       await context.close().catch(() => {});
+      lock.release(CONFIRM_LOCK_PATH);
     }
     process.exit(0);
   })().catch(err => {
+    lock.release(CONFIRM_LOCK_PATH);
     console.error('confirm-emails error:', err.message);
     process.exit(1);
   });
@@ -243,7 +256,7 @@ async function _mainBody() {
   console.log('\n🔒 auto-identity-remove — starting run');
   if (PREVIEW)       console.log('👀 PREVIEW — field values and target URLs will be printed before submit. No state will be saved.');
   else if (DRY_RUN)  console.log('🧪 DRY RUN — forms will be filled but NOT submitted. No state will be saved.');
-  if (VERIFY)        console.log('🔍 VERIFY — read-only spot-check. No forms submitted. No state saved.');
+  if (VERIFY)        console.log('🔍 VERIFY — re-checking listings. No forms submitted. Verification results are saved.');
   if (POLLUTE_COUNT) console.log(`⚠️  NOISE MODE — ${POLLUTE_COUNT} bogus record(s) will be submitted to acceptsBogus brokers.`);
   console.log(`📅 ${new Date().toLocaleString()}`);
   console.log(`📋 ${brokers.length} explicit brokers + 500+ generic | re-check window: ${RECHECK_DAYS} days\n`);
