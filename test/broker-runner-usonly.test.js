@@ -25,6 +25,7 @@ const configMock = {
   recordPendingConfirmation: () => {},
   loadState: () => ({ optOuts: {} }),
   saveCheckpoint: () => {},
+  stateKey: (brokerName) => brokerName,
 };
 
 // Patch logger before require

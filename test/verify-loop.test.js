@@ -328,3 +328,43 @@ test('findListingUrl throws → unverifiable (not a false positive)', async () =
   assert.equal(result.still_listed.length, 0);
   assert.equal(result.verified_clear.length, 0);
 });
+
+// ── Test 12: H2 regression — state mutation is observable after runVerify ────
+// watcher.js calls saveState() after runVerify returns. This test proves the
+// mutation is in place on the state object, ready to persist.
+test('H2: verified_clear outcome writes verifiedDeletedAt on the state object', async () => {
+  const broker  = searchBroker('MutationBroker');
+  const person  = { firstName: 'Jane', lastName: 'Doe' };
+  const state   = makeState('MutationBroker', 8);
+  const context = makeContext();
+
+  const fakeFind = async () => null; // listing gone
+
+  const result = await runVerify(context, [broker], [person], { findUrl: fakeFind, state });
+
+  assert.equal(result.verified_clear.length, 1, 'should be in verified_clear');
+
+  // The mutation that watcher.js's saveState() will persist must be present
+  const entry = state.optOuts['MutationBroker'];
+  assert.ok(entry, 'state.optOuts entry must exist after runVerify');
+  assert.ok(entry.verifiedDeletedAt, 'verifiedDeletedAt must be set on the shared state object');
+  assert.ok(
+    typeof entry.verifiedDeletedAt === 'string' && entry.verifiedDeletedAt.length > 0,
+    'verifiedDeletedAt must be a non-empty ISO string'
+  );
+});
+
+test('H2: still_listed outcome writes verifiedStillListedAt on the state object', async () => {
+  const broker  = searchBroker('MutationStillBroker');
+  const person  = { firstName: 'Jane', lastName: 'Doe' };
+  const state   = makeState('MutationStillBroker', 8);
+  const context = makeContext();
+
+  const fakeFind = async () => 'https://mutationstillbroker.example/listing/1';
+
+  await runVerify(context, [broker], [person], { findUrl: fakeFind, state });
+
+  const entry = state.optOuts['MutationStillBroker'];
+  assert.ok(entry, 'state.optOuts entry must exist after runVerify');
+  assert.ok(entry.verifiedStillListedAt, 'verifiedStillListedAt must be set on the shared state object');
+});

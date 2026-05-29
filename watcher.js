@@ -11,7 +11,7 @@ const path = require('path');
 const fs   = require('fs');
 const os   = require('os');
 
-const { STATE_PATH, RECHECK_DAYS, loadConfig, loadState, recordSuccess, setDryRun, getPersonsFromConfig, loadCheckpoint, clearCheckpoint } = require('./lib/config');
+const { STATE_PATH, RECHECK_DAYS, loadConfig, loadState, saveState, recordSuccess, setDryRun, getPersonsFromConfig, loadCheckpoint, clearCheckpoint } = require('./lib/config');
 const { results, logResult, buildSummary, setDefunctBrokers } = require('./lib/logger');
 const { findDefunct, DEFUNCT_THRESHOLD } = require('./lib/defunct');
 const { sendText, desktopNotify, openInBrowser } = require('./lib/notify');
@@ -181,7 +181,7 @@ const profileDir = (config.profileDir || '~/.config/auto-identity-remove')
   .replace(/^~(?=\/|$)/, os.homedir());
 const state = loadState();
 const persons = getPersonsFromConfig(config);
-brokerRunner.configure({ dryRun: DRY_RUN, preview: PREVIEW, person: persons[0], capsolver: config.capsolver, noCapsolver: NO_CAPSOLVER, snapshot: SNAPSHOT });
+brokerRunner.configure({ dryRun: DRY_RUN, preview: PREVIEW, person: persons[0], capsolver: config.capsolver, noCapsolver: NO_CAPSOLVER, snapshot: SNAPSHOT, personCount: persons.length });
 
 // Detect brokers that have been consistently unreachable across recent runs.
 // Defunct brokers still run — the warning is informational so the user can
@@ -274,6 +274,7 @@ async function _mainBody() {
   if (VERIFY) {
     const { runVerify } = require('./lib/verify-loop');
     const result = await runVerify(context, brokers, persons, { state });
+    saveState();
     await context.close().catch(() => {});
 
     // Print summary
@@ -354,7 +355,7 @@ async function _mainBody() {
       console.log('='.repeat(54));
     }
 
-    brokerRunner.configure({ dryRun: DRY_RUN, preview: PREVIEW, person, capsolver: config.capsolver, noCapsolver: NO_CAPSOLVER, snapshot: SNAPSHOT });
+    brokerRunner.configure({ dryRun: DRY_RUN, preview: PREVIEW, person, capsolver: config.capsolver, noCapsolver: NO_CAPSOLVER, snapshot: SNAPSHOT, personCount: persons.length });
 
     // Email opt-outs (no browser needed — skipped in verify mode)
     if (!VERIFY) {

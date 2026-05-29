@@ -29,6 +29,7 @@ const configMock = {
   recordPendingConfirmation: (name, detail) => recorded.pending.push({ name, detail }),
   loadState: () => ({ optOuts: {} }),
   saveCheckpoint: () => {},
+  stateKey: (brokerName) => brokerName,
 };
 
 function patchedLoad(request, parent, isMain) {

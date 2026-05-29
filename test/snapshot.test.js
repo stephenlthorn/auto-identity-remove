@@ -113,6 +113,7 @@ const configMock = {
   recordFailure: () => {},
   loadState: () => ({ optOuts: {} }),
   saveCheckpoint: () => {},
+  stateKey: (brokerName) => brokerName,
 };
 
 // Track calls to captureSubmitSnapshot via a spy

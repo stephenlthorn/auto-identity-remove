@@ -37,6 +37,7 @@ const configMock = {
   recordFailure: (name, kind) => recorded.failure.push({ name, kind }),
   loadState: () => ({ optOuts: {} }),
   saveCheckpoint: () => {},
+  stateKey: (brokerName) => brokerName,
 };
 
 function patchedLoad(request, parent, isMain) {

@@ -27,6 +27,7 @@ const configMock = {
   recordFailure: () => {},
   loadState: () => ({ optOuts: {} }),
   saveCheckpoint: () => {},
+  stateKey: (brokerName) => brokerName,
 };
 
 function patchedLoad(request, parent, isMain) {
