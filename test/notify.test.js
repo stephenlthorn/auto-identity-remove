@@ -53,39 +53,48 @@ test('sendText: does nothing when notify.textTo is absent', () => {
 });
 
 test('sendText: calls osascript when notify.textTo is set', () => {
-  const { calls, restore } = stubExecSync();
+  // sendText now uses execFileSync (not execSync) - stub both for compatibility
+  const execFileCalls = [];
+  const origExecFile = childProcess.execFileSync;
+  childProcess.execFileSync = (file, args) => { execFileCalls.push({ file, args }); };
   notify.sendText('hello', { textTo: '+15125550000' }, 'darwin');
-  restore();
-  assert.equal(calls.length, 1);
-  assert.ok(calls[0].includes('osascript'));
-  assert.ok(calls[0].includes('Messages'));
+  childProcess.execFileSync = origExecFile;
+  assert.equal(execFileCalls.length, 1);
+  assert.equal(execFileCalls[0].file, 'osascript');
+  assert.ok(execFileCalls[0].args.some(a => a.includes('Messages')));
 });
 
 test('sendText: escapes backslash and double-quote in message', () => {
-  const { calls, restore } = stubExecSync();
+  const execFileCalls = [];
+  const origExecFile = childProcess.execFileSync;
+  childProcess.execFileSync = (file, args) => { execFileCalls.push({ file, args }); };
   notify.sendText('say \\"hi\\"', { textTo: '+1' }, 'darwin');
-  restore();
+  childProcess.execFileSync = origExecFile;
   // Should not throw and should have called osascript
-  assert.equal(calls.length, 1);
+  assert.equal(execFileCalls.length, 1);
 });
 
 // ─── macNotify ───────────────────────────────────────────────────────────────
 
 test('macNotify: calls osascript display notification', () => {
-  const { calls, restore } = stubExecSync();
+  // macNotify now uses execFileSync (not execSync)
+  const execFileCalls = [];
+  const origExecFile = childProcess.execFileSync;
+  childProcess.execFileSync = (file, args) => { execFileCalls.push({ file, args }); };
   notify.macNotify('Title', 'Body');
-  restore();
-  assert.equal(calls.length, 1);
-  assert.ok(calls[0].includes('display notification'));
-  assert.ok(calls[0].includes('Title'));
+  childProcess.execFileSync = origExecFile;
+  assert.equal(execFileCalls.length, 1);
+  assert.equal(execFileCalls[0].file, 'osascript');
+  assert.ok(execFileCalls[0].args.some(a => a.includes('display notification')));
+  assert.ok(execFileCalls[0].args.some(a => a.includes('Title')));
 });
 
-test('macNotify: swallows execSync errors silently', () => {
-  const orig = childProcess.execSync;
-  childProcess.execSync = () => { throw new Error('osascript not found'); };
+test('macNotify: swallows execFileSync errors silently', () => {
+  const origExecFile = childProcess.execFileSync;
+  childProcess.execFileSync = () => { throw new Error('osascript not found'); };
   // Must not throw
   assert.doesNotThrow(() => notify.macNotify('T', 'M'));
-  childProcess.execSync = orig;
+  childProcess.execFileSync = origExecFile;
 });
 
 // ─── openInBrowser ───────────────────────────────────────────────────────────
@@ -167,35 +176,40 @@ test('sendWebhook: is exported as a top-level function (not just _webhookPost)',
 // ─── dispatchNotify ───────────────────────────────────────────────────────────
 
 test('dispatchNotify: on macos with no webhook calls iMessage + macNotify but NOT fetch', async () => {
-  const exec = stubExecSync();
+  // macNotify and sendText now use execFileSync (not execSync)
+  const execFileCalls = [];
+  const origExecFile = childProcess.execFileSync;
+  childProcess.execFileSync = (file, args) => { execFileCalls.push({ file, args }); };
   const fetchStub = stubFetch();
 
   const cfg = { notify: { textTo: '+15125550000' } };
   await notify.dispatchNotify('run done', cfg, 'darwin');
 
-  exec.restore();
+  childProcess.execFileSync = origExecFile;
   fetchStub.restore();
 
-  // Should have called osascript (iMessage) and osascript (display notification)
-  const osCalls = exec.calls.filter(c => c.includes('osascript'));
-  assert.ok(osCalls.length >= 2, 'expected at least 2 osascript calls on macos');
+  // Should have called osascript at least twice (iMessage + display notification)
+  const osCalls = execFileCalls.filter(c => c.file === 'osascript');
+  assert.ok(osCalls.length >= 2, `expected at least 2 osascript execFileSync calls on macos, got ${osCalls.length}`);
   // No fetch
   assert.equal(fetchStub.calls.length, 0);
 });
 
 test('dispatchNotify: on macos WITH webhook calls iMessage + macNotify AND fetch', async () => {
-  const exec = stubExecSync();
+  const execFileCalls = [];
+  const origExecFile = childProcess.execFileSync;
+  childProcess.execFileSync = (file, args) => { execFileCalls.push({ file, args }); };
   const fetchStub = stubFetch();
 
   const cfg = { notify: { textTo: '+1', webhook: 'https://ntfy.sh/chan' } };
   await notify.dispatchNotify('done', cfg, 'darwin');
 
-  exec.restore();
+  childProcess.execFileSync = origExecFile;
   fetchStub.restore();
 
   assert.equal(fetchStub.calls.length, 1);
   assert.equal(fetchStub.calls[0].body.text, 'done');
-  const osCalls = exec.calls.filter(c => c.includes('osascript'));
+  const osCalls = execFileCalls.filter(c => c.file === 'osascript');
   assert.ok(osCalls.length >= 1);
 });
 
@@ -304,3 +318,73 @@ test('sendWebhook with object: preserves caller-supplied timestamp', async () =>
   restore();
   assert.equal(calls[0].body.timestamp, ts, 'caller timestamp should not be overwritten');
 });
+
+// ── M6: execFileSync instead of execSync for macNotify and sendText ───────────
+
+function stubExecFileSync() {
+  const calls = [];
+  const orig = childProcess.execFileSync;
+  childProcess.execFileSync = (file, args, opts) => {
+    calls.push({ file, args, opts });
+  };
+  return { calls, restore: () => { childProcess.execFileSync = orig; } };
+}
+
+test('M6: macNotify calls execFileSync with osascript (not a shell string)', () => {
+  const exec = stubExecFileSync();
+  notify.macNotify('Title', 'Body');
+  exec.restore();
+  assert.equal(exec.calls.length, 1, 'should call execFileSync once');
+  assert.equal(exec.calls[0].file, 'osascript', 'first arg should be osascript binary');
+  assert.ok(Array.isArray(exec.calls[0].args), 'second arg should be an array (not a shell string)');
+});
+
+test('M6: macNotify passes script via args array, not shell string', () => {
+  const exec = stubExecFileSync();
+  notify.macNotify('Title', 'Body');
+  exec.restore();
+  // args should be ['-e', '<script>'] - no shell interpolation
+  assert.ok(
+    exec.calls[0].args.includes('-e'),
+    'args should include -e flag'
+  );
+});
+
+test("M6: macNotify handles message containing single quote without breaking", () => {
+  const exec = stubExecFileSync();
+  assert.doesNotThrow(() => notify.macNotify("Title", "it's broken"));
+  exec.restore();
+  assert.equal(exec.calls.length, 1, 'should still call execFileSync');
+});
+
+test('M6: macNotify handles message containing both single and double quotes', () => {
+  const exec = stubExecFileSync();
+  assert.doesNotThrow(() => notify.macNotify('A title', `she said "it's fine"`));
+  exec.restore();
+  assert.equal(exec.calls.length, 1, 'should still call execFileSync once');
+});
+
+test('M6: sendText calls execFileSync with osascript on darwin', () => {
+  const exec = stubExecFileSync();
+  notify.sendText('hello', { textTo: '+15125550000' }, 'darwin');
+  exec.restore();
+  assert.equal(exec.calls.length, 1, 'should call execFileSync once');
+  assert.equal(exec.calls[0].file, 'osascript', 'first arg should be osascript binary');
+  assert.ok(Array.isArray(exec.calls[0].args), 'args must be an array');
+});
+
+test("M6: sendText handles message with single quote via execFileSync (no shell injection)", () => {
+  const exec = stubExecFileSync();
+  assert.doesNotThrow(() => notify.sendText("it's a test", { textTo: '+1' }, 'darwin'));
+  exec.restore();
+  assert.equal(exec.calls.length, 1, 'should still call execFileSync');
+});
+
+test('M6: sendText handles message with double quote via execFileSync', () => {
+  const exec = stubExecFileSync();
+  assert.doesNotThrow(() => notify.sendText('say "hello"', { textTo: '+1' }, 'darwin'));
+  exec.restore();
+  assert.equal(exec.calls.length, 1);
+});
+
+// ── end M6 ────────────────────────────────────────────────────────────────────

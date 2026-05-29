@@ -377,6 +377,149 @@ test('runSerpScan ranks object has ddg, bing, google keys', async () => {
   }
 });
 
+// ── M7: PII redaction in history + subdomain matching ────────────────────────
+
+test('M7: matchBrokers matches privacy.spokeo.com against broker spokeo.com', () => {
+  // L6 fix: strip leading subdomains so privacy.spokeo.com matches spokeo.com
+  const serpHostnames = ['privacy.spokeo.com'];
+  const brokerHostnames = ['spokeo.com'];
+  const matches = matchBrokers(serpHostnames, brokerHostnames);
+  assert.ok(
+    matches.length > 0,
+    'privacy.spokeo.com should match broker spokeo.com'
+  );
+  assert.ok(
+    matches.some(m => m === 'spokeo.com' || m === 'privacy.spokeo.com'),
+    `expected match for spokeo.com, got: ${JSON.stringify(matches)}`
+  );
+});
+
+test('M7: matchBrokers matches sub.sub.whitepages.com against whitepages.com', () => {
+  const serpHostnames = ['people.whitepages.com'];
+  const brokerHostnames = ['whitepages.com'];
+  const matches = matchBrokers(serpHostnames, brokerHostnames);
+  assert.ok(matches.length > 0, 'people.whitepages.com should match whitepages.com');
+});
+
+test('M7: matchBrokers does not match different TLD (spokeo.net != spokeo.com)', () => {
+  const serpHostnames = ['spokeo.net'];
+  const brokerHostnames = ['spokeo.com'];
+  const matches = matchBrokers(serpHostnames, brokerHostnames);
+  assert.equal(matches.length, 0, 'different TLD should not match');
+});
+
+test('M7: runSerpScan history record does not contain plaintext person name', async () => {
+  const fs = require('fs');
+  const path = require('path');
+  const os = require('os');
+
+  // Write to a temp dir so we can inspect what was written
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'serp-test-'));
+  const histPath = path.join(tmpDir, 'serp-history.json');
+
+  // Patch appendToHistory by replacing DATA_DIR - we do this by using
+  // the real runSerpScan with a context that returns a broker match
+  const context = {
+    newPage: async () => {
+      const page = {
+        _url: null,
+        goto: async (url) => { page._url = url; },
+        content: async () => {
+          if (page._url && page._url.includes('duckduckgo')) {
+            return `<a class="result__a" href="https://duckduckgo.com/?uddg=https%3A%2F%2Fwww.spokeo.com%2FJane-Doe">Spokeo</a>`;
+          }
+          return '<html></html>';
+        },
+        close: async () => {},
+      };
+      return page;
+    },
+  };
+
+  const testPersons = [
+    { firstName: 'Jane', lastName: 'Doe', fullName: 'Jane Doe', city: 'Seattle', state: 'WA', email: 'jane@test.com' },
+  ];
+  const testBrokers = [
+    { name: 'Spokeo', optOutUrl: 'https://www.spokeo.com/optout' },
+  ];
+
+  // We need to call runSerpScan but redirect its writes to our temp dir.
+  // Since the module uses a module-level DATA_DIR, we test via the _skipWrite
+  // bypass is NOT set, but we intercept the write with a custom approach:
+  // Override fs.writeFileSync temporarily to capture what would be written.
+  const writtenData = [];
+  const origWriteFileSync = fs.writeFileSync;
+  const origRenameSync = fs.renameSync;
+  const origMkdirSync = fs.mkdirSync;
+
+  fs.mkdirSync = (dir, opts) => { /* no-op temp */ };
+  fs.writeFileSync = (filePath, data) => {
+    writtenData.push(data);
+  };
+  fs.renameSync = (src, dst) => { /* no-op */ };
+
+  try {
+    await runSerpScan(context, testPersons, testBrokers, {});
+  } finally {
+    fs.writeFileSync = origWriteFileSync;
+    fs.renameSync = origRenameSync;
+    fs.mkdirSync = origMkdirSync;
+  }
+
+  // At least one write should have happened (Spokeo found in DDG)
+  assert.ok(writtenData.length > 0, 'should have written history data');
+
+  // The written JSON should NOT contain the plaintext name "Jane Doe"
+  for (const data of writtenData) {
+    assert.ok(
+      !data.includes('Jane Doe'),
+      `history record must not contain plaintext name "Jane Doe", got: ${data.slice(0, 200)}`
+    );
+  }
+});
+
+test('M7: runSerpScan history record does not contain raw query with person name', async () => {
+  const fs = require('fs');
+
+  const writtenData = [];
+  const origWriteFileSync = fs.writeFileSync;
+  const origRenameSync = fs.renameSync;
+  const origMkdirSync = fs.mkdirSync;
+  fs.mkdirSync = () => {};
+  fs.writeFileSync = (filePath, data) => { writtenData.push(data); };
+  fs.renameSync = () => {};
+
+  const context = {
+    newPage: async () => ({
+      goto: async () => {},
+      content: async () =>
+        `<a class="result__a" href="https://duckduckgo.com/?uddg=https%3A%2F%2Fwww.spokeo.com%2FBob">Spokeo</a>`,
+      close: async () => {},
+    }),
+  };
+  const persons = [
+    { firstName: 'Bob', lastName: 'Smith', fullName: 'Bob Smith', city: 'Denver', state: 'CO', email: 'bob@x.com' },
+  ];
+  const brokers = [{ name: 'Spokeo', optOutUrl: 'https://www.spokeo.com/optout' }];
+
+  try {
+    await runSerpScan(context, persons, brokers, {});
+  } finally {
+    fs.writeFileSync = origWriteFileSync;
+    fs.renameSync = origRenameSync;
+    fs.mkdirSync = origMkdirSync;
+  }
+
+  for (const data of writtenData) {
+    assert.ok(
+      !data.includes('Bob Smith'),
+      `history must not contain "Bob Smith" in written data: ${data.slice(0, 300)}`
+    );
+  }
+});
+
+// ── end M7 ────────────────────────────────────────────────────────────────────
+
 test('runSerpScan null rank means broker not found on that engine', async () => {
   const context = makeContext({
     'duckduckgo.com': `
