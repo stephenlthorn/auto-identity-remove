@@ -298,6 +298,99 @@ test('processed entry includes broker, url, and person placeholder', async () =>
   assert.ok(entry.url, 'should have url');
 });
 
+// ── M4: quoted-printable + smart URL selection ────────────────────────────────
+
+test('M4: quoted-printable =3D in URL is decoded correctly', async () => {
+  // Real emails encode "=" as "=3D". The URL https://x.com/confirm?id=abc
+  // arrives as https://x.com/confirm?id=3Dabc and must be decoded.
+  const qpBody =
+    'Content-Transfer-Encoding: quoted-printable\r\n\r\n' +
+    'Click here: https://spokeo.com/confirm?token=3Dabc123 to confirm.';
+  const eml = [
+    'From: optout@spokeo.com',
+    'To: user@example.com',
+    'Subject: Confirm',
+    'Content-Transfer-Encoding: quoted-printable',
+    '',
+    'Click here: https://spokeo.com/confirm?token=3Dabc123 to confirm.',
+  ].join('\r\n');
+  const ctx = makeContext();
+
+  const result = await processConfirmationEmails(ctx, [SPOKEO_BROKER], {
+    dir: 'confirms',
+    dryRun: true,
+    _readDir: () => ['spokeo.eml'],
+    _readFile: () => eml,
+  });
+
+  assert.equal(result.processed.length, 1, 'should process the email');
+  assert.ok(
+    result.processed[0].url.includes('token=abc123') ||
+    result.processed[0].url.includes('confirm'),
+    `URL should have decoded =3D: got ${result.processed[0].url}`
+  );
+  assert.ok(
+    !result.processed[0].url.includes('=3D'),
+    `URL must not contain raw =3D: got ${result.processed[0].url}`
+  );
+});
+
+test('M4: quoted-printable soft line break in URL is joined correctly', async () => {
+  // Soft breaks: "=" at end of line means continuation - URL split across lines
+  const eml = [
+    'From: optout@spokeo.com',
+    'To: user@example.com',
+    'Subject: Confirm',
+    'Content-Transfer-Encoding: quoted-printable',
+    '',
+    'Visit https://spokeo.com/confirm?tok=',
+    'en=3Dabc to complete your opt-out.',
+  ].join('\r\n');
+  const ctx = makeContext();
+
+  const result = await processConfirmationEmails(ctx, [SPOKEO_BROKER], {
+    dir: 'confirms',
+    dryRun: true,
+    _readDir: () => ['spokeo.eml'],
+    _readFile: () => eml,
+  });
+
+  // Should have found a URL (not no_url)
+  assert.equal(result.processed.length, 1, 'soft-break URL should be joinable and matched');
+  assert.ok(result.processed[0].url.includes('confirm'), 'URL should contain confirm');
+});
+
+test('M4: unsubscribe link first, confirm link second - picks confirm', async () => {
+  const eml = [
+    'From: optout@spokeo.com',
+    'To: user@example.com',
+    'Subject: Confirm',
+    '',
+    'To unsubscribe visit https://spokeo.com/unsubscribe?id=foo first.',
+    'To confirm your removal: https://spokeo.com/confirm?token=realtoken',
+  ].join('\r\n');
+  const ctx = makeContext();
+
+  const result = await processConfirmationEmails(ctx, [SPOKEO_BROKER], {
+    dir: 'confirms',
+    dryRun: true,
+    _readDir: () => ['spokeo.eml'],
+    _readFile: () => eml,
+  });
+
+  assert.equal(result.processed.length, 1);
+  assert.ok(
+    result.processed[0].url.includes('confirm'),
+    `should pick confirm URL, got: ${result.processed[0].url}`
+  );
+  assert.ok(
+    !result.processed[0].url.includes('unsubscribe'),
+    `should NOT pick unsubscribe URL, got: ${result.processed[0].url}`
+  );
+});
+
+// ── end M4 ────────────────────────────────────────────────────────────────────
+
 test('failed: when goto throws, entry appears in failed array', async () => {
   const eml = makeEml('optout@spokeo.com', 'Click https://spokeo.com/confirm/bad');
   const errCtx = {

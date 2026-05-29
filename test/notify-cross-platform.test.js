@@ -46,17 +46,18 @@ function stubSpawnSyncThrows() {
 // ─── desktopNotify: darwin ────────────────────────────────────────────────────
 
 test('desktopNotify: on darwin calls macNotify (osascript)', () => {
-  const execCalls = [];
-  const origExec = childProcess.execSync;
-  childProcess.execSync = (...args) => { execCalls.push(args[0]); };
+  // macNotify now uses execFileSync (not execSync)
+  const execFileCalls = [];
+  const origExecFile = childProcess.execFileSync;
+  childProcess.execFileSync = (file, args) => { execFileCalls.push({ file, args }); };
 
   notify.desktopNotify('Title', 'Body', 'darwin');
 
-  childProcess.execSync = origExec;
+  childProcess.execFileSync = origExecFile;
 
-  const osCalls = execCalls.filter(c => c.includes('osascript'));
-  assert.ok(osCalls.length >= 1, 'should call osascript on darwin');
-  assert.ok(osCalls[0].includes('display notification'), 'should be a display notification call');
+  const osCalls = execFileCalls.filter(c => c.file === 'osascript');
+  assert.ok(osCalls.length >= 1, 'should call osascript execFileSync on darwin');
+  assert.ok(osCalls[0].args.some(a => a.includes('display notification')), 'should be a display notification call');
 });
 
 // ─── desktopNotify: linux ────────────────────────────────────────────────────
@@ -107,8 +108,10 @@ test('desktopNotify: on win32 swallows PowerShell errors and does not throw', ()
 // ─── desktopNotify: error swallowing ─────────────────────────────────────────
 
 test('desktopNotify: returns without throwing even when all underlying calls fail', () => {
+  const origExecFile = childProcess.execFileSync;
   const origExec = childProcess.execSync;
   const origSpawnSync = childProcess.spawnSync;
+  childProcess.execFileSync = () => { throw new Error('execFileSync failed'); };
   childProcess.execSync = () => { throw new Error('exec failed'); };
   childProcess.spawnSync = () => { throw new Error('spawnSync failed'); };
 
@@ -116,6 +119,7 @@ test('desktopNotify: returns without throwing even when all underlying calls fai
   assert.doesNotThrow(() => notify.desktopNotify('T', 'M', 'linux'));
   assert.doesNotThrow(() => notify.desktopNotify('T', 'M', 'win32'));
 
+  childProcess.execFileSync = origExecFile;
   childProcess.execSync = origExec;
   childProcess.spawnSync = origSpawnSync;
 });
