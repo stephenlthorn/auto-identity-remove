@@ -1,0 +1,13 @@
+# Oneshot opt-out run, triggered by aidr.timer (which the Schedule tab manages).
+# Copy to /etc/systemd/system/aidr.service and edit the path. The dashboard's
+# Schedule tab writes/owns aidr.timer; this service is what that timer activates.
+[Unit]
+Description=auto-identity-remove opt-out run
+After=network.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/auto-identity-remove
+ExecStart=/usr/bin/node /opt/auto-identity-remove/watcher.js
+Environment=HEADLESS=1
+Environment=PLAYWRIGHT_BROWSERS_PATH=/root/.cache/ms-playwright

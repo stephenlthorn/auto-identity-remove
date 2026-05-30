@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>auto-identity-remove · dashboard</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>🛡️</text></svg>" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="logo">🛡️</span><div><h1>auto-identity-remove</h1><p class="sub">data-broker opt-out control panel</p></div></div>
+    <div class="summary" id="summary"><span class="pill muted">loading…</span></div>
+  </header>
+
+  <main>
+    <section class="card run-card">
+      <div class="run-controls">
+        <button class="btn btn-primary" data-mode="preview" title="Fill forms without submitting">▶ Preview (dry-run)</button>
+        <button class="btn btn-danger" data-mode="real" title="Submit real opt-outs">⚡ Run real opt-outs</button>
+        <button class="btn" data-mode="verify" title="Re-check brokers with a recorded success">🔁 Verify</button>
+        <button class="btn" data-mode="doctor" title="Self-diagnose configuration">🩺 Doctor</button>
+        <button class="btn" data-mode="list" title="List brokers + status from state.json">📋 List</button>
+        <span class="run-filters">
+          <input id="onlyInput" placeholder="--only (comma names)" aria-label="Only these brokers (comma-separated names)" />
+          <input id="skipInput" placeholder="--skip (comma names)" aria-label="Skip these brokers (comma-separated names)" />
+        </span>
+        <button class="btn btn-stop" id="stopBtn" disabled>■ Stop</button>
+        <span class="run-status" id="runStatus"></span>
+      </div>
+      <div class="run-controls run-advanced">
+        <span class="dim adv-label">email confirmations:</span>
+        <button class="btn" data-mode="pending" title="List brokers awaiting email confirmation">📨 Pending</button>
+        <button class="btn" data-mode="confirm" title="Auto-click confirmation links in received .eml files">✅ Confirm emails</button>
+        <span class="dim adv-label">advanced:</span>
+        <button class="btn" data-mode="retry" title="Re-run only brokers that failed last time">↻ Retry failed</button>
+        <button class="btn" data-mode="serp" title="Search engine scan for residual listings">🔎 SERP scan</button>
+        <button class="btn" data-mode="snapshot" title="Save a snapshot of current state">📸 Snapshot</button>
+      </div>
+      <pre class="console" id="console" role="log" aria-live="polite" aria-atomic="false" aria-label="Run output"><span class="dim">Console output appears here. Pick an action above.</span></pre>
+    </section>
+
+    <nav class="tabs" role="tablist" aria-label="Dashboard sections">
+      <button class="tab active" id="tabbtn-brokers" role="tab" aria-selected="true" aria-controls="tab-brokers" data-tab="brokers">Brokers</button>
+      <button class="tab" id="tabbtn-config" role="tab" aria-selected="false" aria-controls="tab-config" data-tab="config">Config</button>
+      <button class="tab" id="tabbtn-schedule" role="tab" aria-selected="false" aria-controls="tab-schedule" data-tab="schedule">Schedule</button>
+      <button class="tab" id="tabbtn-logs" role="tab" aria-selected="false" aria-controls="tab-logs" data-tab="logs">Logs</button>
+      <button class="tab" id="tabbtn-admin" role="tab" aria-selected="false" aria-controls="tab-admin" data-tab="admin">Admin</button>
+    </nav>
+
+    <section class="card tab-panel" id="tab-brokers" role="tabpanel" aria-labelledby="tabbtn-brokers">
+      <div class="toolbar">
+        <input id="brokerSearch" placeholder="filter brokers…" />
+        <div class="legend">
+          <span class="dot ok"></span> opted out
+          <span class="dot pending"></span> pending
+          <span class="dot manual"></span> manual
+          <span class="dot none"></span> not yet
+        </div>
+      </div>
+      <table class="grid" id="brokerTable">
+        <thead><tr><th>Broker</th><th>Method</th><th>Pri</th><th>Scope</th><th>Status</th><th>Last action</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <section class="card tab-panel hidden" id="tab-config" role="tabpanel" aria-labelledby="tabbtn-config">
+      <div class="config-head">
+        <p class="dim" id="configState"></p>
+        <button class="btn btn-primary" id="saveConfig">💾 Save config</button>
+      </div>
+      <form id="configForm" class="config-form">
+        <fieldset><legend>Person</legend>
+          <label>First name <input name="person.firstName" /></label>
+          <label>Last name <input name="person.lastName" /></label>
+          <label>Full name <input name="person.fullName" /></label>
+          <label>Aliases (comma) <input name="person.aliases" /></label>
+          <label>City <input name="person.city" /></label>
+          <label>State/Region <input name="person.state" /></label>
+          <label>ZIP/Postal <input name="person.zip" /></label>
+          <label>Country <input name="person.country" placeholder="US" /></label>
+          <label>Email <input name="person.email" type="email" /></label>
+          <label>Phone (digits) <input name="person.phone" /></label>
+          <label>Phone formatted <input name="person.phoneFormatted" /></label>
+        </fieldset>
+        <fieldset><legend>CapSolver (CAPTCHA solving)</legend>
+          <label>API key <input name="capsolver.apiKey" type="password" placeholder="CAP-…" /></label>
+        </fieldset>
+        <fieldset><legend>Notifications</legend>
+          <label>Webhook (ntfy/Slack/Discord) <input name="notify.webhook" placeholder="https://ntfy.sh/your-topic" /></label>
+          <label>Text to (macOS iMessage) <input name="notify.textTo" /></label>
+        </fieldset>
+        <fieldset><legend>SMTP (email-based opt-outs)</legend>
+          <label>Host <input name="email.smtp.host" placeholder="smtp.gmail.com" /></label>
+          <label>Port <input name="email.smtp.port" type="number" placeholder="587" /></label>
+          <label>User <input name="email.smtp.user" /></label>
+          <label>Password / App-password <input name="email.smtp.pass" type="password" /></label>
+          <label>From <input name="email.smtp.from" /></label>
+        </fieldset>
+        <fieldset><legend>Broker accounts (sites needing login)</legend>
+          <label>Spokeo email <input name="accounts.spokeo.email" /></label>
+          <label>Spokeo password <input name="accounts.spokeo.password" type="password" /></label>
+          <label>BeenVerified email <input name="accounts.beenverified.email" /></label>
+          <label>BeenVerified password <input name="accounts.beenverified.password" type="password" /></label>
+          <label>MyLife email <input name="accounts.mylife.email" /></label>
+          <label>MyLife password <input name="accounts.mylife.password" type="password" /></label>
+        </fieldset>
+      </form>
+    </section>
+
+    <section class="card tab-panel hidden" id="tab-schedule" role="tabpanel" aria-labelledby="tabbtn-schedule">
+      <h3>Automated schedule</h3>
+      <p class="dim">Runs <code>node watcher.js</code> on a systemd timer inside this container.</p>
+      <div class="sched-row">
+        <span>Status:</span> <span class="pill" id="schedEnabled">—</span>
+        <span>Next run:</span> <strong id="schedNext">—</strong>
+        <span>Cadence:</span> <strong id="schedCal">—</strong>
+      </div>
+      <div class="sched-actions">
+        <button class="btn btn-primary" id="schedEnable">Enable</button>
+        <button class="btn" id="schedDisable">Disable</button>
+        <span class="adv-label dim">cadence:</span>
+        <button class="btn" data-preset="monthly">Monthly</button>
+        <button class="btn" data-preset="weekly">Weekly</button>
+        <button class="btn" data-preset="daily">Daily</button>
+      </div>
+    </section>
+
+    <section class="card tab-panel hidden" id="tab-admin" role="tabpanel" aria-labelledby="tabbtn-admin">
+      <h3>Admin · change login</h3>
+      <p class="dim" id="whoami">…</p>
+      <form id="pwForm" class="admin-form" autocomplete="off">
+        <fieldset><legend>Change credentials</legend>
+          <label>Current password <input id="curPw" type="password" autocomplete="current-password" /></label>
+          <label>New username <span class="dim">(optional — leave blank to keep)</span> <input id="newUser" placeholder="admin" autocomplete="username" /></label>
+          <label>New password <input id="newPw" type="password" autocomplete="new-password" /></label>
+          <label>Confirm new password <input id="newPw2" type="password" autocomplete="new-password" /></label>
+        </fieldset>
+        <button type="button" class="btn btn-primary" id="savePw">🔑 Update login</button>
+        <p class="pw-msg" id="pwMsg"></p>
+      </form>
+    </section>
+
+    <section class="card tab-panel hidden" id="tab-logs" role="tabpanel" aria-labelledby="tabbtn-logs">
+      <div class="logs-layout">
+        <ul class="log-list" id="logList"></ul>
+        <pre class="console log-view" id="logView"><span class="dim">Select a log file.</span></pre>
+      </div>
+    </section>
+    <footer class="foot" id="foot"></footer>
+  </main>
+
+  <div class="modal hidden" id="confirmModal">
+    <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmDesc">
+      <h3 id="confirmTitle">⚡ Submit real opt-outs?</h3>
+      <p id="confirmDesc">This drives a real browser and submits opt-out requests to live data-broker sites using your configured PII. This is not a drill.</p>
+      <div class="modal-actions">
+        <button class="btn" id="cancelReal">Cancel</button>
+        <button class="btn btn-danger" id="confirmReal">Yes, run for real</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+{
+  "name": "auto-identity-remove-dashboard",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Optional web dashboard for auto-identity-remove — status, runs, config editor, schedule, live logs.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --check server.js && echo \"no tests yet\""
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}
