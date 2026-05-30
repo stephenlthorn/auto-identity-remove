@@ -455,7 +455,7 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
 
   console.log(`\n── Generic brokers (${brokers.length} from Markup CSV + BADBOOL)${dryRun ? ' [DRY RUN]' : ''} ──`);
 
-  const page = await context.newPage();
+  let page = await context.newPage();
 
   const stats = {
     attempted: 0,
@@ -467,35 +467,73 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
     dead: 0,
   };
 
-  for (const broker of brokers) {
-    process.stdout.write(`\n  [${broker.name.slice(0,40)}]… `);
-    const result = await processFn(page, broker, state, dryRun);
-
-    logResult(broker.name, result.status, result.detail || '');
-
-    stats.attempted++;
-    const bucket = classifyOutcome(result.status, result.detail || '');
-    // dead is stored separately; re-map no_form_found subdivisions
-    if (result.status === 'dead') {
-      stats.dead++;
-    } else {
-      stats[bucket] = (stats[bucket] || 0) + 1;
+  // Broker sites frequently spawn popups / _blank tabs / consent / OAuth windows.
+  // Those open as extra pages in the persistent context and are never closed, so
+  // their renderer processes accumulate across the ~500-site list and can exhaust
+  // the host (observed: ~1200 stray Chromium processes on a full run). Close any
+  // page that isn't our working page after each broker.
+  const prunePopups = async () => {
+    if (typeof context.pages !== 'function') return; // tolerate minimal/mock contexts
+    for (const p of context.pages()) {
+      if (p !== page) { try { await p.close(); } catch (_) {} }
     }
+  };
 
-    if (result.status === 'success') {
-      recordSuccess(broker.name, result.detail || '');
-    } else if (result.status === 'pending_confirm') {
-      const { recordPendingConfirmation } = require('./lib/config');
-      recordPendingConfirmation(broker.name, result.detail || '');
-    } else if (result.status === 'error' || result.status === 'dead') {
-      const { recordFailure } = require('./lib/config');
-      recordFailure(broker.name, 'error');
+  const RECYCLE_EVERY = 25; // periodically replace the working page to bound renderer growth
+  let processed = 0;
+
+  try {
+    for (const broker of brokers) {
+      process.stdout.write(`\n  [${broker.name.slice(0,40)}]… `);
+
+      let result;
+      try {
+        result = await processFn(page, broker, state, dryRun);
+      } catch (err) {
+        // One broker must never abort the whole run or skip the cleanup below.
+        result = { status: 'error', detail: (err && err.message ? err.message.slice(0, 80) : 'error') };
+        // If the working page itself crashed, replace it so the run can continue.
+        if (typeof page.isClosed === 'function' && page.isClosed()) {
+          try { page = await context.newPage(); } catch (_) {}
+        }
+      }
+
+      logResult(broker.name, result.status, result.detail || '');
+
+      stats.attempted++;
+      const bucket = classifyOutcome(result.status, result.detail || '');
+      // dead is stored separately; re-map no_form_found subdivisions
+      if (result.status === 'dead') {
+        stats.dead++;
+      } else {
+        stats[bucket] = (stats[bucket] || 0) + 1;
+      }
+
+      if (result.status === 'success') {
+        recordSuccess(broker.name, result.detail || '');
+      } else if (result.status === 'pending_confirm') {
+        const { recordPendingConfirmation } = require('./lib/config');
+        recordPendingConfirmation(broker.name, result.detail || '');
+      } else if (result.status === 'error' || result.status === 'dead') {
+        const { recordFailure } = require('./lib/config');
+        recordFailure(broker.name, 'error');
+      }
+
+      await prunePopups(); // reap any popups / tabs this broker opened
+
+      // Recycle the working page every N brokers to release accumulated
+      // renderer / site-isolation processes that survive same-page navigation.
+      if (++processed % RECYCLE_EVERY === 0) {
+        try { await page.close(); } catch (_) {}
+        page = await context.newPage();
+      }
+
+      try { await page.waitForTimeout(400); } catch (_) {} // polite delay
     }
-
-    await page.waitForTimeout(400); // polite delay
+  } finally {
+    await page.close().catch(() => {});
+    await prunePopups();
   }
-
-  await page.close().catch(() => {});
 
   return {
     count: brokers.length,
