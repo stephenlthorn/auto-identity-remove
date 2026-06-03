@@ -1,0 +1,22 @@
+# auto-identity-remove web dashboard
+# Copy to /etc/systemd/system/aidr-dashboard.service, edit paths + credentials,
+# then: systemctl daemon-reload && systemctl enable --now aidr-dashboard
+[Unit]
+Description=auto-identity-remove web dashboard
+After=network.target
+
+[Service]
+Type=simple
+# Adjust to where the repo lives:
+WorkingDirectory=/opt/auto-identity-remove/dashboard
+ExecStart=/usr/bin/node /opt/auto-identity-remove/dashboard/server.js
+Environment=AIDR_PORT=8080
+# Set a real login (the dashboard edits PII and can submit opt-outs):
+Environment=AIDR_USER=admin
+Environment=AIDR_PASS=change-me
+# Playwright browser cache used by watcher.js runs spawned from the dashboard:
+Environment=PLAYWRIGHT_BROWSERS_PATH=/root/.cache/ms-playwright
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
