@@ -6,7 +6,7 @@
  * unit-tested by the project's top-level `node --test` run (which does not
  * install the dashboard's express dependency).
  *
- * Two protections live here, both added after a security review of the
+ * Three protections live here, added after security reviews of the
  * dashboard PR:
  *
  *  1. Flag-injection guard for --only / --skip filter values. watcher.js detects
@@ -21,6 +21,11 @@
  *     with the user's PII, so they must not fire from a stray / forged / replayed
  *     request that merely names the mode - the caller must explicitly pass
  *     `confirm: true`. The browser UI sends this after its confirmation modal.
+ *
+ *  3. Filter-mode gating: --only/--skip are only honoured by watcher.js for
+ *     preview/real/retry. Sending filters for list/pending/confirm/doctor/verify/
+ *     serp modes is silently ignored by watcher.js; this helper gates them at
+ *     the server so the caller gets clear feedback instead of silent no-ops.
  */
 
 'use strict';
@@ -29,6 +34,11 @@
 // confirmation links, retry live submissions). These require explicit confirm.
 const LIVE_MODES = new Set(['real', 'retry', 'snapshot', 'confirm']);
 
+// Modes in which watcher.js actually applies --only / --skip filtering.
+// For all other modes the filter flags are parsed but never used, so we gate
+// them here to surface a clear error rather than silently discarding them.
+const FILTER_MODES = new Set(['preview', 'real', 'retry']);
+
 /**
  * Is the given run mode one that performs a real, irreversible action?
  * @param {string} mode
@@ -36,6 +46,69 @@ const LIVE_MODES = new Set(['real', 'retry', 'snapshot', 'confirm']);
  */
 function isLiveMode(mode) {
   return LIVE_MODES.has(mode);
+}
+
+/**
+ * Does the given run mode honour --only / --skip filters?
+ * @param {string} mode
+ * @returns {boolean}
+ */
+function modeHonorsFilters(mode) {
+  return FILTER_MODES.has(mode);
+}
+
+/**
+ * Map a raw watcher.js status string to a canonical display bucket.
+ *
+ * Status vocabulary (from lib/logger.js STATUS_BUCKET):
+ *   success, notFound, unverified, pending_confirm, error, captcha_failed, dead, manual
+ *
+ * Returns one of: 'ok' | 'notfound' | 'pending' | 'error' | 'manual' | 'other'
+ *
+ * NOTE: the browser app.js mirrors this mapping; keep them in sync.
+ *
+ * @param {*} status  Raw status string from state.json history.
+ * @returns {string}
+ */
+function classifyStatus(status) {
+  switch (String(status || '').toLowerCase()) {
+    case 'success':         return 'ok';
+    case 'notfound':        return 'notfound';
+    case 'pending_confirm': return 'pending';
+    case 'unverified':      return 'pending';
+    case 'error':           return 'error';
+    case 'captcha_failed':  return 'error';
+    case 'dead':            return 'error';
+    case 'manual':          return 'manual';
+    default:                return 'other';
+  }
+}
+
+/**
+ * Decide the active credential source from env vars and whether env creds are
+ * fully configured (both user AND password must be set to count as configured).
+ *
+ * Returns { envUser, envPass, envConfigured, warning? }
+ *
+ * @param {string} envUser  Value of AIDR_USER env var (empty string if unset).
+ * @param {string} envPass  Value of AIDR_PASS env var (empty string if unset).
+ * @returns {{ envUser: string, envPass: string, envConfigured: boolean, warning?: string }}
+ */
+function resolveEnvCreds(envUser, envPass) {
+  const hasUser = typeof envUser === 'string' && envUser.length > 0;
+  const hasPass = typeof envPass === 'string' && envPass.length > 0;
+  if (hasUser && hasPass) {
+    return { envUser, envPass, envConfigured: true };
+  }
+  if (hasUser || hasPass) {
+    return {
+      envUser: '',
+      envPass: '',
+      envConfigured: false,
+      warning: 'AIDR_USER/AIDR_PASS: only one of the two is set - env credentials ignored (set BOTH to enable)',
+    };
+  }
+  return { envUser: '', envPass: '', envConfigured: false };
 }
 
 /**
@@ -97,4 +170,13 @@ function validateRunRequest(body, modeArgsMap) {
   return { ok: true, mode, only: only.value, skip: skip.value };
 }
 
-module.exports = { LIVE_MODES, isLiveMode, validateFilter, validateRunRequest };
+module.exports = {
+  LIVE_MODES,
+  FILTER_MODES,
+  isLiveMode,
+  modeHonorsFilters,
+  classifyStatus,
+  resolveEnvCreds,
+  validateFilter,
+  validateRunRequest,
+};

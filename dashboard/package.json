@@ -6,7 +6,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node --check server.js && echo \"no tests yet\""
+    "test": "node --test"
   },
   "engines": {
     "node": ">=18.0.0"

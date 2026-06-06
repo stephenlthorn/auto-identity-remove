@@ -41,7 +41,8 @@ on a reverse proxy for access control):
 | Var | Default | Meaning |
 |-----|---------|---------|
 | `AIDR_PORT` | `8080` | Listen port |
-| `AIDR_USER` / `AIDR_PASS` | _(unset)_ | HTTP Basic credentials. When set, **all routes except `/api/health`** require them (browser-native login prompt). |
+| `AIDR_HOST` | `127.0.0.1` | Bind address. Defaults to loopback (local access only). Set `AIDR_HOST=0.0.0.0` **only** if you intend LAN/public access (use a reverse proxy with TLS). |
+| `AIDR_USER` / `AIDR_PASS` | _(unset)_ | HTTP Basic credentials. **Both must be set** for the env credentials to be active (setting only one is treated as misconfigured and logs a warning). When set, **all routes except `/api/health`** require them (browser-native login prompt). |
 | `AIDR_TOKEN` | _(unset)_ | Token accepted **only** via the `X-AIDR-Token` header (for scripts/automation). Not accepted via query string. |
 
 A request is allowed if it satisfies **either** valid Basic credentials **or** a
@@ -80,7 +81,7 @@ the Schedule tab can enable/disable `aidr.timer` and switch cadence.
 
 The config holds personal data and the UI can trigger real opt-out submissions,
 so set `AIDR_USER`/`AIDR_PASS` (and optionally `AIDR_TOKEN` for automation). The
-server binds `0.0.0.0`; a TLS-terminating reverse proxy is recommended for
-encryption in transit, but is **not** required for access control. `/api/health`
-is intentionally unauthenticated and returns only `{ ok: true }` (no path or
+server binds `127.0.0.1` by default (loopback only); set `AIDR_HOST=0.0.0.0` if
+you need LAN access and use a TLS-terminating reverse proxy. `/api/health` is
+intentionally unauthenticated and returns only `{ ok: true }` (no path or
 version disclosure).

@@ -26,4 +26,23 @@ jobs:
         run: npm ci
 
       - name: Run tests
+        run: node --test test/*.test.js dashboard/validate.test.js
+
+  dashboard:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dashboard dependencies
+        working-directory: dashboard
+        run: npm ci
+
+      - name: Run dashboard tests
+        working-directory: dashboard
         run: node --test

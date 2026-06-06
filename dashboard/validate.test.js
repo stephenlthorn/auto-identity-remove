@@ -12,7 +12,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { isLiveMode, validateFilter, validateRunRequest } = require('./validate');
+const { isLiveMode, modeHonorsFilters, classifyStatus, resolveEnvCreds, validateFilter, validateRunRequest } = require('./validate');
 
 // Mirror of server.js MODE_ARGS keys (values irrelevant to validation).
 const MODE_ARGS = {
@@ -130,4 +130,96 @@ test('validateRunRequest: clean filters are normalized onto the result', () => {
   assert.equal(r.ok, true);
   assert.equal(r.only, 'Spokeo,Radaris');
   assert.equal(r.skip, 'MyLife');
+});
+
+// ── modeHonorsFilters ────────────────────────────────────────────────────────
+
+test('modeHonorsFilters: preview/real/retry honor filters', () => {
+  for (const m of ['preview', 'real', 'retry']) {
+    assert.equal(modeHonorsFilters(m), true, `${m} should honor filters`);
+  }
+});
+
+test('modeHonorsFilters: list/pending/confirm/doctor/verify/serp do not honor filters', () => {
+  for (const m of ['list', 'pending', 'confirm', 'doctor', 'verify', 'serp', 'snapshot']) {
+    assert.equal(modeHonorsFilters(m), false, `${m} should not honor filters`);
+  }
+});
+
+// ── classifyStatus ───────────────────────────────────────────────────────────
+
+test('classifyStatus: success -> ok', () => {
+  assert.equal(classifyStatus('success'), 'ok');
+});
+
+test('classifyStatus: notFound -> notfound', () => {
+  assert.equal(classifyStatus('notFound'), 'notfound');
+});
+
+test('classifyStatus: pending_confirm -> pending', () => {
+  assert.equal(classifyStatus('pending_confirm'), 'pending');
+});
+
+test('classifyStatus: unverified -> pending', () => {
+  assert.equal(classifyStatus('unverified'), 'pending');
+});
+
+test('classifyStatus: error -> error', () => {
+  assert.equal(classifyStatus('error'), 'error');
+});
+
+test('classifyStatus: captcha_failed -> error', () => {
+  assert.equal(classifyStatus('captcha_failed'), 'error');
+});
+
+test('classifyStatus: dead -> error', () => {
+  assert.equal(classifyStatus('dead'), 'error');
+});
+
+test('classifyStatus: manual -> manual', () => {
+  assert.equal(classifyStatus('manual'), 'manual');
+});
+
+test('classifyStatus: unknown string -> other', () => {
+  assert.equal(classifyStatus('bogus'), 'other');
+  assert.equal(classifyStatus(''), 'other');
+  assert.equal(classifyStatus(undefined), 'other');
+  assert.equal(classifyStatus(null), 'other');
+});
+
+test('classifyStatus: case-insensitive matching', () => {
+  assert.equal(classifyStatus('SUCCESS'), 'ok');
+  assert.equal(classifyStatus('Pending_Confirm'), 'pending');
+  assert.equal(classifyStatus('CAPTCHA_FAILED'), 'error');
+});
+
+// ── resolveEnvCreds ──────────────────────────────────────────────────────────
+
+test('resolveEnvCreds: both set -> envConfigured true, no warning', () => {
+  const r = resolveEnvCreds('admin', 'secret');
+  assert.equal(r.envConfigured, true);
+  assert.equal(r.envUser, 'admin');
+  assert.equal(r.envPass, 'secret');
+  assert.equal(r.warning, undefined);
+});
+
+test('resolveEnvCreds: neither set -> envConfigured false, no warning', () => {
+  const r = resolveEnvCreds('', '');
+  assert.equal(r.envConfigured, false);
+  assert.equal(r.warning, undefined);
+});
+
+test('resolveEnvCreds: only user set -> envConfigured false, warning emitted', () => {
+  const r = resolveEnvCreds('admin', '');
+  assert.equal(r.envConfigured, false);
+  assert.equal(r.envUser, '');
+  assert.equal(r.envPass, '');
+  assert.ok(r.warning, 'should emit a warning');
+  assert.match(r.warning, /AIDR_USER|AIDR_PASS/);
+});
+
+test('resolveEnvCreds: only pass set -> envConfigured false, warning emitted', () => {
+  const r = resolveEnvCreds('', 'secret');
+  assert.equal(r.envConfigured, false);
+  assert.ok(r.warning, 'should emit a warning');
 });
