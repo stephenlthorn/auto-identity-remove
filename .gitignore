@@ -3,6 +3,7 @@ config.json
 state.json
 state.json.bak
 state.json.tmp
+state.json.lock
 serp-history.json
 data/serp-history.json
 inbox/
