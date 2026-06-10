@@ -49,6 +49,11 @@ const NO_CAPSOLVER    = process.argv.includes('--no-capsolver');
 const RESUME          = process.argv.includes('--resume');
 const SNAPSHOT        = process.argv.includes('--snapshot');
 const REPORT          = process.argv.includes('--report');
+
+// -- Config-encryption migration flags (run before any pipeline work) ---------
+const ENCRYPT_CONFIG  = process.argv.includes('--encrypt-config');
+const DECRYPT_CONFIG  = process.argv.includes('--decrypt-config');
+const KEEP_PLAINTEXT  = process.argv.includes('--keep-plaintext');
 const KNOW_MODE       = process.argv.includes('--know');
 const KNOW_STATUS     = process.argv.includes('--know-status');
 const COMPLAINTS_MODE = process.argv.includes('--complaints');
@@ -130,6 +135,33 @@ if (FREEZE_MODE) {
   console.log('   Undo a mark:    node watcher.js --freeze-clear <key>');
   console.log(`   Keys: ${FREEZE_TARGETS.map(t => t.key).join(', ')}\n`);
   process.exit(0);
+}
+
+// -- --encrypt-config / --decrypt-config: at-rest encryption migration --------
+if (ENCRYPT_CONFIG || DECRYPT_CONFIG) {
+  const { encryptConfigToDisk, decryptConfigToDisk, getPassphrase, PASSPHRASE_ENV } = require('./lib/config');
+  if (!getPassphrase()) {
+    console.error(`No passphrase. Set ${PASSPHRASE_ENV} (export ${PASSPHRASE_ENV}=...) and re-run.`);
+    process.exit(1);
+  }
+  try {
+    if (ENCRYPT_CONFIG) {
+      const res = encryptConfigToDisk({ shred: !KEEP_PLAINTEXT });
+      console.log(`\nEncrypted config written to ${res.encPath}`);
+      console.log(res.shredded
+        ? '   Plaintext config.json shredded.'
+        : '   Plaintext config.json kept (--keep-plaintext).');
+      console.log(`   Decrypt later with: node watcher.js --decrypt-config\n`);
+    } else {
+      const res = decryptConfigToDisk({ removeEnc: true });
+      console.log(`\nDecrypted plaintext config written to ${res.configPath}`);
+      console.log('   Encrypted config.json.enc removed.\n');
+    }
+    process.exit(0);
+  } catch (err) {
+    console.error(`Config migration failed: ${err.message}`);
+    process.exit(1);
+  }
 }
 
 // ── --list: print all brokers + status from state.json, then exit ────────────
