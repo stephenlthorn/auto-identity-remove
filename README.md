@@ -354,6 +354,10 @@ A dated JSON report is saved to `logs/verify-YYYY-MM-DD.json`.
 - "Still listed" can mean the opt-out failed **or** the broker re-added your data since the last successful opt-out was recorded. Either way, re-running `node watcher.js` will attempt removal again.
 - If the broker's search page is down or slow, the result is classified as `unverifiable` (a timeout is not counted as "still listed").
 
+### Continuous SERP monitoring (`--serp-watch`)
+
+`node watcher.js --serp-watch` runs a search-engine scan, diffs the broker domains it finds against the previous `data/serp-history.json` snapshot, and dispatches an alert (via `lib/notify.js` `dispatchNotify`: macOS toast/iMessage, Linux `notify-send`, and/or the `notify.webhook` URL) only when your name appears on a NEW domain. Because the scan appends to `data/serp-history.json`, repeated runs diff against the prior run. Add `--serp-watch` to `run.sh` to have the existing monthly scheduler watch for new exposures.
+
 ---
 
 ## Experimental: noise mode
