@@ -318,3 +318,29 @@ test('formatBreachReport lists broker cross-references', () => {
   assert.match(report, /also data brokers/);
   assert.match(report, /SpokeoLeak \(spokeo\.com\) ↔ broker "Spokeo"/);
 });
+
+// ─── collectEmails / missingKeyMessage ───────────────────────────────────────
+
+const { collectEmails, missingKeyMessage } = require('../lib/hibp');
+
+test('collectEmails gathers unique, lowercased emails from persons', () => {
+  const persons = [
+    { firstName: 'Jane', email: 'Jane@Example.com' },
+    { firstName: 'John', email: 'john@example.com' },
+    { firstName: 'Dup', email: 'jane@example.com' },
+    { firstName: 'NoEmail' },
+  ];
+  assert.deepEqual(collectEmails(persons), ['jane@example.com', 'john@example.com']);
+});
+
+test('collectEmails returns [] for empty / missing input', () => {
+  assert.deepEqual(collectEmails([]), []);
+  assert.deepEqual(collectEmails(undefined), []);
+});
+
+test('missingKeyMessage explains how to get a free HIBP key', () => {
+  const msg = missingKeyMessage();
+  assert.match(msg, /hibp\.apiKey/);
+  assert.match(msg, /haveibeenpwned\.com\/API\/Key/);
+  assert.match(msg, /config\.json/);
+});
