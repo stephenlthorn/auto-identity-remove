@@ -385,6 +385,18 @@ Only brokers tagged `acceptsBogus: true` in `brokers.js` will receive noise subm
 
 ## Maintenance
 
+### Refreshing the broker list (`--update-brokers`)
+
+The bundled Markup dataset is from January 2023 and is increasingly stale. Refresh the broker coverage from the official, auto-updating state data-broker registries:
+
+```bash
+node watcher.js --update-brokers
+```
+
+This fetches the California (SB-362) and Vermont registries over HTTP (no browser is launched), normalizes each entry, dedups it by hostname against the explicit brokers in `brokers.js`, and writes `data/feeds-brokers.json`. The generic runner loads that file alongside the Markup dataset on the next run; the Markup data stays as the fallback, so a failed or skipped refresh never reduces coverage. Override the registry URLs with the `CA_REGISTRY_URL` / `VT_REGISTRY_URL` environment variables if the official endpoints move.
+
+---
+
 ### Pruning stale / dead URLs
 
 The Markup dataset is years old; many of the ~489 generic opt-out URLs now 404 or fail DNS lookup. These are classified as `💀 Dead (stale URL)` in run output and do **not** count as errors.
