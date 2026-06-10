@@ -325,3 +325,36 @@ test('mergeConfig: non-secret field set to empty string is cleared', async () =>
     await close();
   }
 });
+
+test('/api/exposure returns a current score, breakdown and history array', async () => {
+  const stateContent = {
+    optOuts: {
+      Spokeo: { lastSuccess: '2026-01-01T00:00:00.000Z' }, // still listed (never verified)
+      MyLife: { lastSuccess: '2026-01-01T00:00:00.000Z', verifiedDeletedAt: '2026-02-01T00:00:00.000Z' }, // gone
+    },
+  };
+  const { server, close } = await buildServer({ stateContent });
+  try {
+    const r = await request(server, {
+      pathname: '/api/exposure',
+      headers: { Authorization: basicAuth('testuser', 'testpass') },
+    });
+    assert.equal(r.status, 200);
+    assert.equal(typeof r.json.score, 'number');
+    assert.equal(r.json.listedCount, 1); // Spokeo still listed, MyLife gone
+    assert.ok(r.json.breakdown && typeof r.json.breakdown.listed === 'number');
+    assert.ok(Array.isArray(r.json.history));
+  } finally {
+    await close();
+  }
+});
+
+test('/api/exposure requires auth', async () => {
+  const { server, close } = await buildServer();
+  try {
+    const r = await request(server, { pathname: '/api/exposure' });
+    assert.equal(r.status, 401);
+  } finally {
+    await close();
+  }
+});

@@ -48,6 +48,8 @@ const CONFIG = path.join(ROOT, 'config.json');
 const STATE = path.join(ROOT, 'state.json');
 const LOGS = path.join(ROOT, 'logs');
 const BROKERS = path.join(ROOT, 'brokers.js');
+const SERP_HISTORY = path.join(ROOT, 'data', 'serp-history.json');
+const EXPOSURE_LIB = path.join(ROOT, 'lib', 'exposure.js');
 
 const PORT = Number.parseInt(process.env.AIDR_PORT, 10) || 8080;
 const HOST = process.env.AIDR_HOST || '127.0.0.1';
@@ -328,6 +330,27 @@ app.get('/api/state', (_req, res) => {
   const m = readJsonMeta(STATE);
   if (m.parseError) return res.json({ error: 'state.json could not be parsed' });
   res.json(m.data || {});
+});
+
+// GET /api/exposure -> current exposure score (computed from state.json +
+// persisted SERP history) plus the dated snapshot history. The score math
+// lives in the parent repo's lib/exposure.js (pure, unit-tested there).
+app.get('/api/exposure', (_req, res) => {
+  let exposure;
+  try { exposure = require(EXPOSURE_LIB); }
+  catch (e) { return res.status(500).json({ error: 'exposure module unavailable: ' + e.message }); }
+
+  const state = readJsonSafe(STATE, { optOuts: {} });
+  const serpRows = readJsonSafe(SERP_HISTORY, []);
+  const serpResults = exposure.serpResultsFromHistory(Array.isArray(serpRows) ? serpRows : []);
+  const summary = exposure.computeExposureScore({
+    state: state && state.optOuts ? state : { optOuts: {} },
+    serpResults,
+    breachCount: 0,
+    brokers: loadBrokers(),
+  });
+  const history = exposure.loadExposureHistory();
+  res.json({ ...summary, history });
 });
 
 app.get('/api/summary', (_req, res) => {
