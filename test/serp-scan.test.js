@@ -604,3 +604,20 @@ test('readHistory returns empty array when JSON is not an array', () => {
 test('serp-scan exports HISTORY_PATH ending in data/serp-history.json', () => {
   assert.ok(HISTORY_PATH.endsWith('serp-history.json'), `HISTORY_PATH was ${HISTORY_PATH}`);
 });
+
+// -- runSerpScan summary results carry a hostname (for serp-watch diffing) ----
+
+test('runSerpScan summary results include a broker hostname', async () => {
+  const context = makeContext({
+    'duckduckgo.com': `
+      <a class="result__a" href="https://duckduckgo.com/?uddg=https%3A%2F%2Fwww.spokeo.com%2FJane">S</a>
+    `,
+    'bing.com': `<html></html>`,
+    'google.com': `<html></html>`,
+  });
+
+  const summary = await runSerpScan(context, SAMPLE_PERSONS, SAMPLE_BROKERS, { _skipWrite: true });
+  const spokeo = summary.results.find(r => r.broker === 'Spokeo');
+  assert.ok(spokeo, 'Spokeo should be in results');
+  assert.equal(spokeo.hostname, 'spokeo.com', 'each result should carry the broker registrable hostname');
+});
