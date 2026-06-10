@@ -358,3 +358,158 @@ test('/api/exposure requires auth', async () => {
     await close();
   }
 });
+
+// ---- freeze checklist endpoints --------------------------------------------
+
+test('GET /api/freeze returns 7 targets with done:false for empty state', async () => {
+  const { server, close } = await buildServer({ stateContent: { optOuts: {} } });
+  try {
+    const r = await request(server, {
+      pathname: '/api/freeze',
+      headers: { Authorization: basicAuth('testuser', 'testpass') },
+    });
+    assert.equal(r.status, 200, `expected 200, got ${r.status}: ${r.raw}`);
+    assert.ok(Array.isArray(r.json.targets), 'response.targets must be an array');
+    assert.equal(r.json.targets.length, 7);
+    assert.ok(r.json.targets.every(t => t.done === false), 'all targets not-done for empty state');
+    const eq = r.json.targets.find(t => t.key === 'equifax');
+    assert.match(eq.url, /equifax\.com/);
+    assert.equal(eq.type, 'credit-bureau');
+  } finally {
+    await close();
+  }
+});
+
+test('GET /api/freeze reflects completed targets from state.freezes', async () => {
+  const { server, close } = await buildServer({
+    stateContent: { optOuts: {}, freezes: { experian: { doneAt: '2026-06-02T00:00:00.000Z' } } },
+  });
+  try {
+    const r = await request(server, {
+      pathname: '/api/freeze',
+      headers: { Authorization: basicAuth('testuser', 'testpass') },
+    });
+    assert.equal(r.status, 200);
+    const ex = r.json.targets.find(t => t.key === 'experian');
+    assert.equal(ex.done, true);
+    assert.equal(ex.doneAt, '2026-06-02T00:00:00.000Z');
+  } finally {
+    await close();
+  }
+});
+
+test('POST /api/freeze action=done records the target on disk', async () => {
+  const { server, close, realState } = await buildServer({ stateContent: { optOuts: {} } });
+  try {
+    const r = await request(server, {
+      method: 'POST',
+      pathname: '/api/freeze',
+      headers: {
+        Authorization: basicAuth('testuser', 'testpass'),
+        Origin: `http://127.0.0.1:${server.address().port}`,
+      },
+      body: { key: 'equifax', action: 'done' },
+    });
+    assert.equal(r.status, 200, `expected 200, got ${r.status}: ${r.raw}`);
+    assert.equal(r.json.ok, true);
+    const saved = JSON.parse(fs.readFileSync(realState, 'utf8'));
+    assert.ok(saved.freezes.equifax, 'equifax freeze must be persisted');
+    assert.match(saved.freezes.equifax.doneAt, /^\d{4}-\d{2}-\d{2}T/);
+  } finally {
+    await close();
+  }
+});
+
+test('POST /api/freeze action=clear removes a recorded target', async () => {
+  const { server, close, realState } = await buildServer({
+    stateContent: { optOuts: {}, freezes: { equifax: { doneAt: '2026-06-01T00:00:00.000Z' } } },
+  });
+  try {
+    const r = await request(server, {
+      method: 'POST',
+      pathname: '/api/freeze',
+      headers: {
+        Authorization: basicAuth('testuser', 'testpass'),
+        Origin: `http://127.0.0.1:${server.address().port}`,
+      },
+      body: { key: 'equifax', action: 'clear' },
+    });
+    assert.equal(r.status, 200, `expected 200, got ${r.status}: ${r.raw}`);
+    const saved = JSON.parse(fs.readFileSync(realState, 'utf8'));
+    assert.ok(!saved.freezes.equifax, 'equifax freeze must be cleared on disk');
+  } finally {
+    await close();
+  }
+});
+
+test('POST /api/freeze does not disturb the existing optOuts namespace', async () => {
+  const { server, close, realState } = await buildServer({
+    stateContent: { optOuts: { spokeo: { history: ['success'], lastSuccess: '2026-01-01T00:00:00.000Z' } } },
+  });
+  try {
+    const r = await request(server, {
+      method: 'POST',
+      pathname: '/api/freeze',
+      headers: {
+        Authorization: basicAuth('testuser', 'testpass'),
+        Origin: `http://127.0.0.1:${server.address().port}`,
+      },
+      body: { key: 'innovis', action: 'done' },
+    });
+    assert.equal(r.status, 200);
+    const saved = JSON.parse(fs.readFileSync(realState, 'utf8'));
+    assert.ok(saved.optOuts.spokeo, 'optOuts must survive a freeze write');
+    assert.equal(saved.optOuts.spokeo.lastSuccess, '2026-01-01T00:00:00.000Z');
+    assert.ok(saved.freezes.innovis, 'innovis recorded alongside optOuts');
+  } finally {
+    await close();
+  }
+});
+
+test('POST /api/freeze with an unknown key returns 400', async () => {
+  const { server, close } = await buildServer({ stateContent: { optOuts: {} } });
+  try {
+    const r = await request(server, {
+      method: 'POST',
+      pathname: '/api/freeze',
+      headers: {
+        Authorization: basicAuth('testuser', 'testpass'),
+        Origin: `http://127.0.0.1:${server.address().port}`,
+      },
+      body: { key: 'bogus', action: 'done' },
+    });
+    assert.equal(r.status, 400);
+    assert.match(r.json.error, /unknown freeze target|bad key/i);
+  } finally {
+    await close();
+  }
+});
+
+test('POST /api/freeze with a bad action returns 400', async () => {
+  const { server, close } = await buildServer({ stateContent: { optOuts: {} } });
+  try {
+    const r = await request(server, {
+      method: 'POST',
+      pathname: '/api/freeze',
+      headers: {
+        Authorization: basicAuth('testuser', 'testpass'),
+        Origin: `http://127.0.0.1:${server.address().port}`,
+      },
+      body: { key: 'equifax', action: 'nope' },
+    });
+    assert.equal(r.status, 400);
+    assert.match(r.json.error, /bad action|action/i);
+  } finally {
+    await close();
+  }
+});
+
+test('GET /api/freeze requires auth (401 without credentials)', async () => {
+  const { server, close } = await buildServer({ stateContent: { optOuts: {} } });
+  try {
+    const r = await request(server, { pathname: '/api/freeze' });
+    assert.equal(r.status, 401);
+  } finally {
+    await close();
+  }
+});

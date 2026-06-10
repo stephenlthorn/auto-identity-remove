@@ -25,6 +25,8 @@
  *   POST /api/schedule           -> { action: enable|disable|preset, preset? }
  *   GET  /api/auth/whoami        -> current user + credential source
  *   POST /api/auth/password      -> change login (requires current password)
+ *   GET  /api/freeze             -> credit/identity freeze checklist + status
+ *   POST /api/freeze             -> { key, action: done|clear } mark a freeze target
  *
  * Auth (all routes except /api/health, static + API): set AIDR_USER + AIDR_PASS
  *   for HTTP Basic, and/or AIDR_TOKEN for header token auth (X-AIDR-Token). A
@@ -42,6 +44,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { spawn, execFile } = require('child_process');
 const { validateRunRequest, modeHonorsFilters, classifyStatus, resolveEnvCreds } = require('./validate');
+const { FREEZE_TARGETS, TARGET_KEYS, getFreezeStatus } = require('../lib/freeze');
 
 const ROOT = path.resolve(__dirname, '..');
 const CONFIG = path.join(ROOT, 'config.json');
@@ -519,6 +522,41 @@ app.post('/api/schedule', async (req, res) => {
 app.get('/api/version', (_req, res) => {
   const pkg = readJsonSafe(path.join(ROOT, 'package.json'), {});
   res.json({ tool: pkg.version || 'unknown', node: process.version, brokers: loadBrokers().length });
+});
+
+// ---- freeze checklist ------------------------------------------------------
+// Guided credit/identity freeze tracking. GET returns the canonical targets
+// merged with completion status from state.freezes; POST marks a target
+// done/cleared. State is additive - only state.freezes is touched, never
+// state.optOuts. Auth + CSRF are enforced by the global middleware above.
+app.get('/api/freeze', (_req, res) => {
+  const m = readJsonMeta(STATE);
+  const state = (m.exists && !m.parseError && m.data) ? m.data : { optOuts: {} };
+  res.json({ targets: getFreezeStatus(state) });
+});
+
+app.post('/api/freeze', (req, res) => {
+  const { key, action } = req.body || {};
+  if (!TARGET_KEYS.has(key)) return res.status(400).json({ error: `unknown freeze target: ${key}` });
+  if (action !== 'done' && action !== 'clear') return res.status(400).json({ error: 'bad action (expected "done" or "clear")' });
+
+  const m = readJsonMeta(STATE);
+  if (m.parseError) return res.status(409).json({ error: 'state.json could not be parsed' });
+  const state = (m.exists && m.data) ? m.data : { optOuts: {} };
+  if (!state.freezes || typeof state.freezes !== 'object') state.freezes = {};
+
+  if (action === 'done') {
+    state.freezes[key] = { doneAt: new Date().toISOString() };
+  } else {
+    delete state.freezes[key];
+  }
+
+  try {
+    writeJsonAtomic(STATE, state, 0o600);
+    res.json({ ok: true, targets: getFreezeStatus(state) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ---- static + start -------------------------------------------------------
