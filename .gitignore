@@ -6,6 +6,7 @@ state.json.tmp
 state.json.lock
 serp-history.json
 data/serp-history.json
+data/exposure-history.json
 inbox/
 logs/
 logs/snapshots/
