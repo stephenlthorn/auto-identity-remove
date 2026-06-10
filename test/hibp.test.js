@@ -385,3 +385,15 @@ test('integration: missing key short-circuits before any HIBP call', async () =>
   assert.equal(fetchImpl.calls.length, 0);
   assert.match(missingKeyMessage(), /haveibeenpwned\.com\/API\/Key/);
 });
+
+// ─── config.example.json documents hibp.apiKey ──────────────────────────────
+
+test('config.example.json documents an optional hibp.apiKey', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const raw = fs.readFileSync(path.join(__dirname, '..', 'config.example.json'), 'utf8');
+  const parsed = JSON.parse(raw);
+  assert.ok(parsed.hibp, 'config.example.json should include a "hibp" block');
+  assert.ok('apiKey' in parsed.hibp, 'hibp block should document apiKey');
+  assert.match(raw, /haveibeenpwned\.com\/API\/Key/);
+});

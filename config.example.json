@@ -24,6 +24,11 @@
     "apiKey": "CAP-YOUR_KEY_HERE"
   },
 
+  "hibp": {
+    "_comment": "Optional. Have I Been Pwned breach check (node watcher.js --breach-check). Get a key at https://haveibeenpwned.com/API/Key. Leave apiKey blank to disable.",
+    "apiKey": ""
+  },
+
   "accounts": {
     "_comment": "For sites that require a login. Leave password blank — setup.js will prompt you to create the account once, then store credentials here.",
     "spokeo":       { "email": "", "password": "" },
