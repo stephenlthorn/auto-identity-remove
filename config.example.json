@@ -46,7 +46,7 @@
   },
 
   "email": {
-    "_comment": "SMTP config for sending opt-out emails. Required — without this, email brokers are logged as 'manual'. Gmail: host=smtp.gmail.com, port=587, use an App Password (myaccount.google.com/apppasswords). Outlook/Office365: host=smtp-mail.outlook.com, port=587.",
+    "_comment": "SMTP config for sending opt-out emails. Required - without this, email brokers are logged as 'manual'. Gmail: host=smtp.gmail.com, port=587, use an App Password (myaccount.google.com/apppasswords). Outlook/Office365: host=smtp-mail.outlook.com, port=587.",
     "smtp": {
       "host": "smtp.gmail.com",
       "port": 587,
@@ -54,6 +54,12 @@
       "pass": "YOUR_GMAIL_APP_PASSWORD",
       "from": "you@gmail.com"
     }
+  },
+
+  "relay": {
+    "_comment": "OPTIONAL masked-email relay. When set, opt-out submissions use a per-person alias instead of person.email so brokers never get your real address. Currently supports provider 'simplelogin' via API. Apple Hide My Email and Firefox Relay are manual-only - see docs/relay.md. Omit this block entirely to submit with your real email (default).",
+    "provider": "simplelogin",
+    "apiKey": "YOUR_SIMPLELOGIN_API_KEY"
   },
 
   "profileDir": "~/.config/auto-identity-remove"
