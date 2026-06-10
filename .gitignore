@@ -7,6 +7,7 @@ state.json.lock
 serp-history.json
 data/serp-history.json
 data/exposure-history.json
+data/exposure-history.json.bak
 inbox/
 logs/
 logs/snapshots/
