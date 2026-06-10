@@ -19,6 +19,7 @@ const readline = require('readline');
 const { execSync } = require('child_process');
 
 const { installSchedule } = require('./lib/scheduler');
+const { encryptConfigToDisk } = require('./lib/config');
 
 const CONFIG_PATH = path.join(__dirname, 'config.json');
 const STATE_PATH  = path.join(__dirname, 'state.json');
@@ -81,7 +82,27 @@ function formatPhone(phone, country) {
   return phone;
 }
 
-module.exports = { regionPrompts, formatPhone };
+/**
+ * If a non-empty passphrase is given, encrypt the plaintext config at configPath
+ * into encPath (shredding the plaintext). Returns { encrypted: boolean }.
+ * Pure aside from the file I/O it delegates to lib/config.encryptConfigToDisk.
+ *
+ * @param {{ passphrase: string, configPath?: string, encPath?: string }} opts
+ */
+function maybeEncryptConfig(opts) {
+  const o = opts || {};
+  const passphrase = o.passphrase || '';
+  if (!passphrase) return { encrypted: false };
+  const res = encryptConfigToDisk({
+    passphrase,
+    shred: true,
+    ...(o.configPath ? { configPath: o.configPath } : {}),
+    ...(o.encPath ? { encPath: o.encPath } : {}),
+  });
+  return { encrypted: true, encPath: res.encPath };
+}
+
+module.exports = { regionPrompts, formatPhone, maybeEncryptConfig };
 
 // ─── Main setup ───────────────────────────────────────────────────────────────
 
@@ -190,6 +211,25 @@ async function main() {
 
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
   console.log('\n✅ config.json saved.\n');
+
+  // -- Optional at-rest encryption --------------------------------------------
+  console.log('-- Encrypt config at rest? ----------------------------------------');
+  console.log('Your config holds PII, the CapSolver key, and (optionally) an SMTP');
+  console.log('password. You can encrypt it with AES-256-GCM. You will then need to');
+  console.log('set AIDR_PASSPHRASE in the environment when running the watcher.\n');
+  const doEncrypt = await confirm('Encrypt config.json now?');
+  if (doEncrypt) {
+    const passphrase = await askSecret('Choose a passphrase (keep it safe - there is no recovery)');
+    if (passphrase) {
+      const encResult = maybeEncryptConfig({ passphrase });
+      if (encResult.encrypted) {
+        console.log(`\nconfig encrypted to ${encResult.encPath}; plaintext shredded.`);
+        console.log(`   Run the watcher with: AIDR_PASSPHRASE=... node watcher.js\n`);
+      }
+    } else {
+      console.log('  No passphrase entered - leaving config in plaintext.\n');
+    }
+  }
 
   // Initialize state.json if not present
   if (!fs.existsSync(STATE_PATH)) {
