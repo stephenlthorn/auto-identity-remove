@@ -212,3 +212,109 @@ test('breachCount returns array length, 0 for non-arrays', () => {
   assert.equal(breachCount([]), 0);
   assert.equal(breachCount(undefined), 0);
 });
+
+// ─── runBreachCheck orchestrator ─────────────────────────────────────────────
+
+test('runBreachCheck aggregates breaches across emails and sets freeze flag', async () => {
+  // First email: a high-severity breach. Second email: clean (404).
+  const fetchImpl = makeFetch([
+    { status: 200, json: [{ Name: 'Adobe', Domain: 'adobe.com', BreachDate: '2013-10-04', DataClasses: ['Passwords'] }] },
+    { status: 404 },
+  ]);
+  const result = await runBreachCheck({
+    emails: ['jane@example.com', 'clean@example.com'],
+    apiKey: 'k',
+    brokers: [],
+    fetchImpl,
+  });
+  assert.equal(fetchImpl.calls.length, 2, 'one HIBP call per email');
+  assert.equal(result.perEmail.length, 2);
+  assert.equal(result.perEmail[0].breaches.length, 1);
+  assert.equal(result.perEmail[1].breaches.length, 0);
+  assert.equal(result.totalBreaches, 1);
+  assert.equal(result.freeze, true);
+});
+
+test('runBreachCheck records per-email error without aborting other emails', async () => {
+  // First email rate-limited (429 -> error), second email clean.
+  const fetchImpl = makeFetch([
+    { status: 429 },
+    { status: 200, json: [] },
+  ]);
+  const result = await runBreachCheck({
+    emails: ['a@example.com', 'b@example.com'],
+    apiKey: 'k',
+    fetchImpl,
+  });
+  assert.equal(result.perEmail.length, 2);
+  assert.match(result.perEmail[0].error, /rate limited \(429\)/);
+  assert.equal(result.perEmail[1].breaches.length, 0);
+  assert.equal(result.freeze, false);
+});
+
+test('runBreachCheck surfaces broker cross-references', async () => {
+  const fetchImpl = makeFetch({
+    status: 200,
+    json: [{ Name: 'SpokeoLeak', Domain: 'spokeo.com', BreachDate: '2020-01-01', DataClasses: ['Physical addresses'] }],
+  });
+  const result = await runBreachCheck({
+    emails: ['jane@example.com'],
+    apiKey: 'k',
+    brokers: [{ name: 'Spokeo', optOutUrl: 'https://www.spokeo.com/optout' }],
+    fetchImpl,
+  });
+  assert.equal(result.brokerMatches.length, 1);
+  assert.equal(result.brokerMatches[0].broker.name, 'Spokeo');
+  assert.equal(result.freeze, true);
+});
+
+// ─── formatBreachReport ──────────────────────────────────────────────────────
+
+test('formatBreachReport renders freeze recommendation when freeze is true', () => {
+  const report = formatBreachReport({
+    perEmail: [
+      { email: 'jane@example.com', breaches: [
+        { name: 'Adobe', domain: 'adobe.com', breachDate: '2013-10-04', dataClasses: ['Passwords'], severity: 'high' },
+      ] },
+    ],
+    brokerMatches: [],
+    freeze: true,
+  });
+  assert.match(report, /jane@example\.com: 1 breach/);
+  assert.match(report, /\[HIGH\] Adobe/);
+  assert.match(report, /credit freeze/i);
+  assert.match(report, /Equifax, Experian, and TransUnion/);
+});
+
+test('formatBreachReport renders clean message when no breaches', () => {
+  const report = formatBreachReport({
+    perEmail: [{ email: 'clean@example.com', breaches: [] }],
+    brokerMatches: [],
+    freeze: false,
+  });
+  assert.match(report, /no breaches found/);
+  assert.match(report, /No high-severity identity breaches found/);
+});
+
+test('formatBreachReport renders per-email error line', () => {
+  const report = formatBreachReport({
+    perEmail: [{ email: 'a@example.com', breaches: [], error: 'HIBP: rate limited (429)' }],
+    brokerMatches: [],
+    freeze: false,
+  });
+  assert.match(report, /a@example\.com: error - HIBP: rate limited \(429\)/);
+});
+
+test('formatBreachReport lists broker cross-references', () => {
+  const report = formatBreachReport({
+    perEmail: [{ email: 'jane@example.com', breaches: [
+      { name: 'SpokeoLeak', domain: 'spokeo.com', breachDate: '', dataClasses: ['Physical addresses'], severity: 'high' },
+    ] }],
+    brokerMatches: [
+      { breach: { name: 'SpokeoLeak', domain: 'spokeo.com' }, broker: { name: 'Spokeo' } },
+    ],
+    freeze: true,
+  });
+  assert.match(report, /also data brokers/);
+  assert.match(report, /SpokeoLeak \(spokeo\.com\) ↔ broker "Spokeo"/);
+});
