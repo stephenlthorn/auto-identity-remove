@@ -513,3 +513,67 @@ test('GET /api/freeze requires auth (401 without credentials)', async () => {
     await close();
   }
 });
+
+test('GET /api/config/status: no config file -> not configured, person fields missing', async () => {
+  const { server, close } = await buildServer(); // no cfgContent -> config.json absent
+  try {
+    const r = await request(server, {
+      pathname: '/api/config/status',
+      headers: { Authorization: basicAuth('testuser', 'testpass') },
+    });
+    assert.equal(r.status, 200);
+    assert.equal(r.json.configured, false);
+    assert.ok(Array.isArray(r.json.missing));
+    assert.ok(r.json.missing.includes('person.firstName'), 'should report person.firstName missing');
+    assert.ok(r.json.missing.includes('person.lastName'), 'should report person.lastName missing');
+    assert.ok(r.json.missing.includes('person.email'), 'should report person.email missing');
+  } finally {
+    await close();
+  }
+});
+
+test('GET /api/config/status: a complete person -> configured with no missing fields', async () => {
+  const cfgContent = {
+    person: { firstName: 'Alice', lastName: 'Smith', email: 'alice@example.com' },
+  };
+  const { server, close } = await buildServer({ cfgContent });
+  try {
+    const r = await request(server, {
+      pathname: '/api/config/status',
+      headers: { Authorization: basicAuth('testuser', 'testpass') },
+    });
+    assert.equal(r.status, 200);
+    assert.equal(r.json.configured, true);
+    assert.deepEqual(r.json.missing, []);
+  } finally {
+    await close();
+  }
+});
+
+test('GET /api/config/status: unedited example placeholder -> not configured', async () => {
+  const cfgContent = {
+    person: { firstName: 'Jane', lastName: 'Doe', email: 'jane.doe@example.com' },
+  };
+  const { server, close } = await buildServer({ cfgContent });
+  try {
+    const r = await request(server, {
+      pathname: '/api/config/status',
+      headers: { Authorization: basicAuth('testuser', 'testpass') },
+    });
+    assert.equal(r.status, 200);
+    assert.equal(r.json.configured, false);
+    assert.ok(r.json.missing.length > 0);
+  } finally {
+    await close();
+  }
+});
+
+test('GET /api/config/status requires auth (401 without credentials)', async () => {
+  const { server, close } = await buildServer();
+  try {
+    const r = await request(server, { pathname: '/api/config/status' });
+    assert.equal(r.status, 401);
+  } finally {
+    await close();
+  }
+});

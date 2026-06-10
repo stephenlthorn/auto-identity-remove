@@ -44,6 +44,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { spawn, execFile } = require('child_process');
 const { validateRunRequest, modeHonorsFilters, classifyStatus, resolveEnvCreds } = require('./validate');
+const { configStatus } = require('./config-status');
 const { FREEZE_TARGETS, TARGET_KEYS, getFreezeStatus } = require('../lib/freeze');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -399,6 +400,16 @@ app.get('/api/config', (_req, res) => {
   res.json({ exists: true, config: maskConfig(m.data) });
 });
 
+// First-run gate: report whether config.json has the required person identity
+// fields filled (mirrors lib/config.js getPersonsFromConfig). The browser uses
+// this on boot to decide whether to show the onboarding wizard. Absent or
+// unparseable config -> not configured (configStatus(null) flags every field).
+app.get('/api/config/status', (_req, res) => {
+  const m = readJsonMeta(CONFIG);
+  const cfg = m.parseError ? null : (m.data || null);
+  res.json(configStatus(cfg));
+});
+
 app.put('/api/config', (req, res) => {
   const incoming = req.body && req.body.config ? req.body.config : req.body;
   if (!incoming || typeof incoming !== 'object') return res.status(400).json({ error: 'invalid config' });
@@ -572,4 +583,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { app, loadBrokers, maskConfig, mergeConfig, loadCreds, MASK };
+module.exports = { app, loadBrokers, maskConfig, mergeConfig, loadCreds, MASK, configStatus };
