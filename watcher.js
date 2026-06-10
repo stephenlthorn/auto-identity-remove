@@ -19,6 +19,7 @@ const brokerRunner = require('./lib/broker-runner');
 const { sendOptOutEmails } = require('./lib/email');
 const lock = require('./lib/lock');
 const { applyFilter, loadLastLog, extractFailedBrokers } = require('./lib/filter');
+const { addToAllowlist, removeFromAllowlist, parseAllowlistArgs } = require('./lib/allowlist-edit');
 const { diffResults, loadPreviousLog } = require('./lib/diff');
 const { renderAuditMarkdown, writeAuditFile } = require('./lib/audit');
 const { buildStealthScript } = require('./lib/stealth');
@@ -199,6 +200,34 @@ if (PENDING_MODE) {
     }
     console.log(`\n${pending.length} broker(s) awaiting confirmation. Check your inbox for opt-out confirmation emails.\n`);
   }
+  process.exit(0);
+}
+
+// ── --allow / --unallow <name>: edit config.json allowlist, then exit ────────
+const _allowlistCmd = parseAllowlistArgs(process.argv);
+if (_allowlistCmd) {
+  const { CONFIG_PATH } = require('./lib/config');
+  if (_allowlistCmd.error || !_allowlistCmd.name) {
+    console.error(`❌ ${_allowlistCmd.action === 'unallow' ? '--unallow' : '--allow'} requires a broker name, e.g. --${_allowlistCmd.action} Spokeo`);
+    process.exit(1);
+  }
+  let cfg;
+  try {
+    cfg = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+  } catch (err) {
+    console.error(`❌ could not read config.json: ${err.message}`);
+    process.exit(1);
+  }
+  const next = _allowlistCmd.action === 'allow'
+    ? addToAllowlist(cfg, _allowlistCmd.name)
+    : removeFromAllowlist(cfg, _allowlistCmd.name);
+  // Atomic write: tmp -> rename (mirrors lib/config.js saveState semantics).
+  const tmp = CONFIG_PATH + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(next, null, 2) + '\n');
+  fs.renameSync(tmp, CONFIG_PATH);
+  const verb = _allowlistCmd.action === 'allow' ? 'Added to' : 'Removed from';
+  console.log(`\n📌 ${verb} allowlist: ${_allowlistCmd.name}`);
+  console.log(`   Allowlist now: ${(next.allowlist || []).join(', ') || '(empty)'}\n`);
   process.exit(0);
 }
 
@@ -584,7 +613,7 @@ if (KNOW_MODE) {
   });
 } else {
 
-brokerRunner.configure({ dryRun: DRY_RUN, preview: PREVIEW, person: persons[0], capsolver: config.capsolver, noCapsolver: NO_CAPSOLVER, snapshot: SNAPSHOT, personCount: persons.length });
+brokerRunner.configure({ dryRun: DRY_RUN, preview: PREVIEW, person: persons[0], capsolver: config.capsolver, noCapsolver: NO_CAPSOLVER, snapshot: SNAPSHOT, personCount: persons.length, config });
 
 // Detect brokers that have been consistently unreachable across recent runs.
 // Defunct brokers still run — the warning is informational so the user can
@@ -676,7 +705,7 @@ async function _mainBody() {
   // ── Verify mode: T+7 post-submit verification loop ───────────────────────
   if (VERIFY) {
     const { runVerify } = require('./lib/verify-loop');
-    const result = await runVerify(context, brokers, persons, { state });
+    const result = await runVerify(context, brokers, persons, { state, config });
     saveState();
     await context.close().catch(() => {});
 
@@ -786,7 +815,7 @@ async function _mainBody() {
       console.log('='.repeat(54));
     }
 
-    brokerRunner.configure({ dryRun: DRY_RUN, preview: PREVIEW, person, capsolver: config.capsolver, noCapsolver: NO_CAPSOLVER, snapshot: SNAPSHOT, personCount: persons.length });
+    brokerRunner.configure({ dryRun: DRY_RUN, preview: PREVIEW, person, capsolver: config.capsolver, noCapsolver: NO_CAPSOLVER, snapshot: SNAPSHOT, personCount: persons.length, config });
 
     // Email opt-outs (no browser needed — skipped in verify mode)
     if (!VERIFY) {
