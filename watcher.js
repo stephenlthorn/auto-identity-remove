@@ -40,6 +40,7 @@ const LIST_MODE    = process.argv.includes('--list');
 const SCORE_MODE   = process.argv.includes('--score');
 
 const PENDING_MODE    = process.argv.includes('--pending');
+const BREACH_CHECK    = process.argv.includes('--breach-check');
 const NO_CAPSOLVER    = process.argv.includes('--no-capsolver');
 const RESUME          = process.argv.includes('--resume');
 const SNAPSHOT        = process.argv.includes('--snapshot');
@@ -125,6 +126,42 @@ if (PENDING_MODE) {
   }
   process.exit(0);
 }
+
+// ── --breach-check: query Have I Been Pwned for configured emails, then exit ─
+if (BREACH_CHECK) {
+  const brokers = require('./brokers');
+  const {
+    collectEmails,
+    missingKeyMessage,
+    runBreachCheck,
+    formatBreachReport,
+  } = require('./lib/hibp');
+
+  const cfg     = loadConfig();
+  const persons = getPersonsFromConfig(cfg);
+  const emails  = collectEmails(persons);
+  const apiKey  = cfg.hibp && cfg.hibp.apiKey;
+
+  if (!apiKey) {
+    console.log('\n' + missingKeyMessage() + '\n');
+    process.exit(0);
+  }
+
+  if (emails.length === 0) {
+    console.log('\nNo email addresses found in config.json. Add an "email" to your person(s) first.\n');
+    process.exit(0);
+  }
+
+  (async () => {
+    console.log(`\nChecking ${emails.length} email(s) against Have I Been Pwned...`);
+    const result = await runBreachCheck({ emails, apiKey, brokers });
+    console.log('\n' + formatBreachReport(result) + '\n');
+    process.exit(0);
+  })().catch(err => {
+    console.error('breach-check error:', err.message);
+    process.exit(1);
+  });
+} else {
 
 // ── --confirm-emails [dir]: process .eml files and auto-click confirm links ───
 if (CONFIRM_EMAILS) {
@@ -544,3 +581,5 @@ main().catch(err => {
 } // end else (not DOCTOR mode)
 
 } // end else (not --confirm-emails mode)
+
+} // end else (not --breach-check mode)

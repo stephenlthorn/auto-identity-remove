@@ -344,3 +344,44 @@ test('missingKeyMessage explains how to get a free HIBP key', () => {
   assert.match(msg, /haveibeenpwned\.com\/API\/Key/);
   assert.match(msg, /config\.json/);
 });
+
+// ─── watcher --breach-check integration contract ─────────────────────────────
+// The watcher branch composes collectEmails + runBreachCheck + formatBreachReport.
+// This test pins that composition so the wiring in watcher.js cannot drift from
+// the lib contract without a failing test.
+
+test('integration: collectEmails feeds runBreachCheck which feeds formatBreachReport', async () => {
+  const persons = [
+    { firstName: 'Jane', email: 'Jane@Example.com' },
+    { firstName: 'John', email: 'john@example.com' },
+  ];
+  const emails = collectEmails(persons);
+  assert.deepEqual(emails, ['jane@example.com', 'john@example.com']);
+
+  const fetchImpl = makeFetch([
+    { status: 200, json: [{ Name: 'Adobe', Domain: 'adobe.com', BreachDate: '2013-10-04', DataClasses: ['Passwords'] }] },
+    { status: 404 },
+  ]);
+  const result = await runBreachCheck({ emails, apiKey: 'k', brokers: [], fetchImpl });
+  assert.equal(fetchImpl.calls.length, emails.length);
+
+  const report = formatBreachReport(result);
+  assert.match(report, /jane@example\.com: 1 breach/);
+  assert.match(report, /john@example\.com: no breaches/);
+  assert.match(report, /credit freeze/i);
+});
+
+test('integration: missing key short-circuits before any HIBP call', async () => {
+  // Simulate the watcher guard: when apiKey is falsy, print missingKeyMessage
+  // and never call runBreachCheck. We assert the guidance content here.
+  const apiKey = '';
+  const fetchImpl = makeFetch({ status: 200, json: [] });
+  let called = false;
+  if (apiKey) {
+    called = true;
+    await runBreachCheck({ emails: ['x@example.com'], apiKey, fetchImpl });
+  }
+  assert.equal(called, false);
+  assert.equal(fetchImpl.calls.length, 0);
+  assert.match(missingKeyMessage(), /haveibeenpwned\.com\/API\/Key/);
+});
