@@ -165,3 +165,50 @@ test('checkBreaches throws when apiKey missing', async () => {
   );
   assert.equal(fetchImpl.calls.length, 0, 'must not call fetch without a key');
 });
+
+// ─── crossReferenceBrokers / recommendFreeze / breachCount ───────────────────
+
+const SAMPLE_BROKERS = [
+  { name: 'Spokeo', optOutUrl: 'https://www.spokeo.com/optout' },
+  { name: 'Radaris', searchUrl: 'https://radaris.com/search' },
+  { name: 'NoUrlBroker' },
+];
+
+test('crossReferenceBrokers matches a breach domain to a broker by registrable domain', () => {
+  const breaches = [
+    { name: 'SpokeoLeak', domain: 'people.spokeo.com', severity: 'high' },
+    { name: 'Unrelated', domain: 'example.org', severity: 'low' },
+  ];
+  const matches = crossReferenceBrokers(breaches, SAMPLE_BROKERS);
+  assert.equal(matches.length, 1);
+  assert.equal(matches[0].breach.name, 'SpokeoLeak');
+  assert.equal(matches[0].broker.name, 'Spokeo');
+});
+
+test('crossReferenceBrokers returns [] when no domains overlap', () => {
+  const breaches = [{ name: 'X', domain: 'nowhere.test', severity: 'low' }];
+  assert.deepEqual(crossReferenceBrokers(breaches, SAMPLE_BROKERS), []);
+});
+
+test('crossReferenceBrokers tolerates breaches/brokers without domains/urls', () => {
+  const breaches = [{ name: 'NoDomain', domain: '', severity: 'low' }];
+  assert.deepEqual(crossReferenceBrokers(breaches, SAMPLE_BROKERS), []);
+  assert.deepEqual(crossReferenceBrokers(null, SAMPLE_BROKERS), []);
+  assert.deepEqual(crossReferenceBrokers(breaches, null), []);
+});
+
+test('recommendFreeze true when any breach is high severity', () => {
+  assert.equal(recommendFreeze([{ severity: 'low' }, { severity: 'high' }]), true);
+});
+
+test('recommendFreeze false when no high-severity breach', () => {
+  assert.equal(recommendFreeze([{ severity: 'low' }, { severity: 'medium' }]), false);
+  assert.equal(recommendFreeze([]), false);
+  assert.equal(recommendFreeze(null), false);
+});
+
+test('breachCount returns array length, 0 for non-arrays', () => {
+  assert.equal(breachCount([{}, {}, {}]), 3);
+  assert.equal(breachCount([]), 0);
+  assert.equal(breachCount(undefined), 0);
+});
