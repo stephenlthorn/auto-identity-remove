@@ -41,6 +41,7 @@ const LIST_MODE    = process.argv.includes('--list');
 const SCORE_MODE   = process.argv.includes('--score');
 
 const PENDING_MODE    = process.argv.includes('--pending');
+const UPDATE_BROKERS  = process.argv.includes('--update-brokers');
 const BREACH_CHECK    = process.argv.includes('--breach-check');
 const NO_CAPSOLVER    = process.argv.includes('--no-capsolver');
 const RESUME          = process.argv.includes('--resume');
@@ -494,6 +495,21 @@ if (DOCTOR) {
     console.error('doctor error:', err.message);
     process.exit(1);
   });
+} else if (UPDATE_BROKERS) {
+  // ── --update-brokers: refresh data/feeds-brokers.json from live registries ──
+  // Pure HTTP + file write; no Playwright, no loadConfig. Fetches the California
+  // + Vermont data-broker registries, normalizes, dedups against brokers.js, and
+  // writes the feed file consumed by generic-runner.js. Markup data remains the
+  // fallback. Async, so this lives as a peer of --doctor (not a standalone
+  // pre-ladder block) to avoid falling through into the normal Playwright run.
+  const brokers = require('./brokers');
+  const { runUpdateBrokers } = require('./lib/feeds');
+  runUpdateBrokers({ brokers, logFn: (m) => console.log(m) })
+    .then(() => process.exit(0))
+    .catch(err => {
+      console.error('update-brokers error:', err.message);
+      process.exit(1);
+    });
 } else {
 
 // --pollute N: submit N fake records to brokers tagged acceptsBogus: true
