@@ -105,6 +105,10 @@
           <label>Phone (digits) <input name="person.phone" /></label>
           <label>Phone formatted <input name="person.phoneFormatted" /></label>
         </fieldset>
+        <fieldset><legend>Allowlist (keep me listed here)</legend>
+          <label>Brokers to keep listed (comma) <input name="allowlist" placeholder="e.g. Spokeo, BeenVerified" /></label>
+          <p class="dim">Brokers on this list are never opted out and are not flagged by verification. Case-insensitive; match the broker name from the Brokers tab.</p>
+        </fieldset>
         <fieldset><legend>CapSolver (CAPTCHA solving)</legend>
           <label>API key <input name="capsolver.apiKey" type="password" placeholder="CAP-…" /></label>
         </fieldset>

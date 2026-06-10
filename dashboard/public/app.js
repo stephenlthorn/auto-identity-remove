@@ -316,7 +316,7 @@ async function loadConfig() {
   const c = r.config || {};
   $$('#configForm input').forEach(inp => {
     let v = getPath(c, inp.name);
-    if (inp.name === 'person.aliases' && Array.isArray(v)) v = v.join(', ');
+    if ((inp.name === 'person.aliases' || inp.name === 'allowlist') && Array.isArray(v)) v = v.join(', ');
     inp.value = v == null ? '' : v;
   });
 }
@@ -327,7 +327,7 @@ $('#saveConfig').addEventListener('click', async () => {
     // Fix 5: skip only the mask sentinel (untouched secret fields - preserve on server).
     // All other values including empty string are sent so users can clear non-secret fields.
     if (v === MASK) return;
-    if (inp.name === 'person.aliases') v = v.split(',').map(s => s.trim()).filter(Boolean);
+    if (inp.name === 'person.aliases' || inp.name === 'allowlist') v = v.split(',').map(s => s.trim()).filter(Boolean);
     if (inp.name === 'email.smtp.port') v = parseInt(v, 10) || v;
     setPath(cfg, inp.name, v);
   });
