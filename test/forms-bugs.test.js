@@ -117,14 +117,18 @@ test('fillForm does not throw when formFields key contains regex metacharacters'
     }),
     getByLabel: (re) => {
       getByLabelCalled = true;
-      // Should be called without throwing
+      // Should be called without throwing. Real Playwright Locator exposes
+      // count(); fillForm reads it to gate filled=true (silent-miss → resolver).
       return {
+        count: async () => 0, // label miss → fill skipped, resolver may run
         first: () => ({
           fill: async () => {},
           catch: async () => {},
         }),
       };
     },
+    // Resolver fallback round-trip after a label miss — no-op stub returns no match.
+    evaluate: async () => ({ found: false }),
   };
 
   let error = null;
@@ -156,11 +160,14 @@ test('fillForm getByLabel fallback uses escaped regex so metachar does not cause
     getByLabel: (re) => {
       regexesCreated.push(re);
       return {
+        count: async () => 0, // label miss → fill skipped (regex still recorded above)
         first: () => ({
           fill: async () => {},
         }),
       };
     },
+    // Resolver fallback round-trip after a label miss — no-op stub returns no match.
+    evaluate: async () => ({ found: false }),
   };
 
   await fillForm(page, formFields);
