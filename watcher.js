@@ -284,6 +284,36 @@ if (KNOW_STATUS) {
   process.exit(0);
 }
 
+// ── Mode-conflict guard ───────────────────────────────────────────────────────
+// Detect mutually exclusive mode flags being combined (e.g. --doctor --report).
+// Each documented mode exits after doing its work; combining them is ambiguous.
+{
+  const { resolveMode } = require('./lib/mode-dispatch');
+  const { conflict } = resolveMode({
+    list:             LIST_MODE,
+    score:            SCORE_MODE,
+    report:           REPORT,
+    doctor:           DOCTOR,
+    breachCheck:      BREACH_CHECK,
+    updateBrokers:    UPDATE_BROKERS,
+    pending:          PENDING_MODE,
+    know:             KNOW_MODE,
+    knowStatus:       KNOW_STATUS,
+    complaints:       COMPLAINTS_MODE,
+    confirmEmails:    CONFIRM_EMAILS,
+    serpScan:         SERP_SCAN,
+    serpWatch:        SERP_WATCH,
+    installScheduler: INSTALL_SCHEDULER,
+    encryptConfig:    ENCRYPT_CONFIG,
+    decryptConfig:    DECRYPT_CONFIG,
+    freeze:           FREEZE_MODE,
+  });
+  if (conflict) {
+    console.error(`Error: ${conflict}`);
+    process.exit(1);
+  }
+}
+
 // ── --breach-check: query Have I Been Pwned for configured emails, then exit ─
 if (BREACH_CHECK) {
   const brokers = require('./brokers');
@@ -460,6 +490,12 @@ if (CONFIRM_EMAILS) {
 // ── --report: build monthly PDF + emailable HTML report and exit ─────────────
 const brokers = require('./brokers');
 const { buildReportModel, renderReportHtml, renderReportPdf, reportPdfPath, REPORT_DIR } = require('./lib/report');
+const {
+  computeExposureScore,
+  serpResultsFromHistory,
+  loadExposureHistory,
+  exposureToReportAdapter,
+} = require('./lib/exposure');
 
 let chromiumForReport;
 try {
@@ -484,7 +520,20 @@ try {
 
 (async () => {
   const state = loadState();
-  const model = buildReportModel({ state, brokers });
+
+  // Compute current exposure so the report can show a real trend.
+  let serpRowsForReport = [];
+  try {
+    const serpHistoryPathForReport = path.join(__dirname, 'data', 'serp-history.json');
+    serpRowsForReport = JSON.parse(fs.readFileSync(serpHistoryPathForReport, 'utf8'));
+    if (!Array.isArray(serpRowsForReport)) serpRowsForReport = [];
+  } catch (_) { serpRowsForReport = []; }
+  const serpResultsForReport = serpResultsFromHistory(serpRowsForReport);
+  const exposureSummary = computeExposureScore({ state, serpResults: serpResultsForReport, breachCount: 0, brokers });
+  const priorHistory = loadExposureHistory();
+  const exposure = exposureToReportAdapter(exposureSummary, priorHistory);
+
+  const model = buildReportModel({ state, brokers, exposure });
   const html = renderReportHtml(model);
 
   fs.mkdirSync(REPORT_DIR, { recursive: true });
@@ -903,22 +952,6 @@ async function _mainBody() {
       await brokerRunner.processBroker(context, broker);
     }
 
-    // Build the set of explicit broker hostnames so generic-runner can skip them
-    const explicitHosts = new Set(
-      brokers.map(b => {
-        try {
-          return new URL(b.optOutUrl || b.searchUrl || '').hostname.replace(/^www\./, '');
-        } catch(_) { return ''; }
-      }).filter(Boolean)
-    );
-
-    // generic-runner.js returns { count, genericStats }; store stats so they
-    // appear in the summary and in the run-log JSON.
-    const genericResult = await runGenericBrokers(context, explicitHosts, state, logResult, recordSuccess, { dryRun: DRY_RUN });
-    if (genericResult && genericResult.genericStats) {
-      results.genericStats = genericResult.genericStats;
-    }
-
     // ── Noise / pollution mode (--pollute N) ──────────────────────────────────
     // Submits N randomly-generated fake records to brokers tagged acceptsBogus.
     // Off by default (POLLUTE_COUNT === 0). See README for ToS warning.
@@ -940,6 +973,25 @@ async function _mainBody() {
         }
       }
     }
+  }
+
+  // Build the set of explicit broker hostnames so generic-runner can skip them.
+  // Generic opt-outs are domain-level (not person-specific), so this runs once
+  // after all persons' explicit opt-outs are complete.
+  const explicitHosts = new Set(
+    brokers.map(b => {
+      try {
+        return new URL(b.optOutUrl || b.searchUrl || '').hostname.replace(/^www\./, '');
+      } catch(_) { return ''; }
+    }).filter(Boolean)
+  );
+
+  // generic-runner.js returns { count, genericStats }; store stats so they
+  // appear in the summary and in the run-log JSON. Runs once (domain-level,
+  // not per-person). Uses persons[0] internally via activePerson().
+  const genericResult = await runGenericBrokers(context, explicitHosts, state, logResult, recordSuccess, { dryRun: DRY_RUN });
+  if (genericResult && genericResult.genericStats) {
+    results.genericStats = genericResult.genericStats;
   }
 
   // Clear checkpoint now that the run completed successfully
