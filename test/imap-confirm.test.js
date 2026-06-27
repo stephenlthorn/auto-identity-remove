@@ -391,6 +391,179 @@ test('M4: unsubscribe link first, confirm link second - picks confirm', async ()
 
 // ── end M4 ────────────────────────────────────────────────────────────────────
 
+// ── Fix 1: SSRF host allowlist ────────────────────────────────────────────────
+
+test('Fix1: confirm link on the broker domain is accepted and navigated', async () => {
+  const broker = {
+    name: 'Spokeo',
+    expectedSender: 'optout@spokeo.com',
+    optOutUrl: 'https://www.spokeo.com/optout',
+  };
+  const eml = makeEml('optout@spokeo.com', 'Click https://spokeo.com/confirm/abc to confirm.');
+  const ctx = makeContext();
+  const successCalls = [];
+
+  const result = await processConfirmationEmails(ctx, [broker], {
+    dir: 'confirms',
+    dryRun: false,
+    _readDir: () => ['spokeo.eml'],
+    _readFile: () => eml,
+    _moveFile: () => {},
+    _recordSuccess: (name) => successCalls.push(name),
+  });
+
+  assert.equal(result.processed.length, 1, 'on-domain link should be processed');
+  assert.equal(result.failed.length, 0);
+  assert.deepEqual(successCalls, ['Spokeo']);
+});
+
+test('Fix1: confirm link on an off-domain host is rejected - no navigation, no recordSuccess', async () => {
+  const broker = {
+    name: 'Spokeo',
+    expectedSender: 'optout@spokeo.com',
+    optOutUrl: 'https://www.spokeo.com/optout',
+  };
+  // Link host is evil.com, not spokeo.com
+  const eml = makeEml('optout@spokeo.com', 'Click https://evil.com/confirm/steal to confirm.');
+  const ctx = makeContext();
+  const successCalls = [];
+
+  const result = await processConfirmationEmails(ctx, [broker], {
+    dir: 'confirms',
+    dryRun: false,
+    _readDir: () => ['spokeo.eml'],
+    _readFile: () => eml,
+    _moveFile: () => {},
+    _recordSuccess: (name) => successCalls.push(name),
+  });
+
+  // Should be unmatched (skipped) - not processed, not failed
+  assert.equal(result.processed.length, 0, 'off-domain link must not be processed');
+  assert.equal(result.failed.length, 0, 'off-domain link must not appear as failed');
+  assert.ok(
+    result.unmatched.some(u => u.reason === 'host_mismatch'),
+    `expected an unmatched entry with reason host_mismatch, got: ${JSON.stringify(result.unmatched)}`
+  );
+  assert.equal(successCalls.length, 0, 'recordSuccess must NOT be called for off-domain link');
+  assert.equal(ctx.calls.length, 0, 'Playwright must NOT be called for off-domain link');
+});
+
+test('Fix1: javascript: scheme link is rejected - no navigation', async () => {
+  const broker = {
+    name: 'Spokeo',
+    expectedSender: 'optout@spokeo.com',
+    optOutUrl: 'https://www.spokeo.com/optout',
+  };
+  // Body contains a URL with confirm keyword but uses javascript: scheme
+  // We need to inject it so the extractor picks it up - add it after an http URL
+  // Actually the extractor only picks http(s) URLs (CONFIRM_URL_RE / ANY_URL_RE).
+  // Test the validateConfirmUrl helper directly instead.
+  const { validateConfirmUrl } = require('../lib/imap-confirm');
+  const result = validateConfirmUrl('javascript:alert(1)', broker);
+  assert.ok(!result.valid, `javascript: scheme must be rejected, got: ${JSON.stringify(result)}`);
+  assert.ok(result.reason, 'must have a reason');
+});
+
+test('Fix1: file: scheme link is rejected', () => {
+  const { validateConfirmUrl } = require('../lib/imap-confirm');
+  const broker = {
+    name: 'Spokeo',
+    expectedSender: 'optout@spokeo.com',
+    optOutUrl: 'https://www.spokeo.com/optout',
+  };
+  const result = validateConfirmUrl('file:///etc/passwd', broker);
+  assert.ok(!result.valid, `file: scheme must be rejected, got: ${JSON.stringify(result)}`);
+});
+
+test('Fix1: data: scheme link is rejected', () => {
+  const { validateConfirmUrl } = require('../lib/imap-confirm');
+  const broker = {
+    name: 'Spokeo',
+    expectedSender: 'optout@spokeo.com',
+    optOutUrl: 'https://www.spokeo.com/optout',
+  };
+  const result = validateConfirmUrl('data:text/html,<h1>hi</h1>', broker);
+  assert.ok(!result.valid, `data: scheme must be rejected, got: ${JSON.stringify(result)}`);
+});
+
+test('Fix1: subdomain of broker domain is accepted (same registrable domain)', async () => {
+  const broker = {
+    name: 'Spokeo',
+    expectedSender: 'optout@spokeo.com',
+    optOutUrl: 'https://www.spokeo.com/optout',
+  };
+  // privacy.spokeo.com is still spokeo.com as registrable domain
+  const eml = makeEml('optout@spokeo.com', 'Click https://privacy.spokeo.com/confirm/abc to confirm.');
+  const ctx = makeContext();
+  const successCalls = [];
+
+  const result = await processConfirmationEmails(ctx, [broker], {
+    dir: 'confirms',
+    dryRun: false,
+    _readDir: () => ['spokeo.eml'],
+    _readFile: () => eml,
+    _moveFile: () => {},
+    _recordSuccess: (name) => successCalls.push(name),
+  });
+
+  assert.equal(result.processed.length, 1, 'subdomain of broker domain should be accepted');
+  assert.deepEqual(successCalls, ['Spokeo']);
+});
+
+// ── end Fix 1 ─────────────────────────────────────────────────────────────────
+
+// ── Fix 2: UTF-8 QP decoding ──────────────────────────────────────────────────
+
+test('Fix2: decodeQuotedPrintable decodes multi-byte UTF-8 sequences correctly', () => {
+  const { decodeQuotedPrintable } = require('../lib/imap-confirm');
+
+  // "cafe" with accented e: UTF-8 is C3 A9 -> =C3=A9
+  const qpEncoded = 'caf=C3=A9';
+  const decoded = decodeQuotedPrintable(qpEncoded);
+  assert.equal(decoded, 'café'.normalize('NFC') === 'café' ? 'café' : 'café',
+    `Expected UTF-8 decoded string, got: ${JSON.stringify(decoded)}`);
+  // More direct test: the decoded string should equal the actual Unicode character
+  assert.equal(decoded, 'café', `decoded must equal caf${'é'}`);
+});
+
+test('Fix2: decodeQuotedPrintable handles multi-byte sequence for euro sign', () => {
+  const { decodeQuotedPrintable } = require('../lib/imap-confirm');
+
+  // Euro sign: UTF-8 is E2 82 AC -> =E2=82=AC
+  const qpEncoded = 'Price: =E2=82=AC100';
+  const decoded = decodeQuotedPrintable(qpEncoded);
+  assert.equal(decoded, 'Price: €100', `Expected euro sign, got: ${JSON.stringify(decoded)}`);
+});
+
+test('Fix2: QP body with UTF-8 non-ASCII in URL is preserved through processConfirmationEmails', async () => {
+  // Simulates an email body where the confirmation URL contains a UTF-8 character
+  // encoded in QP (accented e in the token)
+  const eml = [
+    'From: optout@spokeo.com',
+    'To: user@example.com',
+    'Subject: Confirm',
+    'Content-Transfer-Encoding: quoted-printable',
+    '',
+    'Visit https://spokeo.com/confirm?t=caf=C3=A9 to complete.',
+  ].join('\r\n');
+  const ctx = makeContext();
+
+  const result = await processConfirmationEmails(ctx, [SPOKEO_BROKER], {
+    dir: 'confirms',
+    dryRun: true,
+    _readDir: () => ['spokeo.eml'],
+    _readFile: () => eml,
+  });
+
+  assert.equal(result.processed.length, 1, 'should process the email');
+  // The URL should contain the decoded UTF-8 character, not the raw =C3=A9
+  const url = result.processed[0].url;
+  assert.ok(!url.includes('=C3=A9'), `URL should not contain raw QP =C3=A9, got: ${url}`);
+  assert.ok(url.includes('confirm'), `URL should contain confirm keyword, got: ${url}`);
+});
+
+// ── end Fix 2 ─────────────────────────────────────────────────────────────────
+
 test('failed: when goto throws, entry appears in failed array', async () => {
   const eml = makeEml('optout@spokeo.com', 'Click https://spokeo.com/confirm/bad');
   const errCtx = {
