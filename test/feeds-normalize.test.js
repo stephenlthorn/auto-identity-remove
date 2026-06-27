@@ -131,3 +131,45 @@ test('normalizeFeedRow keeps a name-only row with an empty optOutUrl as manual',
   assert.equal(entry.optOutUrl, '');
   assert.equal(entry.method, 'manual');
 });
+
+// ── Fix 6: classifyMethod tightened path-segment matching ─────────────────────
+
+test('Fix6: URL containing "request" in a subdomain name is NOT classified as direct-form', () => {
+  // Bug: "request.example.com/login" contains "request" as substring -> was over-classified
+  const entry = normalizeFeedRow({ name: 'X', website: 'https://request.example.com/login' }, 'ca');
+  assert.equal(
+    entry.method, 'manual',
+    'hostname containing "request" should not be classified as direct-form'
+  );
+});
+
+test('Fix6: URL containing "remove" in a query param value is NOT classified as direct-form', () => {
+  // "action=removeall" - "remove" is embedded in a value, not a segment
+  const entry = normalizeFeedRow({ name: 'X', website: 'https://example.com/settings?action=removeall' }, 'ca');
+  assert.equal(
+    entry.method, 'manual',
+    'query param value containing "remove" should not be classified as direct-form'
+  );
+});
+
+test('Fix6: URL with "delete" as a whole path segment IS classified as direct-form', () => {
+  const entry = normalizeFeedRow({ name: 'X', website: 'https://example.com/delete' }, 'ca');
+  assert.equal(entry.method, 'direct-form', '/delete as a whole segment should be direct-form');
+});
+
+test('Fix6: URL with "request" as a whole path segment IS classified as direct-form', () => {
+  const entry = normalizeFeedRow({ name: 'X', website: 'https://example.com/privacy/request' }, 'ca');
+  assert.equal(entry.method, 'direct-form', '/request as a whole path segment should be direct-form');
+});
+
+test('Fix6: URL with "remove" as a whole path segment IS classified as direct-form', () => {
+  const entry = normalizeFeedRow({ name: 'X', website: 'https://example.com/account/remove' }, 'ca');
+  assert.equal(entry.method, 'direct-form', '/remove as a whole segment should be direct-form');
+});
+
+test('Fix6: homepage URL is still manual', () => {
+  const entry = normalizeFeedRow({ name: 'X', website: 'https://example.com/' }, 'ca');
+  assert.equal(entry.method, 'manual');
+});
+
+// ── end Fix 6 ─────────────────────────────────────────────────────────────────

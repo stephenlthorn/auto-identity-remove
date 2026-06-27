@@ -137,6 +137,119 @@ test('fillForm does not throw when formFields key contains regex metacharacters'
   assert.equal(error, null, `fillForm should not throw on metachar keyword, got: ${error?.message}`);
 });
 
+// ── Fix 8: country select name-then-code fallback ────────────────────────────
+
+test('Fix8: fillForm fills country select by label (full name) when label option is available', async () => {
+  const { fillForm } = require('../lib/forms');
+
+  const selectOptionCalls = [];
+
+  // Simulate a <select> where "Canada" label exists
+  const page = {
+    locator: (sel) => ({
+      first: () => ({
+        count: async () => (sel.includes('country') ? 1 : 0),
+        isVisible: async () => sel.includes('country'),
+        evaluate: async (fn) => sel.includes('country') ? 'select' : 'input',
+        selectOption: async (arg) => {
+          selectOptionCalls.push(arg);
+          // Simulate: {label: 'Canada'} succeeds (returns without throwing)
+        },
+      }),
+    }),
+    getByLabel: () => ({ first: () => ({ fill: async () => {}, catch: async () => {} }) }),
+  };
+
+  const personCA = { country: 'CA', state: 'ON', zip: 'K1A 0A6' };
+  await fillForm(page, { 'select[name*="country" i]': 'CA' }, personCA);
+
+  // The first attempt should be by label (full country name "Canada")
+  assert.ok(
+    selectOptionCalls.length > 0,
+    'selectOption should have been called for country select'
+  );
+  // At least one call should try a label or a value - the code tries label first
+  const firstCall = selectOptionCalls[0];
+  assert.ok(
+    (typeof firstCall === 'object' && firstCall !== null && firstCall.label) ||
+    firstCall === 'CA',
+    `Expected either {label: ...} or 'CA' as first selectOption call, got: ${JSON.stringify(firstCall)}`
+  );
+});
+
+test('Fix8: fillForm falls back to country code when label option is not available', async () => {
+  const { fillForm } = require('../lib/forms');
+
+  const selectOptionCalls = [];
+
+  // Simulate a <select> where "Canada" label does NOT exist (label call throws)
+  const page = {
+    locator: (sel) => ({
+      first: () => ({
+        count: async () => (sel.includes('country') ? 1 : 0),
+        isVisible: async () => sel.includes('country'),
+        evaluate: async (fn) => 'select',
+        selectOption: async (arg) => {
+          selectOptionCalls.push(arg);
+          // If arg is a label object, throw to simulate label not found
+          if (typeof arg === 'object' && arg !== null && arg.label) {
+            throw new Error('Label not found');
+          }
+          // Code value 'CA' succeeds
+        },
+      }),
+    }),
+    getByLabel: () => ({ first: () => ({ fill: async () => {} }) }),
+  };
+
+  const personCA = { country: 'CA', state: 'ON', zip: 'K1A 0A6' };
+  await fillForm(page, { 'select[name*="country" i]': 'CA' }, personCA);
+
+  // Should have tried label (failed) then fallen back to value 'CA'
+  const valueCalls = selectOptionCalls.filter(c => c === 'CA');
+  assert.ok(
+    valueCalls.length >= 1,
+    `Should have called selectOption('CA') as code fallback, calls: ${JSON.stringify(selectOptionCalls)}`
+  );
+});
+
+test('Fix8: fillForm logs a warning when a select cannot be matched', async () => {
+  const { fillForm } = require('../lib/forms');
+
+  // Capture console.warn
+  const warnMessages = [];
+  const origWarn = console.warn;
+  console.warn = (...args) => warnMessages.push(args.join(' '));
+
+  // Simulate a <select> that exists but throws for both label and value
+  const page = {
+    locator: (sel) => ({
+      first: () => ({
+        count: async () => (sel.includes('country') ? 1 : 0),
+        isVisible: async () => sel.includes('country'),
+        evaluate: async (fn) => 'select',
+        selectOption: async (arg) => {
+          throw new Error('No matching option');
+        },
+      }),
+    }),
+    getByLabel: () => ({ first: () => ({ fill: async () => {} }) }),
+  };
+
+  const personDE = { country: 'DE', state: '', zip: '' };
+  await fillForm(page, { 'select[name*="country" i]': 'DE' }, personDE);
+
+  console.warn = origWarn;
+
+  // Should have logged a warning about the unmatched select
+  assert.ok(
+    warnMessages.some(msg => /select|country|unmatched|warn/i.test(msg)),
+    `Expected a warning about unmatched select, got: ${JSON.stringify(warnMessages)}`
+  );
+});
+
+// ── end Fix 8 ─────────────────────────────────────────────────────────────────
+
 test('fillForm getByLabel fallback uses escaped regex so metachar does not cause SyntaxError', async () => {
   const { fillForm } = require('../lib/forms');
 

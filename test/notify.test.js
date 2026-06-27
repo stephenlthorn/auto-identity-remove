@@ -214,23 +214,26 @@ test('dispatchNotify: on macos WITH webhook calls iMessage + macNotify AND fetch
 });
 
 test('dispatchNotify: on linux with notify-send available calls notify-send', async () => {
-  // Make _hasBinary('notify-send') return true by making `which` succeed
-  const exec = stubExecSync();
+  // After Fix 7, dispatchNotify calls desktopNotify on linux, which uses spawnSync.
+  // Stub spawnSync to capture notify-send calls.
+  const spawnSyncCalls = [];
+  const origSpawnSync = childProcess.spawnSync;
+  childProcess.spawnSync = (cmd, args, opts) => {
+    spawnSyncCalls.push({ cmd, args: args || [] });
+    return { status: 0, stdout: '', stderr: '' };
+  };
   const fetchStub = stubFetch();
 
   const cfg = { notify: {} };
   await notify.dispatchNotify('linux summary', cfg, 'linux');
 
-  exec.restore();
+  childProcess.spawnSync = origSpawnSync;
   fetchStub.restore();
 
-  // On linux path, we call `which notify-send` then `notify-send ...`
-  // (execSync is stubbed to not throw, so _hasBinary returns true)
-  const nsCalls = exec.calls.filter(c => c.startsWith('notify-send'));
-  assert.equal(nsCalls.length, 1);
-  assert.ok(nsCalls[0].includes('linux summary'));
-  // No osascript
-  assert.equal(exec.calls.filter(c => c.includes('osascript')).length, 0);
+  // dispatchNotify on linux should invoke notify-send via spawnSync
+  const nsCalls = spawnSyncCalls.filter(c => c.cmd === 'notify-send');
+  assert.equal(nsCalls.length, 1, `expected 1 notify-send spawnSync call, got ${nsCalls.length}`);
+  assert.ok(nsCalls[0].args.some(a => a === 'linux summary'), `notify-send args should include message, got: ${JSON.stringify(nsCalls[0].args)}`);
   // No fetch (no webhook)
   assert.equal(fetchStub.calls.length, 0);
 });
@@ -265,16 +268,15 @@ test('dispatchNotify: on windows with webhook only calls fetch, no osascript or 
 });
 
 test('dispatchNotify: no webhook and linux with no notify-send available — no crash', async () => {
-  // Simulate `which` failing → _hasBinary returns false
-  const orig = childProcess.execSync;
-  childProcess.execSync = (cmd) => {
-    if (cmd.startsWith('which')) throw new Error('not found');
-  };
+  // After Fix 7, dispatchNotify calls desktopNotify on linux (uses spawnSync directly).
+  // spawnSync throwing should be swallowed.
+  const orig = childProcess.spawnSync;
+  childProcess.spawnSync = (cmd, args) => { throw new Error('not found'); };
   const fetchStub = stubFetch();
 
   const cfg = { notify: {} };
   await assert.doesNotReject(() => notify.dispatchNotify('test', cfg, 'linux'));
-  childProcess.execSync = orig;
+  childProcess.spawnSync = orig;
   fetchStub.restore();
 });
 
@@ -388,3 +390,72 @@ test('M6: sendText handles message with double quote via execFileSync', () => {
 });
 
 // ── end M6 ────────────────────────────────────────────────────────────────────
+
+// ── Fix 7: _hasBinary and _linuxToast use spawnSync (no shell) ───────────────
+
+test('Fix7: _hasBinary uses spawnSync (not execSync) to check binary existence', () => {
+  const spawnSyncCalls = [];
+  const origSpawnSync = childProcess.spawnSync;
+  childProcess.spawnSync = (cmd, args, opts) => {
+    spawnSyncCalls.push({ cmd, args: args || [] });
+    return { status: 0 }; // binary found
+  };
+
+  const result = notify._hasBinary('notify-send');
+
+  childProcess.spawnSync = origSpawnSync;
+
+  assert.equal(result, true, '_hasBinary should return true when spawnSync succeeds');
+  const whichCalls = spawnSyncCalls.filter(c => c.cmd === 'which');
+  assert.equal(whichCalls.length, 1, '_hasBinary should call spawnSync with which');
+  assert.ok(whichCalls[0].args.includes('notify-send'), 'args should include the binary name');
+});
+
+test('Fix7: _hasBinary returns false when spawnSync returns non-zero status', () => {
+  const origSpawnSync = childProcess.spawnSync;
+  childProcess.spawnSync = () => ({ status: 1 }); // binary not found
+
+  const result = notify._hasBinary('notify-send');
+
+  childProcess.spawnSync = origSpawnSync;
+  assert.equal(result, false, '_hasBinary should return false when which exits non-zero');
+});
+
+test('Fix7: _linuxToast uses spawnSync with argv array (no shell string)', () => {
+  const spawnSyncCalls = [];
+  const origSpawnSync = childProcess.spawnSync;
+  childProcess.spawnSync = (cmd, args, opts) => {
+    spawnSyncCalls.push({ cmd, args: args || [] });
+    return { status: 0 };
+  };
+
+  notify._linuxToast('Test Title', 'Test Message');
+
+  childProcess.spawnSync = origSpawnSync;
+
+  const nsCalls = spawnSyncCalls.filter(c => c.cmd === 'notify-send');
+  assert.equal(nsCalls.length, 1, '_linuxToast should call notify-send via spawnSync');
+  // Verify it uses an argv array (no shell quoting)
+  assert.ok(nsCalls[0].args.includes('Test Title'), 'title should be a separate argv element');
+  assert.ok(nsCalls[0].args.includes('Test Message'), 'message should be a separate argv element');
+});
+
+test('Fix7: dispatchNotify on linux calls notify-send via spawnSync (not execSync)', async () => {
+  const spawnSyncCalls = [];
+  const origSpawnSync = childProcess.spawnSync;
+  childProcess.spawnSync = (cmd, args, opts) => {
+    spawnSyncCalls.push({ cmd, args: args || [] });
+    return { status: 0 };
+  };
+
+  const cfg = { notify: {} };
+  await notify.dispatchNotify('test message', cfg, 'linux');
+
+  childProcess.spawnSync = origSpawnSync;
+
+  const nsCalls = spawnSyncCalls.filter(c => c.cmd === 'notify-send');
+  assert.ok(nsCalls.length > 0, 'dispatchNotify on linux should use spawnSync for notify-send');
+  assert.ok(nsCalls[0].args.some(a => a === 'test message'), 'message should appear as an argv element');
+});
+
+// ── end Fix 7 ─────────────────────────────────────────────────────────────────
