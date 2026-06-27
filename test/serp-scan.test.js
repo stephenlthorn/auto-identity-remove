@@ -605,6 +605,141 @@ test('serp-scan exports HISTORY_PATH ending in data/serp-history.json', () => {
   assert.ok(HISTORY_PATH.endsWith('serp-history.json'), `HISTORY_PATH was ${HISTORY_PATH}`);
 });
 
+// ── Fix 4: history batching + cap ────────────────────────────────────────────
+
+test('Fix4: runSerpScan batches history writes - single writeFileSync + rename per scan, not per result', async () => {
+  const fsMod = require('fs');
+
+  let writeCallCount = 0;
+  const origWriteFileSync = fsMod.writeFileSync;
+  const origRenameSync = fsMod.renameSync;
+  const origMkdirSync = fsMod.mkdirSync;
+  const origReadFileSync = fsMod.readFileSync;
+
+  fsMod.mkdirSync = () => {};
+  fsMod.readFileSync = (p, enc) => {
+    if (p === HISTORY_PATH) { const e = new Error('ENOENT'); e.code = 'ENOENT'; throw e; }
+    return origReadFileSync(p, enc);
+  };
+  fsMod.writeFileSync = (filePath, data) => { writeCallCount++; };
+  fsMod.renameSync = () => {};
+
+  // Context that returns multiple brokers across engines to generate > 1 result
+  const context = {
+    newPage: async () => ({
+      _url: null,
+      goto: async function(url) { this._url = url; },
+      content: async function() {
+        if (this._url && this._url.includes('duckduckgo')) {
+          return `
+            <a class="result__a" href="https://duckduckgo.com/?uddg=https%3A%2F%2Fwww.spokeo.com%2FJane">S</a>
+            <a class="result__a" href="https://duckduckgo.com/?uddg=https%3A%2F%2Fwww.whitepages.com%2FJane">WP</a>
+          `;
+        }
+        return '<html></html>';
+      },
+      close: async () => {},
+    }),
+  };
+
+  const persons = [
+    { firstName: 'Jane', lastName: 'Doe', fullName: 'Jane Doe', city: 'Austin', state: 'TX', email: 'j@x.com' },
+  ];
+  const brokers = [
+    { name: 'Spokeo',     optOutUrl: 'https://www.spokeo.com/optout' },
+    { name: 'WhitePages', optOutUrl: 'https://www.whitepages.com/suppression-requests' },
+  ];
+
+  try {
+    await runSerpScan(context, persons, brokers, {});
+  } finally {
+    fsMod.writeFileSync = origWriteFileSync;
+    fsMod.renameSync = origRenameSync;
+    fsMod.mkdirSync = origMkdirSync;
+    fsMod.readFileSync = origReadFileSync;
+  }
+
+  // There were 2 broker results (Spokeo + WhitePages in DDG), but the write
+  // should happen once per scan, NOT once per result (which would be 2 writes).
+  assert.ok(
+    writeCallCount <= 1,
+    `history should be written once per scan (batched), but writeFileSync was called ${writeCallCount} times`
+  );
+});
+
+test('Fix4: history is capped at HISTORY_MAX entries - older entries are dropped', async () => {
+  const { HISTORY_MAX } = require('../lib/serp-scan');
+  assert.ok(typeof HISTORY_MAX === 'number' && HISTORY_MAX > 0, 'HISTORY_MAX should be exported as a positive number');
+
+  const fsMod = require('fs');
+
+  // Pre-populate history with HISTORY_MAX entries
+  const existingEntries = Array.from({ length: HISTORY_MAX }, (_, i) => ({
+    personId: `pid-${i}`,
+    broker: 'OldBroker',
+    engine: 'ddg',
+    rank: 1,
+    hostname: 'oldbrok.com',
+    scannedAt: new Date(Date.now() - (HISTORY_MAX - i) * 1000).toISOString(),
+  }));
+
+  let lastWrittenData = null;
+  const origWriteFileSync = fsMod.writeFileSync;
+  const origRenameSync = fsMod.renameSync;
+  const origMkdirSync = fsMod.mkdirSync;
+  const origReadFileSync = fsMod.readFileSync;
+
+  fsMod.mkdirSync = () => {};
+  fsMod.readFileSync = (p, enc) => {
+    if (p === HISTORY_PATH) return JSON.stringify(existingEntries);
+    return origReadFileSync(p, enc);
+  };
+  fsMod.writeFileSync = (filePath, data) => { lastWrittenData = data; };
+  fsMod.renameSync = () => {};
+
+  const context = {
+    newPage: async () => ({
+      _url: null,
+      goto: async function(url) { this._url = url; },
+      content: async function() {
+        if (this._url && this._url.includes('duckduckgo')) {
+          return `<a class="result__a" href="https://duckduckgo.com/?uddg=https%3A%2F%2Fwww.spokeo.com%2FJane">S</a>`;
+        }
+        return '<html></html>';
+      },
+      close: async () => {},
+    }),
+  };
+
+  const persons = [
+    { firstName: 'Jane', lastName: 'Doe', fullName: 'Jane Doe', city: 'Austin', state: 'TX', email: 'j@x.com' },
+  ];
+  const brokers = [{ name: 'Spokeo', optOutUrl: 'https://www.spokeo.com/optout' }];
+
+  try {
+    await runSerpScan(context, persons, brokers, {});
+  } finally {
+    fsMod.writeFileSync = origWriteFileSync;
+    fsMod.renameSync = origRenameSync;
+    fsMod.mkdirSync = origMkdirSync;
+    fsMod.readFileSync = origReadFileSync;
+  }
+
+  assert.ok(lastWrittenData !== null, 'should have written history data');
+  const written = JSON.parse(lastWrittenData);
+  assert.ok(
+    Array.isArray(written) && written.length <= HISTORY_MAX,
+    `history should be capped at HISTORY_MAX (${HISTORY_MAX}), but got ${written.length} entries`
+  );
+  // The new Spokeo entry should be present (most recent entries kept)
+  assert.ok(
+    written.some(e => e.broker === 'Spokeo'),
+    'most recent entry (Spokeo) must be in history'
+  );
+});
+
+// ── end Fix 4 ─────────────────────────────────────────────────────────────────
+
 // -- runSerpScan summary results carry a hostname (for serp-watch diffing) ----
 
 test('runSerpScan summary results include a broker hostname', async () => {
