@@ -86,7 +86,9 @@ test('getFieldMap does not crash when config has persons[] array instead of pers
   };
 
   const CONFIG_REAL_PATH = path.join(__dirname, '..', 'config.json');
+  const CONFIG_ENC_PATH  = path.join(__dirname, '..', 'config.json.enc');
   const origReadFileSync = fs.readFileSync;
+  const origExistsSync   = fs.existsSync;
 
   // Reset module cache so _config is null and the patched config is read
   delete require.cache[require.resolve('../generic-runner')];
@@ -95,6 +97,12 @@ test('getFieldMap does not crash when config has persons[] array instead of pers
   fs.readFileSync = function(p, enc) {
     if (p === CONFIG_REAL_PATH) return JSON.stringify(cfg);
     return origReadFileSync.call(fs, p, enc);
+  };
+  // loadConfig() calls existsSync before readFileSync; report config as present
+  fs.existsSync = function(p) {
+    if (p === CONFIG_ENC_PATH) return false; // no encrypted envelope
+    if (p === CONFIG_REAL_PATH) return true;  // plaintext config present
+    return origExistsSync.call(fs, p);
   };
 
   let error = null;
@@ -140,6 +148,7 @@ test('getFieldMap does not crash when config has persons[] array instead of pers
     error = e;
   } finally {
     fs.readFileSync = origReadFileSync;
+    fs.existsSync   = origExistsSync;
     delete require.cache[require.resolve('../generic-runner')];
   }
 
@@ -203,7 +212,9 @@ test('processGenericUrl does not use pendingConfirmation boolean (legacy dead fi
   // NOT be skipped - it should be attempted (result will be manual/success/error
   // depending on what the fake page returns, but NOT 'skipped').
   const CONFIG_REAL_PATH = path.join(__dirname, '..', 'config.json');
+  const CONFIG_ENC_PATH  = path.join(__dirname, '..', 'config.json.enc');
   const origReadFileSync = fs.readFileSync;
+  const origExistsSync   = fs.existsSync;
   const cfg = {
     person: {
       firstName: 'A', lastName: 'B', fullName: 'A B',
@@ -216,6 +227,11 @@ test('processGenericUrl does not use pendingConfirmation boolean (legacy dead fi
   fs.readFileSync = function(p, enc) {
     if (p === CONFIG_REAL_PATH) return JSON.stringify(cfg);
     return origReadFileSync.call(fs, p, enc);
+  };
+  fs.existsSync = function(p) {
+    if (p === CONFIG_ENC_PATH) return false;
+    if (p === CONFIG_REAL_PATH) return true;
+    return origExistsSync.call(fs, p);
   };
 
   const oldDate = new Date(Date.now() - 100 * 86400000).toISOString();
@@ -254,6 +270,7 @@ test('processGenericUrl does not use pendingConfirmation boolean (legacy dead fi
     );
   } finally {
     fs.readFileSync = origReadFileSync;
+    fs.existsSync   = origExistsSync;
     delete require.cache[require.resolve('../generic-runner')];
   }
 

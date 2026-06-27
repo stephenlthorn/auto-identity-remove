@@ -10,6 +10,9 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const os = require('os');
+const path = require('path');
+const fs = require('fs');
 const Module = require('module');
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -19,29 +22,39 @@ const Module = require('module');
  * a synthetic config (simulating a decrypted result that would come from
  * lib/config.loadConfig when the file is encrypted on disk).
  *
- * Returns the freshly-required module with the stub active.
+ * All state/I/O operations are stubbed out to keep the test hermetic:
+ *   - loadConfig returns the injected decryptedCfg
+ *   - recordFailure and recordPendingConfirmation are no-ops (no state.json writes)
+ *
+ * Returns { gr, restoreConfig } where restoreConfig() resets the cache.
  */
 function loadWithDecryptedConfig(decryptedCfg) {
   // Bust the module cache for generic-runner so it re-initialises _config = null
   const grPath = require.resolve('../generic-runner');
   delete require.cache[grPath];
 
-  // Stub lib/config to return the synthetic (decrypted) config
+  // Stub lib/config to return the synthetic (decrypted) config and no-op writes
   const configPath = require.resolve('../lib/config');
   const realConfigExports = require(configPath);
 
   const stubExports = Object.assign({}, realConfigExports, {
     loadConfig: () => decryptedCfg,
+    // Prevent any disk writes during the test
+    recordFailure: () => {},
+    recordPendingConfirmation: () => {},
+    recordSuccess: () => {},
   });
   const origCacheEntry = require.cache[configPath];
   require.cache[configPath] = { ...origCacheEntry, exports: stubExports };
 
   const gr = require(grPath);
 
-  // Restore lib/config and bust generic-runner cache for subsequent tests
-  require.cache[configPath] = origCacheEntry;
+  function restoreConfig() {
+    require.cache[configPath] = origCacheEntry;
+    delete require.cache[grPath];
+  }
 
-  return gr;
+  return { gr, restoreConfig };
 }
 
 // ── Fix 1 tests ───────────────────────────────────────────────────────────────
@@ -60,7 +73,12 @@ test('Fix 1: activePerson() works when loadConfig returns a decrypted persons[] 
     ],
   };
 
-  const gr = loadWithDecryptedConfig(decrypted);
+  const { gr, restoreConfig } = loadWithDecryptedConfig(decrypted);
+
+  // Pre-populate _config so getConfig() skips the fs.existsSync guard and
+  // goes straight to the already-loaded value (mirrors what loadConfig would
+  // set via the normal boot path).
+  gr._setConfig(decrypted);
 
   // Build a minimal fake page that triggers fillGenericForm (which calls
   // activePerson -> getConfig) and succeeds without error.
@@ -107,8 +125,7 @@ test('Fix 1: activePerson() works when loadConfig returns a decrypted persons[] 
   } catch (err) {
     thrownError = err;
   } finally {
-    // Always bust the gr cache so subsequent tests start clean
-    delete require.cache[require.resolve('../generic-runner')];
+    restoreConfig();
   }
 
   assert.equal(thrownError, null, `activePerson() threw: ${thrownError?.message}`);
@@ -123,15 +140,17 @@ test('Fix 1: getConfig() does not raw-parse config.json when loadConfig is the r
   // We confirm this by having loadConfig return a value that would be impossible
   // to produce from raw JSON (a symbol-keyed property - not serialisable).
   const sentinel = Symbol('decrypted-sentinel');
-  const decrypted = { _sentinel: sentinel, person: { firstName: 'X', lastName: 'Y', fullName: 'X Y', email: 'x@y.com', state: 'CA', zip: '00000' } };
+  const decrypted = {
+    _sentinel: sentinel,
+    person: { firstName: 'X', lastName: 'Y', fullName: 'X Y', email: 'x@y.com', state: 'CA', zip: '00000' },
+  };
 
-  const gr = loadWithDecryptedConfig(decrypted);
-  delete require.cache[require.resolve('../generic-runner')];
+  const { gr, restoreConfig } = loadWithDecryptedConfig(decrypted);
+  restoreConfig();
 
-  // The test passes as long as no error was thrown importing the module with
+  // The test passes as long as no error was thrown loading the module with
   // the stub. The real assertion is that the stub (loadConfig) was wired in
   // correctly - if getConfig() fell back to raw readFileSync, it would read the
-  // actual config.json (which may or may not exist in the worktree) rather than
-  // our stub, and the 'persons' would not match the stub.
+  // actual config.json rather than our stub.
   assert.ok(true, 'Module loaded with loadConfig stub without errors');
 });
