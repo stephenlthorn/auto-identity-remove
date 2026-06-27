@@ -77,7 +77,7 @@ function purgeServerModule() {
   }
 }
 
-function buildServer({ user = 'testuser', pass = 'testpass', cfgContent, stateContent } = {}) {
+function buildServer({ user = 'testuser', pass = 'testpass', cfgContent, stateContent, encContent, passphrase } = {}) {
   // Write temp files.
   cfgPath = tmpFile('.json');
   statePath = tmpFile('.json');
@@ -93,6 +93,11 @@ function buildServer({ user = 'testuser', pass = 'testpass', cfgContent, stateCo
   process.env.AIDR_PASS = pass;
   process.env.AIDR_PORT = '0'; // ephemeral
   delete process.env.AIDR_TOKEN;
+  if (passphrase !== undefined) {
+    process.env.AIDR_PASSPHRASE = passphrase;
+  } else {
+    delete process.env.AIDR_PASSPHRASE;
+  }
 
   purgeServerModule();
 
@@ -120,11 +125,13 @@ function buildServer({ user = 'testuser', pass = 'testpass', cfgContent, stateCo
   const serverDir = path.resolve(__dirname);
   const projectRoot = path.resolve(serverDir, '..');
   const realConfig = path.join(projectRoot, 'config.json');
+  const realConfigEnc = path.join(projectRoot, 'config.json.enc');
   const realState = path.join(projectRoot, 'state.json');
 
   // Stash original content.
-  let origConfig = null, origState = null;
+  let origConfig = null, origConfigEnc = null, origState = null;
   try { origConfig = fs.readFileSync(realConfig, 'utf8'); } catch (_) {}
+  try { origConfigEnc = fs.readFileSync(realConfigEnc, 'utf8'); } catch (_) {}
   try { origState = fs.readFileSync(realState, 'utf8'); } catch (_) {}
 
   // Write test content.
@@ -132,6 +139,11 @@ function buildServer({ user = 'testuser', pass = 'testpass', cfgContent, stateCo
     fs.writeFileSync(realConfig, JSON.stringify(cfgContent, null, 2));
   } else {
     try { fs.unlinkSync(realConfig); } catch (_) {}
+  }
+  if (encContent !== undefined) {
+    fs.writeFileSync(realConfigEnc, JSON.stringify(encContent, null, 2));
+  } else {
+    try { fs.unlinkSync(realConfigEnc); } catch (_) {}
   }
   if (stateContent !== undefined) {
     fs.writeFileSync(realState, JSON.stringify(stateContent, null, 2));
@@ -159,13 +171,21 @@ function buildServer({ user = 'testuser', pass = 'testpass', cfgContent, stateCo
           } else {
             try { fs.unlinkSync(realConfig); } catch (_) {}
           }
+          if (origConfigEnc !== null) {
+            try { fs.writeFileSync(realConfigEnc, origConfigEnc); } catch (_) {}
+          } else {
+            try { fs.unlinkSync(realConfigEnc); } catch (_) {}
+          }
           if (origState !== null) {
             try { fs.writeFileSync(realState, origState); } catch (_) {}
           } else {
             try { fs.unlinkSync(realState); } catch (_) {}
           }
+          // Restore AIDR_PASSPHRASE env var.
+          delete process.env.AIDR_PASSPHRASE;
         }),
         realConfig,
+        realConfigEnc,
         realState,
         projectRoot,
       });
@@ -626,4 +646,124 @@ test('maskConfig still masks the capsolver key after decrypting', () => {
   const plain = { capsolver: { apiKey: 'CAP-SECRET' } };
   const masked = maskConfig(plain);
   assert.equal(masked.capsolver.apiKey, MASK);
+});
+
+// -- Fix 1: PUT /api/config is encryption-aware --------------------------------
+
+test('PUT /api/config with encrypted config preserves untouched fields and re-encrypts', async () => {
+  // Build an encrypted config.json.enc with an existing secret and person field.
+  const plain = {
+    person: { firstName: 'Alice', lastName: 'Smith' },
+    capsolver: { apiKey: 'ORIGINAL-SECRET' },
+    notify: { webhook: 'https://hooks.example.com/original' },
+  };
+  const PASSPHRASE = 'test-passphrase-fix1';
+  const envelope = secrets.encryptConfig(plain, PASSPHRASE);
+  // buildServer with encContent (no cfgContent) so server sees an encrypted config.
+  const { server, close, realConfig, realConfigEnc } = await buildServer({
+    encContent: envelope,
+    passphrase: PASSPHRASE,
+  });
+  try {
+    // PUT only updates person.firstName; leaves capsolver.apiKey as MASK (untouched).
+    const r = await request(server, {
+      method: 'PUT',
+      pathname: '/api/config',
+      headers: {
+        Authorization: basicAuth('testuser', 'testpass'),
+        Origin: `http://127.0.0.1:${server.address().port}`,
+      },
+      body: { config: { person: { firstName: 'Updated', lastName: 'Smith' }, capsolver: { apiKey: MASK } } },
+    });
+    assert.equal(r.status, 200, `expected 200, got ${r.status}: ${JSON.stringify(r.json)}`);
+    // On-disk: no plaintext config.json must appear beside the enc file.
+    assert.ok(!fs.existsSync(realConfig) || (() => {
+      // If config.json exists, it must not be plaintext (must be absent or enc envelope).
+      // The critical invariant: no plaintext PII in config.json when enc is active.
+      try {
+        const parsed = JSON.parse(fs.readFileSync(realConfig, 'utf8'));
+        // If it parses as a plain config (has person.firstName), that is a leak.
+        return !(parsed && parsed.person && parsed.person.firstName === 'Updated');
+      } catch (_) { return true; }
+    })(), 'plaintext config.json must not appear when encryption is active');
+    // The enc file must still exist and decrypt to the merged result.
+    assert.ok(fs.existsSync(realConfigEnc), 'config.json.enc must exist after encrypted PUT');
+    const savedEnv = JSON.parse(fs.readFileSync(realConfigEnc, 'utf8'));
+    const decrypted = secrets.decryptConfig(savedEnv, PASSPHRASE);
+    assert.equal(decrypted.person.firstName, 'Updated', 'person.firstName must be updated in enc file');
+    assert.equal(decrypted.capsolver.apiKey, 'ORIGINAL-SECRET', 'masked sentinel must preserve original secret in enc file');
+    assert.equal(decrypted.notify.webhook, 'https://hooks.example.com/original', 'untouched field must be preserved via merge base');
+  } finally {
+    await close();
+  }
+});
+
+test('PUT /api/config without encryption writes plaintext (unchanged behavior)', async () => {
+  const plain = { person: { firstName: 'Bob' }, capsolver: { apiKey: 'ORIGINAL-BOB' } };
+  const { server, close, realConfig, realConfigEnc } = await buildServer({ cfgContent: plain });
+  try {
+    const r = await request(server, {
+      method: 'PUT',
+      pathname: '/api/config',
+      headers: {
+        Authorization: basicAuth('testuser', 'testpass'),
+        Origin: `http://127.0.0.1:${server.address().port}`,
+      },
+      body: { config: { person: { firstName: 'BobUpdated' }, capsolver: { apiKey: MASK } } },
+    });
+    assert.equal(r.status, 200, `expected 200, got ${r.status}: ${JSON.stringify(r.json)}`);
+    // config.json must be plaintext and contain the update.
+    const saved = JSON.parse(fs.readFileSync(realConfig, 'utf8'));
+    assert.equal(saved.person.firstName, 'BobUpdated');
+    assert.equal(saved.capsolver.apiKey, 'ORIGINAL-BOB', 'masked sentinel preserves secret in plaintext mode');
+    // No enc file should appear.
+    assert.ok(!fs.existsSync(realConfigEnc), 'config.json.enc must not appear for plaintext config');
+  } finally {
+    await close();
+  }
+});
+
+// -- Fix 2: secret-clear escape hatch -----------------------------------------
+
+test('PUT /api/config with explicit empty string clears a secret field', async () => {
+  const plain = { capsolver: { apiKey: 'SECRET-TO-CLEAR' }, person: { firstName: 'Clara' } };
+  const { server, close, realConfig } = await buildServer({ cfgContent: plain });
+  try {
+    // Send empty string for capsolver.apiKey (user intentionally cleared it).
+    const r = await request(server, {
+      method: 'PUT',
+      pathname: '/api/config',
+      headers: {
+        Authorization: basicAuth('testuser', 'testpass'),
+        Origin: `http://127.0.0.1:${server.address().port}`,
+      },
+      body: { config: { capsolver: { apiKey: '' } } },
+    });
+    assert.equal(r.status, 200, `expected 200, got ${r.status}: ${JSON.stringify(r.json)}`);
+    const saved = JSON.parse(fs.readFileSync(realConfig, 'utf8'));
+    assert.equal(saved.capsolver.apiKey, '', 'explicit empty string must clear the secret field');
+  } finally {
+    await close();
+  }
+});
+
+test('PUT /api/config with MASK sentinel preserves existing secret (not cleared)', async () => {
+  const plain = { capsolver: { apiKey: 'PRESERVED-SECRET' } };
+  const { server, close, realConfig } = await buildServer({ cfgContent: plain });
+  try {
+    const r = await request(server, {
+      method: 'PUT',
+      pathname: '/api/config',
+      headers: {
+        Authorization: basicAuth('testuser', 'testpass'),
+        Origin: `http://127.0.0.1:${server.address().port}`,
+      },
+      body: { config: { capsolver: { apiKey: MASK } } },
+    });
+    assert.equal(r.status, 200);
+    const saved = JSON.parse(fs.readFileSync(realConfig, 'utf8'));
+    assert.equal(saved.capsolver.apiKey, 'PRESERVED-SECRET', 'MASK sentinel must preserve the existing secret');
+  } finally {
+    await close();
+  }
 });

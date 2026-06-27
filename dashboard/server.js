@@ -55,6 +55,7 @@ const LOGS = path.join(ROOT, 'logs');
 const BROKERS = path.join(ROOT, 'brokers.js');
 const SERP_HISTORY = path.join(ROOT, 'data', 'serp-history.json');
 const secrets = require('../lib/secrets');
+const { isConfigEncrypted } = require('../lib/config');
 const CONFIG_PASSPHRASE = process.env.AIDR_PASSPHRASE || '';
 const EXPOSURE_LIB = path.join(ROOT, 'lib', 'exposure.js');
 
@@ -444,10 +445,21 @@ app.get('/api/config/status', (_req, res) => {
 app.put('/api/config', (req, res) => {
   const incoming = req.body && req.body.config ? req.body.config : req.body;
   if (!incoming || typeof incoming !== 'object') return res.status(400).json({ error: 'invalid config' });
-  const existing = readJsonSafe(CONFIG, {});
+  // Use decryption-aware reader so the merge base is always the full decrypted config,
+  // not an empty object (which would wipe fields not present in the submitted form).
+  const m = readConfigMeta();
+  const existing = (m.exists && !m.parseError && m.data) ? m.data : {};
   const merged = mergeConfig(existing, incoming);
+  const passphrase = CONFIG_PASSPHRASE;
+  const encrypted = isConfigEncrypted({ configPath: CONFIG, encPath: CONFIG_ENC });
   try {
-    writeJsonAtomic(CONFIG, merged, 0o600);
+    if (encrypted && passphrase) {
+      // Re-encrypt the merged config and write to the enc file.
+      const envelope = secrets.encryptConfig(merged, passphrase);
+      writeJsonAtomic(CONFIG_ENC, envelope, 0o600);
+    } else {
+      writeJsonAtomic(CONFIG, merged, 0o600);
+    }
     res.json({ ok: true, config: maskConfig(merged) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
