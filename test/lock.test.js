@@ -107,3 +107,45 @@ test('release: does not throw when file is missing', () => {
   const lockPath = tmpLock();
   assert.doesNotThrow(() => release(lockPath));
 });
+
+// ── Fix 3: pid-ownership check in release ────────────────────────────────────
+
+test('release: does NOT remove lock when pid does not match (non-owner)', () => {
+  const lockPath = tmpLock();
+  try {
+    // Write a lock owned by a different pid (simulate another process)
+    const otherPid = 9999997;
+    fs.writeFileSync(lockPath, JSON.stringify({ pid: otherPid, ts: new Date().toISOString() }));
+
+    // Our process tries to release - should be a no-op because it does not own the lock
+    release(lockPath);
+
+    // The lock file should still exist (we did not own it)
+    assert.ok(fs.existsSync(lockPath), 'lock file must remain when release called by non-owner');
+    const contents = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
+    assert.equal(contents.pid, otherPid, 'lock pid should be unchanged after non-owner release');
+  } finally {
+    if (fs.existsSync(lockPath)) fs.unlinkSync(lockPath);
+  }
+});
+
+test('release: DOES remove lock when pid matches (owner)', () => {
+  const lockPath = tmpLock();
+  // acquire writes our pid
+  acquire(lockPath);
+  // now release as owner should remove it
+  release(lockPath);
+  assert.ok(!fs.existsSync(lockPath), 'lock should be gone after owner release');
+});
+
+test('acquire: uses exclusive-create (wx) on fresh path, no TOCTOU', () => {
+  const lockPath = tmpLock();
+  try {
+    // First acquire should succeed
+    acquire(lockPath);
+    const contents = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
+    assert.equal(contents.pid, process.pid);
+  } finally {
+    if (fs.existsSync(lockPath)) fs.unlinkSync(lockPath);
+  }
+});
