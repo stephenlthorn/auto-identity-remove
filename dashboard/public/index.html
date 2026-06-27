@@ -110,26 +110,26 @@
           <p class="dim">Brokers on this list are never opted out and are not flagged by verification. Case-insensitive; match the broker name from the Brokers tab.</p>
         </fieldset>
         <fieldset><legend>CapSolver (CAPTCHA solving)</legend>
-          <label>API key <input name="capsolver.apiKey" type="password" placeholder="CAP-…" /></label>
+          <label>API key <span class="secret-wrap"><input name="capsolver.apiKey" type="password" placeholder="CAP-…" /><button type="button" class="btn btn-clear-secret" data-clears="capsolver.apiKey" title="Clear this secret (sets it to empty on save)">Clear</button></span></label>
         </fieldset>
         <fieldset><legend>Notifications</legend>
-          <label>Webhook (ntfy/Slack/Discord) <input name="notify.webhook" placeholder="https://ntfy.sh/your-topic" /></label>
+          <label>Webhook (ntfy/Slack/Discord) <span class="secret-wrap"><input name="notify.webhook" placeholder="https://ntfy.sh/your-topic" /><button type="button" class="btn btn-clear-secret" data-clears="notify.webhook" title="Clear this secret (sets it to empty on save)">Clear</button></span></label>
           <label>Text to (macOS iMessage) <input name="notify.textTo" /></label>
         </fieldset>
         <fieldset><legend>SMTP (email-based opt-outs)</legend>
           <label>Host <input name="email.smtp.host" placeholder="smtp.gmail.com" /></label>
           <label>Port <input name="email.smtp.port" type="number" placeholder="587" /></label>
           <label>User <input name="email.smtp.user" /></label>
-          <label>Password / App-password <input name="email.smtp.pass" type="password" /></label>
+          <label>Password / App-password <span class="secret-wrap"><input name="email.smtp.pass" type="password" /><button type="button" class="btn btn-clear-secret" data-clears="email.smtp.pass" title="Clear this secret (sets it to empty on save)">Clear</button></span></label>
           <label>From <input name="email.smtp.from" /></label>
         </fieldset>
         <fieldset><legend>Broker accounts (sites needing login)</legend>
           <label>Spokeo email <input name="accounts.spokeo.email" /></label>
-          <label>Spokeo password <input name="accounts.spokeo.password" type="password" /></label>
+          <label>Spokeo password <span class="secret-wrap"><input name="accounts.spokeo.password" type="password" /><button type="button" class="btn btn-clear-secret" data-clears="accounts.spokeo.password" title="Clear this secret (sets it to empty on save)">Clear</button></span></label>
           <label>BeenVerified email <input name="accounts.beenverified.email" /></label>
-          <label>BeenVerified password <input name="accounts.beenverified.password" type="password" /></label>
+          <label>BeenVerified password <span class="secret-wrap"><input name="accounts.beenverified.password" type="password" /><button type="button" class="btn btn-clear-secret" data-clears="accounts.beenverified.password" title="Clear this secret (sets it to empty on save)">Clear</button></span></label>
           <label>MyLife email <input name="accounts.mylife.email" /></label>
-          <label>MyLife password <input name="accounts.mylife.password" type="password" /></label>
+          <label>MyLife password <span class="secret-wrap"><input name="accounts.mylife.password" type="password" /><button type="button" class="btn btn-clear-secret" data-clears="accounts.mylife.password" title="Clear this secret (sets it to empty on save)">Clear</button></span></label>
         </fieldset>
       </form>
     </section>

@@ -48,19 +48,31 @@ function fmtDate(raw) {
   const d = new Date(raw);
   return isNaN(d.getTime()) ? String(raw) : d.toLocaleString();
 }
-// Fix 6: align status->badge mapping to real watcher vocab and server buckets.
-// Keep in sync with dashboard/validate.js classifyStatus.
+// Align status->badge mapping EXACTLY to dashboard/validate.js classifyStatus.
+// Source of truth: validate.js. This switch must be kept identical to that
+// function's switch block. Do NOT add fuzzy regexes here.
+// Vocab (lib/logger.js): success / notFound / unverified / pending_confirm /
+//   error / captcha_failed / dead / manual
+// Returns one of: ok / notfound / pending / error / manual / other
+function _classifyStatus(raw) {
+  switch (raw) {
+    case 'success':         return 'ok';
+    case 'notfound':        return 'notfound';
+    case 'pending_confirm': return 'pending';
+    case 'unverified':      return 'pending';
+    case 'error':           return 'error';
+    case 'captcha_failed':  return 'error';
+    case 'dead':            return 'error';
+    case 'manual':          return 'manual';
+    default:                return 'other';
+  }
+}
 function statusFor(name) {
   const o = (state.optOuts && state.optOuts[name]) || null;
   if (!o) return { key: 'none', label: '-', date: '' };
   const hist = Array.isArray(o.history) ? o.history : [];
   const raw = String(hist[hist.length - 1] || o.status || '').toLowerCase();
-  let key = 'other';
-  if (raw === 'ok' || /success|removed|confirmed|opted/.test(raw)) key = 'ok';
-  else if (raw === 'notfound' || /not_found|not listed/.test(raw)) key = 'notfound';
-  else if (raw === 'pending' || raw === 'pending_confirm' || raw === 'unverified' || /await|sent/.test(raw)) key = 'pending';
-  else if (raw === 'manual') key = 'manual';
-  else if (raw === 'error' || raw === 'captcha_failed' || raw === 'dead' || /fail/.test(raw)) key = 'error';
+  const key = raw ? _classifyStatus(raw) : 'other';
   return { key, label: raw || '-', date: fmtDate(o.lastSuccess || o.lastAttempt || '') };
 }
 function renderBrokers() {
@@ -319,7 +331,25 @@ async function loadConfig() {
     if ((inp.name === 'person.aliases' || inp.name === 'allowlist') && Array.isArray(v)) v = v.join(', ');
     inp.value = v == null ? '' : v;
   });
+  // Reset clear-button state whenever config is (re)loaded.
+  $$('.btn-clear-secret').forEach(btn => { btn.textContent = 'Clear'; btn.disabled = false; });
 }
+// Wire "Clear" buttons for secret fields. Clicking sets the input to '' so
+// the next save sends an explicit empty string (distinct from the MASK sentinel
+// which means "keep existing"). A small status label confirms the intent.
+$$('.btn-clear-secret').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const name = btn.dataset.clears;
+    const inp = $(`#configForm input[name="${name}"]`);
+    if (inp) {
+      inp.value = '';
+      btn.textContent = 'Cleared';
+      btn.disabled = true;
+      inp.focus();
+    }
+  });
+});
+
 $('#saveConfig').addEventListener('click', async () => {
   const cfg = {};
   $$('#configForm input').forEach(inp => {
