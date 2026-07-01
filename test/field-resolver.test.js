@@ -286,6 +286,47 @@ test('resolveField: returns null for generic intent', async () => {
   assert.equal(result, null, 'generic intent should always abstain');
 });
 
+// ─── 5b. fullName must NOT fill "false friend" *name* fields (wrong-PII guard) ─
+
+test('deriveIntent: company_name / business_name → generic (not fullName)', () => {
+  assert.equal(deriveIntent('input[name*="company_name" i]', 'Jane Doe'), 'generic');
+  assert.equal(deriveIntent('input[name*="business_name" i]', 'Jane Doe'), 'generic');
+  assert.equal(deriveIntent('input[name*="organization" i]', 'Jane Doe'), 'generic');
+});
+
+test('resolveField: fullName intent abstains on a multi-signal company_name decoy', async () => {
+  // company_name scores name(2)+id(2)+placeholder(2)=6 under the OLD scorer and
+  // was wrongly filled with the person's real name. It must now score 0.
+  const candidates = [
+    makeEl({ name: 'company_name', id: 'company_name', tagName: 'INPUT', placeholder: 'Company name' }),
+  ];
+  const page = makeResolvePage(candidates);
+  const result = await resolveField(page, 'input[name="name"]', 'Jane Doe');
+  assert.equal(result, null, 'must not fill a company_name field for fullName intent');
+  assert.equal(candidates[0]._filledWith, undefined, 'company_name must not receive PII');
+});
+
+test('resolveField: fullName intent abstains on a middle_name / nickname decoy', async () => {
+  for (const nm of ['middle_name', 'nickname', 'maiden_name']) {
+    const candidates = [makeEl({ name: nm, id: nm, tagName: 'INPUT', placeholder: nm.replace('_', ' ') })];
+    const page = makeResolvePage(candidates);
+    const result = await resolveField(page, 'input[name="name"]', 'Jane Doe');
+    assert.equal(result, null, `must not fill a ${nm} field for fullName intent`);
+  }
+});
+
+test('resolveField: fullName still resolves a genuine full_name field', async () => {
+  // Positive control: the fix must not break the real primary-name case.
+  const candidates = [
+    makeEl({ name: 'full_name', id: 'full_name', tagName: 'INPUT', autocomplete: 'name', placeholder: 'Full name' }),
+  ];
+  const page = makeResolvePage(candidates);
+  const result = await resolveField(page, 'input[name="name"]', 'Jane Doe');
+  assert.notEqual(result, null, 'a genuine full_name field must still resolve');
+  await result.fill('Jane Doe');
+  assert.equal(candidates[0]._filledWith, 'Jane Doe');
+});
+
 // ─── 6. fillForm: secondary fallback fires for exact selector miss ────────────
 //  The provable gap: input[name="email"] has no *="..." pattern → extractKeyword
 //  returns null → primary getByLabel path is skipped → previously no fallback.
