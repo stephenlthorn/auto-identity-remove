@@ -41,10 +41,14 @@ const origGetPersons = configMod.getPersonsFromConfig;
 function patchDeps() {
   const logCalls = [];
   const recorded = [];
+  const recordedArgs = [];
   loggerMod.logResult = (broker, status, detail) => logCalls.push({ broker, status, detail });
-  configMod.recordKnowRequest = (name) => recorded.push(name);
+  configMod.recordKnowRequest = (name, person, totalPersons) => {
+    recorded.push(name);
+    recordedArgs.push({ name, person, totalPersons });
+  };
   configMod.getPersonsFromConfig = (c) => (c.persons && c.persons.length ? c.persons : [c.person]);
-  return { logCalls, recorded };
+  return { logCalls, recorded, recordedArgs };
 }
 
 function restoreDeps() {
@@ -133,4 +137,34 @@ test('multi-person -> one request per (broker, person)', async () => {
   // Manual log per person, state recorded once per broker per person.
   assert.equal(result.manual.length, 2, `expected 2 manual entries, got ${JSON.stringify(result.manual)}`);
   assert.equal(recorded.length, 2);
+});
+
+test('B6: recordKnowRequest is threaded the person + person count (multi-person keying)', async () => {
+  const { recordedArgs } = patchDeps();
+  const personB = { ...PERSON, fullName: 'John Roe', firstName: 'John', lastName: 'Roe' };
+  const cfg = { persons: [PERSON, personB] };
+
+  await runner.sendKnowRequests([EMAIL_BROKER], cfg, {});
+
+  restoreDeps();
+
+  assert.equal(recordedArgs.length, 2);
+  // Each call carries the specific person and the total count so config.stateKey
+  // produces distinct composite keys instead of collapsing onto one bare name.
+  assert.equal(recordedArgs[0].totalPersons, 2);
+  assert.equal(recordedArgs[1].totalPersons, 2);
+  const names = recordedArgs.map(a => a.person && a.person.firstName).sort();
+  assert.deepEqual(names, ['Jane', 'John']);
+});
+
+test('B6: single-person run threads person count 1 (bare-name keying preserved)', async () => {
+  const { recordedArgs } = patchDeps();
+  const cfg = { person: PERSON };
+
+  await runner.sendKnowRequests([EMAIL_BROKER], cfg, {});
+
+  restoreDeps();
+
+  assert.equal(recordedArgs.length, 1);
+  assert.equal(recordedArgs[0].totalPersons, 1);
 });
