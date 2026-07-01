@@ -11,7 +11,7 @@ const path = require('path');
 const fs   = require('fs');
 const os   = require('os');
 
-const { STATE_PATH, RECHECK_DAYS, loadConfig, loadState, saveState, recordSuccess, setDryRun, getPersonsFromConfig, loadCheckpoint, clearCheckpoint } = require('./lib/config');
+const { STATE_PATH, RECHECK_DAYS, loadConfig, loadState, saveState, recordSuccess, setDryRun, getPersonsFromConfig, loadCheckpoint, clearCheckpoint, findResumeIndex } = require('./lib/config');
 const { results, logResult, buildSummary, setDefunctBrokers } = require('./lib/logger');
 const { findDefunct, DEFUNCT_THRESHOLD } = require('./lib/defunct');
 const { sendText, desktopNotify, openInBrowser } = require('./lib/notify');
@@ -22,7 +22,7 @@ const lock = require('./lib/lock');
 const { applyFilter, loadLastLog, extractFailedBrokers } = require('./lib/filter');
 const { addToAllowlist, removeFromAllowlist, parseAllowlistArgs } = require('./lib/allowlist-edit');
 const { diffResults, loadPreviousLog } = require('./lib/diff');
-const { renderAuditMarkdown, writeAuditFile } = require('./lib/audit');
+const { renderAuditMarkdown, writeAuditFile, timestampForFilename } = require('./lib/audit');
 const { buildStealthScript } = require('./lib/stealth');
 
 const PREVIEW           = process.argv.includes('--preview');
@@ -734,7 +734,9 @@ if (process.env.PLAYWRIGHT_BROWSERS_PATH === undefined) {
 
 const LOG_DIR = path.join(__dirname, 'logs');
 fs.mkdirSync(LOG_DIR, { recursive: true });
-const logFile = path.join(LOG_DIR, `run-${new Date().toISOString().slice(0, 10)}.json`);
+// Timestamped to the second (B8): two runs on the same day must not overwrite
+// each other, otherwise loadPreviousLog/diffResults can never diff intraday runs.
+const logFile = path.join(LOG_DIR, `run-${timestampForFilename(new Date().toISOString())}.json`);
 const stamp = () => new Date().toLocaleTimeString();
 
 const LOCK_PATH = STATE_PATH + '.lock';
@@ -937,7 +939,10 @@ async function _mainBody() {
     if (RESUME) {
       const ckpt = loadCheckpoint();
       if (ckpt) {
-        const ckptIdx = sorted.findIndex(b => b.name === ckpt);
+        // Match via stateKey (B22): the checkpoint stores the composite
+        // "Broker|First Last" key in multi-person mode, so a bare-name compare
+        // would miss and silently re-run everything.
+        const ckptIdx = findResumeIndex(sorted, ckpt, person, persons.length);
         if (ckptIdx > 0) {
           console.log(`\n--resume: skipping ${ckptIdx} broker(s) before "${ckpt}"`);
           sorted = sorted.slice(ckptIdx);

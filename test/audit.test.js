@@ -111,11 +111,19 @@ describe('writeAuditFile', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('writes a file named audit-YYYY-MM-DD.md based on the timestamp', () => {
+  it('writes a file stamped down to the second so same-day runs do not collide (B8)', () => {
     const md = renderAuditMarkdown({ person, timestamp, results });
     const filePath = writeAuditFile(tmpDir, md, timestamp);
-    assert.equal(path.basename(filePath), 'audit-2026-05-19.md');
+    assert.equal(path.basename(filePath), 'audit-2026-05-19T10-00-00.md');
     assert.ok(fs.existsSync(filePath), 'File should exist on disk');
+  });
+
+  it('two runs on the same day produce distinct filenames (B8)', () => {
+    const md = '# Audit';
+    const first = writeAuditFile(tmpDir, md, '2026-05-19T10:00:00.000Z');
+    const second = writeAuditFile(tmpDir, md, '2026-05-19T14:30:05.000Z');
+    assert.notEqual(path.basename(first), path.basename(second));
+    assert.ok(fs.existsSync(first) && fs.existsSync(second), 'both files survive');
   });
 
   it('written file contains the markdown content', () => {
@@ -131,9 +139,9 @@ describe('writeAuditFile', () => {
     assert.ok(path.isAbsolute(filePath));
   });
 
-  it('uses today when no timestamp is provided', () => {
+  it('uses now when no timestamp is provided', () => {
     const md = '# Audit';
     const filePath = writeAuditFile(tmpDir, md);
-    assert.match(path.basename(filePath), /^audit-\d{4}-\d{2}-\d{2}\.md$/);
+    assert.match(path.basename(filePath), /^audit-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.md$/);
   });
 });
