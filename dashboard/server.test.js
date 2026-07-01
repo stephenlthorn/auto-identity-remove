@@ -598,6 +598,28 @@ test('GET /api/config/status requires auth (401 without credentials)', async () 
   }
 });
 
+// B5: /api/config/status must use the decryption-aware reader so an encrypted
+// config with a complete person reports configured:true (does NOT re-trigger the
+// first-run wizard). A non-decrypting reader sees ciphertext and reports missing.
+test('GET /api/config/status: encrypted config with complete person -> configured', async () => {
+  const _secrets = require('../lib/secrets');
+  const PASSPHRASE = 'test-passphrase-b5';
+  const plain = { person: { firstName: 'Alice', lastName: 'Smith', email: 'alice@example.com' } };
+  const envelope = _secrets.encryptConfig(plain, PASSPHRASE);
+  const { server, close } = await buildServer({ encContent: envelope, passphrase: PASSPHRASE });
+  try {
+    const r = await request(server, {
+      pathname: '/api/config/status',
+      headers: { Authorization: basicAuth('testuser', 'testpass') },
+    });
+    assert.equal(r.status, 200);
+    assert.equal(r.json.configured, true, 'encrypted config with a complete person must report configured');
+    assert.deepEqual(r.json.missing, []);
+  } finally {
+    await close();
+  }
+});
+
 // -- At-rest config encryption (added for encrypt-config-at-rest) -------------
 const _encFs = require('node:fs');
 const _encOs = require('node:os');
@@ -763,6 +785,54 @@ test('PUT /api/config with MASK sentinel preserves existing secret (not cleared)
     assert.equal(r.status, 200);
     const saved = JSON.parse(fs.readFileSync(realConfig, 'utf8'));
     assert.equal(saved.capsolver.apiKey, 'PRESERVED-SECRET', 'MASK sentinel must preserve the existing secret');
+  } finally {
+    await close();
+  }
+});
+
+// B19: mergeConfig must drop dangerous keys (__proto__ / constructor / prototype)
+// so a crafted PUT body cannot pollute Object.prototype (defense-in-depth). The
+// keys must be dropped outright, not merely neutralised by assignment semantics,
+// so the merged object carries no manipulated prototype and no polluting own key.
+test('mergeConfig drops __proto__/constructor/prototype keys without polluting', () => {
+  const { mergeConfig } = require('./server');
+  // JSON.parse produces __proto__/constructor as OWN enumerable properties.
+  const incoming = JSON.parse('{"person":{"firstName":"Updated","__proto__":{"polluted":"yes"}},"constructor":{"polluted":"c"},"prototype":{"polluted":"p"},"__proto__":{"polluted":"top"}}');
+  const out = mergeConfig({ person: { firstName: 'Peggy' } }, incoming);
+  // No global pollution.
+  assert.equal({}.polluted, undefined, 'Object.prototype must not be polluted');
+  // Legitimate field survives.
+  assert.equal(out.person.firstName, 'Updated', 'legitimate field must still be merged');
+  // Dangerous keys are dropped, not present as own properties.
+  assert.equal(Object.prototype.hasOwnProperty.call(out, 'constructor'), false, 'constructor own-key must be dropped');
+  assert.equal(Object.prototype.hasOwnProperty.call(out, 'prototype'), false, 'prototype own-key must be dropped');
+  assert.equal(Object.prototype.hasOwnProperty.call(out.person, 'polluted'), false, 'nested pollution must not leak');
+  // Merged object must keep a clean prototype (no __proto__ manipulation).
+  assert.equal(Object.getPrototypeOf(out), Object.prototype, 'merged object must have a clean prototype');
+  assert.equal(Object.getPrototypeOf(out.person), Object.prototype, 'nested merged object must have a clean prototype');
+});
+
+test('PUT /api/config with a nested __proto__ does not pollute and is dropped', async () => {
+  const plain = { person: { firstName: 'Peggy' } };
+  const { server, close, realConfig } = await buildServer({ cfgContent: plain });
+  try {
+    const r = await request(server, {
+      method: 'PUT',
+      pathname: '/api/config',
+      headers: {
+        Authorization: basicAuth('testuser', 'testpass'),
+        Origin: `http://127.0.0.1:${server.address().port}`,
+      },
+      body: { config: { person: { firstName: 'Updated', __proto__: { polluted: 'yes' } }, __proto__: { polluted: 'yes' } } },
+    });
+    assert.equal(r.status, 200, `expected 200, got ${r.status}: ${JSON.stringify(r.json)}`);
+    // Global prototype must remain unpolluted.
+    assert.equal({}.polluted, undefined, 'Object.prototype must not be polluted');
+    // The dangerous key must not be persisted as an own property either.
+    const saved = JSON.parse(fs.readFileSync(realConfig, 'utf8'));
+    assert.equal(saved.person.firstName, 'Updated', 'legitimate field must still be updated');
+    assert.equal(Object.prototype.hasOwnProperty.call(saved.person, 'polluted'), false, 'polluted own-prop must not be persisted');
+    assert.equal(saved.polluted, undefined, 'top-level polluted must not be persisted');
   } finally {
     await close();
   }

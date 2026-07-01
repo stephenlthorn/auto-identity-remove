@@ -248,12 +248,16 @@ function maskConfig(cfg) {
   }
   return c;
 }
+// Keys that must never be merged from client input - assigning them can corrupt
+// the prototype chain (prototype pollution). Dropped outright (defense-in-depth).
+const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 // Merge incoming over existing; a value equal to MASK means "keep existing".
 function mergeConfig(existing, incoming) {
   if (Array.isArray(incoming)) return incoming;
   if (incoming && typeof incoming === 'object') {
     const out = Array.isArray(existing) ? {} : { ...(existing || {}) };
     for (const k of Object.keys(incoming)) {
+      if (DANGEROUS_KEYS.has(k)) continue; // never merge prototype-polluting keys
       if (incoming[k] === MASK) continue; // preserve existing secret
       out[k] = mergeConfig(existing ? existing[k] : undefined, incoming[k]);
     }
@@ -437,7 +441,7 @@ app.get('/api/config', (_req, res) => {
 // this on boot to decide whether to show the onboarding wizard. Absent or
 // unparseable config -> not configured (configStatus(null) flags every field).
 app.get('/api/config/status', (_req, res) => {
-  const m = readJsonMeta(CONFIG);
+  const m = readConfigMeta();
   const cfg = m.parseError ? null : (m.data || null);
   res.json(configStatus(cfg));
 });
@@ -551,13 +555,13 @@ app.post('/api/schedule', async (req, res) => {
   const { action, preset } = req.body || {};
   if (action === 'enable') {
     const r = await sh('systemctl', ['enable', '--now', TIMER]);
-    if (r.err || (r.err && r.err.code)) {
+    if (r.err) {
       const msg = r.errout.trim() || (r.err && r.err.message) || 'systemctl enable failed';
       return res.status(500).json({ error: msg });
     }
   } else if (action === 'disable') {
     const r = await sh('systemctl', ['disable', '--now', TIMER]);
-    if (r.err || (r.err && r.err.code)) {
+    if (r.err) {
       const msg = r.errout.trim() || (r.err && r.err.message) || 'systemctl disable failed';
       return res.status(500).json({ error: msg });
     }
