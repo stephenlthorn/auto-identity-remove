@@ -44,7 +44,7 @@ test('recordPendingConfirmation stores pendingConfirm object + lastAttempt', () 
     assert.equal(typeof e.pendingConfirm.since, 'string', 'pendingConfirm.since must be a string');
     assert.equal(e.pendingConfirm.snippet, 'check your email to confirm');
     assert.equal(typeof e.lastAttempt, 'string');
-    assert.equal(e.detail, 'check your email to confirm');
+    assert.equal(e.lastDetail, 'check your email to confirm');
     assert.equal(e.totalRuns, 1);
   });
 });

@@ -510,7 +510,118 @@ test('Fix1: subdomain of broker domain is accepted (same registrable domain)', a
   assert.deepEqual(successCalls, ['Spokeo']);
 });
 
-// ── end Fix 1 ─────────────────────────────────────────────────────────────────
+// ── B15: multi-part-TLD lookalike must be rejected ────────────────────────────
+
+test('B15: lookalike host sharing a multi-part TLD is rejected (attacker.co.uk vs broker.co.uk)', () => {
+  const { validateConfirmUrl } = require('../lib/imap-confirm');
+  const broker = {
+    name: 'BrokerUK',
+    expectedSender: 'optout@broker.co.uk',
+    optOutUrl: 'https://www.broker.co.uk/optout',
+  };
+  // attacker.co.uk shares the naive registrable domain co.uk with broker.co.uk
+  const result = validateConfirmUrl('https://attacker.co.uk/confirm/steal', broker);
+  assert.ok(
+    !result.valid,
+    `attacker.co.uk must NOT be treated as broker.co.uk, got: ${JSON.stringify(result)}`
+  );
+  assert.equal(result.reason, 'host_mismatch');
+});
+
+test('B15: exact broker host on a multi-part TLD is accepted', () => {
+  const { validateConfirmUrl } = require('../lib/imap-confirm');
+  const broker = {
+    name: 'BrokerUK',
+    expectedSender: 'optout@broker.co.uk',
+    optOutUrl: 'https://www.broker.co.uk/optout',
+  };
+  const result = validateConfirmUrl('https://broker.co.uk/confirm/abc', broker);
+  assert.ok(result.valid, `exact broker.co.uk host must be accepted, got: ${JSON.stringify(result)}`);
+});
+
+test('B15: true subdomain on a multi-part TLD is accepted (privacy.broker.co.uk)', () => {
+  const { validateConfirmUrl } = require('../lib/imap-confirm');
+  const broker = {
+    name: 'BrokerUK',
+    expectedSender: 'optout@broker.co.uk',
+    optOutUrl: 'https://www.broker.co.uk/optout',
+  };
+  const result = validateConfirmUrl('https://privacy.broker.co.uk/confirm/abc', broker);
+  assert.ok(result.valid, `privacy.broker.co.uk subdomain must be accepted, got: ${JSON.stringify(result)}`);
+});
+
+// ── end B15 ───────────────────────────────────────────────────────────────────
+
+// ── B16: sender-spoofing rejection ────────────────────────────────────────────
+
+test('B16: spoofed From with broker domain as a sub-label is rejected (optout@spokeo.com.attacker.com)', async () => {
+  const broker = {
+    name: 'Spokeo',
+    expectedSender: 'optout@spokeo.com',
+    optOutUrl: 'https://www.spokeo.com/optout',
+  };
+  // The From domain is spokeo.com.attacker.com - a raw includes() on the header
+  // would match "spokeo.com". Domain-anchored matching must reject it.
+  const eml = makeEml('optout@spokeo.com.attacker.com', 'Click https://spokeo.com/confirm/abc to confirm.');
+  const ctx = makeContext();
+  const successCalls = [];
+
+  const result = await processConfirmationEmails(ctx, [broker], {
+    dir: 'confirms',
+    dryRun: false,
+    _readDir: () => ['spoof.eml'],
+    _readFile: () => eml,
+    _moveFile: () => {},
+    _recordSuccess: (name) => successCalls.push(name),
+  });
+
+  assert.equal(result.processed.length, 0, 'spoofed sender must not be processed');
+  assert.ok(
+    result.unmatched.some(u => u.reason === 'no_broker'),
+    `expected no_broker for spoofed sender, got: ${JSON.stringify(result.unmatched)}`
+  );
+  assert.equal(successCalls.length, 0, 'recordSuccess must NOT be called for spoofed sender');
+});
+
+test('B16: legitimate From with display name and angle brackets still matches broker', async () => {
+  const broker = {
+    name: 'Spokeo',
+    expectedSender: 'optout@spokeo.com',
+    optOutUrl: 'https://www.spokeo.com/optout',
+  };
+  const eml = makeEml('Spokeo Opt-Out <optout@spokeo.com>', 'Click https://spokeo.com/confirm/abc to confirm.');
+  const ctx = makeContext();
+
+  const result = await processConfirmationEmails(ctx, [broker], {
+    dir: 'confirms',
+    dryRun: true,
+    _readDir: () => ['ok.eml'],
+    _readFile: () => eml,
+  });
+
+  assert.equal(result.processed.length, 1, 'legitimate angle-bracket sender should match');
+});
+
+test('B16: legitimate From from a broker subdomain sender still matches (bounces.spokeo.com)', async () => {
+  const broker = {
+    name: 'Spokeo',
+    expectedSender: 'optout@spokeo.com',
+    optOutUrl: 'https://www.spokeo.com/optout',
+  };
+  const eml = makeEml('optout@bounces.spokeo.com', 'Click https://spokeo.com/confirm/abc to confirm.');
+  const ctx = makeContext();
+
+  const result = await processConfirmationEmails(ctx, [broker], {
+    dir: 'confirms',
+    dryRun: true,
+    _readDir: () => ['sub.eml'],
+    _readFile: () => eml,
+  });
+
+  assert.equal(result.processed.length, 1, 'subdomain sender of broker domain should match');
+});
+
+// ── end B16 ───────────────────────────────────────────────────────────────────
 
 // ── Fix 2: UTF-8 QP decoding ──────────────────────────────────────────────────
 

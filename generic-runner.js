@@ -567,7 +567,9 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
         recordPendingConfirmation(broker.name, result.detail || '');
       } else if (result.status === 'error' || result.status === 'dead') {
         const { recordFailure } = require('./lib/config');
-        recordFailure(broker.name, 'error');
+        // B24: record the real status so defunct/drift can tell a gone site
+        // ('dead') from a transient error, rather than collapsing both to 'error'.
+        recordFailure(broker.name, result.status === 'dead' ? 'dead' : 'error');
       }
 
       await prunePopups(); // reap any popups / tabs this broker opened
@@ -596,6 +598,7 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
       'dry-run-skipped': stats['dry-run-skipped'],
       'skipped-recent': stats['skipped-recent'],
       dead: stats.dead,
+      allowlisted: stats.allowlisted || 0,
     },
   };
 }

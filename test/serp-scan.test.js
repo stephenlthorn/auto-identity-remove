@@ -408,6 +408,32 @@ test('M7: matchBrokers does not match different TLD (spokeo.net != spokeo.com)',
   assert.equal(matches.length, 0, 'different TLD should not match');
 });
 
+test('B15: matchBrokers does NOT match a lookalike sharing a multi-part TLD (attacker.co.uk vs broker.co.uk)', () => {
+  // Naive last-two-labels reduction collapses both to co.uk. Dot-anchored
+  // matching must reject attacker.co.uk against broker.co.uk.
+  const serpHostnames = ['attacker.co.uk'];
+  const brokerHostnames = ['broker.co.uk'];
+  const matches = matchBrokers(serpHostnames, brokerHostnames);
+  assert.equal(matches.length, 0, 'attacker.co.uk must NOT match broker.co.uk');
+});
+
+test('B15: matchBrokers matches exact host and true subdomain on a multi-part TLD', () => {
+  const brokerHostnames = ['broker.co.uk'];
+  assert.equal(
+    matchBrokers(['broker.co.uk'], brokerHostnames).length, 1,
+    'exact broker.co.uk should match'
+  );
+  assert.equal(
+    matchBrokers(['privacy.broker.co.uk'], brokerHostnames).length, 1,
+    'true subdomain privacy.broker.co.uk should match'
+  );
+});
+
+test('B15: matchBrokers does NOT match a same-suffix lookalike without a label boundary (notspokeo.com)', () => {
+  const matches = matchBrokers(['notspokeo.com'], ['spokeo.com']);
+  assert.equal(matches.length, 0, 'notspokeo.com must NOT match spokeo.com');
+});
+
 test('M7: runSerpScan history record does not contain plaintext person name', async () => {
   const fs = require('fs');
   const path = require('path');

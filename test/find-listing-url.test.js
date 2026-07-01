@@ -5,7 +5,7 @@
  *
  * Uses a Playwright page stub — no real browser. Verifies that:
  *   1. Links matching listingPattern are returned
- *   2. waitUntil:'networkidle' is requested (not domcontentloaded)
+ *   2. waitUntil:'domcontentloaded' is requested (P4: avoid full networkidle waits on tracker-heavy sites)
  *   3. Returns null when no link matches
  *   4. Returns first match when multiple links match
  */
@@ -61,13 +61,13 @@ test('returns null when page has no links', async () => {
   assert.equal(result, null);
 });
 
-test('uses networkidle waitUntil (not domcontentloaded)', async () => {
+test('uses domcontentloaded waitUntil (P4: not networkidle)', async () => {
   const page = makePage([]);
   await findListingUrl(page, BROKER);
   assert.equal(
     page._captured.opts?.waitUntil,
-    'networkidle',
-    `expected waitUntil:'networkidle', got: ${page._captured.opts?.waitUntil}`
+    'domcontentloaded',
+    `expected waitUntil:'domcontentloaded', got: ${page._captured.opts?.waitUntil}`
   );
 });
 

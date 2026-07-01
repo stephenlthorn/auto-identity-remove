@@ -228,3 +228,44 @@ test('failure post-submit: recordSuccess is NOT called', async () => {
     'recordSuccess must NOT be called for a failure outcome'
   );
 });
+
+// B13: a dead HTTP status (404/410/5xx) on the opt-out URL must short-circuit
+// BEFORE the form is filled/submitted, logging 'error' (not success/unverified).
+function makeContextWithStatus(statusCode) {
+  return {
+    newPage: async () => ({
+      goto: async () => ({ status: () => statusCode }),
+      locator: () => ({ first: () => ({ fill: async () => {}, count: async () => 1, isVisible: async () => true, click: async () => {} }) }),
+      evaluate: async () => pageBody,
+      close: async () => {},
+    }),
+  };
+}
+
+test('B13: opt-out URL returning HTTP 404 short-circuits to error, no success', async () => {
+  clearAll();
+  classifyReturn = { outcome: 'success', snippet: 'request received' }; // would falsely "succeed" if not short-circuited
+  configure({ dryRun: false, person: PERSON, capsolver: null });
+
+  await processBrokerWithPerson(makeContextWithStatus(404), DIRECT_BROKER, PERSON);
+
+  const entry = logged.find(l => l.name === DIRECT_BROKER.name);
+  assert.ok(entry, 'a result should be logged');
+  assert.equal(entry.status, 'error', 'a 404 opt-out page must log error');
+  assert.match(entry.detail, /HTTP 404/);
+  assert.equal(recorded.success.length, 0, 'must NOT record success for a 404 page');
+  assert.equal(recorded.failure.length, 1, 'must record a failure for a 404 page');
+});
+
+test('B13: HTTP 200 does NOT short-circuit (normal flow continues)', async () => {
+  clearAll();
+  classifyReturn = { outcome: 'success', snippet: 'request received' };
+  configure({ dryRun: false, person: PERSON, capsolver: null });
+
+  await processBrokerWithPerson(makeContextWithStatus(200), DIRECT_BROKER, PERSON);
+
+  const entry = logged.find(l => l.name === DIRECT_BROKER.name);
+  assert.ok(entry, 'a result should be logged');
+  assert.notEqual(entry.detail, undefined);
+  assert.ok(!/HTTP 404|HTTP 5/.test(entry.detail || ''), 'a 200 page must not be treated as a dead HTTP status');
+});

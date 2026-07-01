@@ -335,7 +335,7 @@ test('runGenericBrokers calls recordFailure for error outcome', async () => {
   );
 });
 
-test('runGenericBrokers calls recordFailure with kind "error" for both error and dead', async () => {
+test('runGenericBrokers records kind "error" for error and "dead" for dead (B24)', async () => {
   const configPath = require.resolve('../lib/config');
   const origConfigExports = require(configPath);
 
@@ -381,5 +381,30 @@ test('runGenericBrokers calls recordFailure with kind "error" for both error and
   assert.ok(errFailure, 'recordFailure should be called for error outcome');
   assert.ok(deadFailure, 'recordFailure should be called for dead outcome');
   assert.equal(errFailure.kind, 'error');
-  assert.equal(deadFailure.kind, 'error');
+  assert.equal(deadFailure.kind, 'dead', 'dead outcome records kind "dead", not "error" (B24)');
+});
+
+// B12: allowlisted outcomes must be present in the returned genericStats so the
+// per-bucket breakdown sums to `attempted` instead of silently dropping them.
+test('runGenericBrokers genericStats includes an allowlisted count (B12)', async () => {
+  delete require.cache[require.resolve('../generic-runner')];
+  const gr = require('../generic-runner');
+  const res = await gr.runGenericBrokers(
+    { newPage: async () => ({ close: async () => {}, waitForTimeout: async () => {} }) },
+    [],
+    { optOuts: {} },
+    () => {},
+    () => {},
+    {
+      injectedBrokers: [{ name: 'ok1', url: 'https://ok1.example', source: 'test' }],
+      injectedProcessFn: async () => ({ status: 'submitted', detail: '' }),
+    }
+  );
+  assert.ok(Object.prototype.hasOwnProperty.call(res.genericStats, 'allowlisted'),
+    'genericStats must expose an allowlisted key');
+  assert.equal(res.genericStats.allowlisted, 0);
+  // The per-status buckets (including allowlisted) must account for every attempt.
+  const s = res.genericStats;
+  const summed = s.submitted + s.no_form_found + s.error + s['dry-run-skipped'] + s['skipped-recent'] + s.dead + s.allowlisted;
+  assert.equal(summed, s.attempted, 'bucket counts (with allowlisted) must sum to attempted');
 });
