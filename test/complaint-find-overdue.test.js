@@ -49,11 +49,16 @@ test('CCPA broker requested 40 days ago is NOT overdue (under 45-day window)', (
   assert.deepEqual(out, []);
 });
 
+// Regime is derived from the matched person's country (B1), so these use a
+// composite "Broker|First Last" key plus an EU person rather than the
+// never-written entry.regime field.
+const EU_PERSON = { firstName: 'Klaus', lastName: 'Mueller', country: 'DE' };
+
 test('GDPR broker requested 35 days ago is overdue (window 30)', () => {
   const state = makeState({
-    AcmeEU: { lastSuccess: daysBefore(35), regime: 'gdpr' },
+    'AcmeEU|Klaus Mueller': { lastSuccess: daysBefore(35) },
   });
-  const out = findOverdue(state, { now: NOW });
+  const out = findOverdue(state, { now: NOW, persons: [EU_PERSON] });
   assert.equal(out.length, 1);
   assert.equal(out[0].broker, 'AcmeEU');
   assert.equal(out[0].regime, 'gdpr');
@@ -62,9 +67,9 @@ test('GDPR broker requested 35 days ago is overdue (window 30)', () => {
 
 test('GDPR broker requested 28 days ago is NOT overdue (under 30-day window)', () => {
   const state = makeState({
-    AcmeEU: { lastSuccess: daysBefore(28), regime: 'gdpr' },
+    'AcmeEU|Klaus Mueller': { lastSuccess: daysBefore(28) },
   });
-  const out = findOverdue(state, { now: NOW });
+  const out = findOverdue(state, { now: NOW, persons: [EU_PERSON] });
   assert.deepEqual(out, []);
 });
 
@@ -137,9 +142,9 @@ test('broker verified clear BEFORE the request (then re-listed) is still overdue
 test('custom ccpaDays/gdprDays windows are honored', () => {
   const state = makeState({
     Spokeo: { lastSuccess: daysBefore(20) },
-    AcmeEU: { lastSuccess: daysBefore(20), regime: 'gdpr' },
+    'AcmeEU|Klaus Mueller': { lastSuccess: daysBefore(20) },
   });
-  const out = findOverdue(state, { now: NOW, ccpaDays: 10, gdprDays: 15 });
+  const out = findOverdue(state, { now: NOW, ccpaDays: 10, gdprDays: 15, persons: [EU_PERSON] });
   const names = out.map(o => o.broker).sort();
   assert.deepEqual(names, ['AcmeEU', 'Spokeo']);
 });

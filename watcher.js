@@ -359,10 +359,16 @@ if (COMPLAINTS_MODE) {
   const config  = loadConfig();
   const state   = loadState();
   const persons = getPersonsFromConfig(config);
-  const person  = persons[0];
   const brokerMap = new Map(brokers.map(b => [b.name, b]));
+  // Resolve the complaint's complainant back to the person named in the
+  // composite state key (B2); fall back to the first person for bare keys.
+  const personByName = new Map(
+    persons
+      .filter(p => p && (p.firstName || p.lastName))
+      .map(p => [`${p.firstName || ''} ${p.lastName || ''}`.trim(), p])
+  );
 
-  const overdueList = findOverdue(state, {});
+  const overdueList = findOverdue(state, { persons });
   if (overdueList.length === 0) {
     console.log('\nNo brokers are past their legal response window. Nothing to escalate.\n');
     process.exit(0);
@@ -375,6 +381,7 @@ if (COMPLAINTS_MODE) {
 
   const entries = overdueList.map(overdue => {
     const broker = brokerMap.get(overdue.broker) || { name: overdue.broker };
+    const person = (overdue.person && personByName.get(overdue.person)) || persons[0];
     console.log(
       pad(overdue.broker, 32) +
       pad(overdue.regime, 8) +
