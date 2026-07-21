@@ -35,6 +35,17 @@ echo ""
 echo "Installing dependencies (npm ci)..."
 npm ci
 
+# 3b. Install the dashboard's own dependencies (it's a separate package).
+if [ -f "dashboard/package.json" ]; then
+  echo ""
+  echo "Installing dashboard dependencies..."
+  if [ -f "dashboard/package-lock.json" ]; then
+    npm ci --prefix dashboard
+  else
+    npm install --prefix dashboard
+  fi
+fi
+
 # 4. Install the Chromium browser Playwright drives.
 echo ""
 echo "Installing the Chromium browser (npx playwright install chromium)..."
