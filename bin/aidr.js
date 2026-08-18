@@ -28,7 +28,7 @@ function printVersion() {
 }
 
 function spawnNode(resolved) {
-  const cwd = resolved.cwd === 'dashboard' ? path.join(ROOT, 'dashboard') : ROOT;
+  const cwd = ROOT;
   const env = { ...process.env };
   let onSpawn = null;
 
