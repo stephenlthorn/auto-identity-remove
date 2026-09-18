@@ -26,8 +26,11 @@ const { execFileSync } = require('node:child_process');
 
 const ROOT = path.join(__dirname, '..');
 
-const EM_DASH = '—';
-const EN_DASH = '–';
+// Built from code points on purpose. Writing the characters literally here
+// would make this file its own first offender: it is tracked, so the scan
+// below reads it too, and the suite could never go green.
+const EM_DASH = String.fromCharCode(0x2014);
+const EN_DASH = String.fromCharCode(0x2013);
 
 /** Tracked files, so generated and ignored content is out of scope. */
 function trackedFiles() {

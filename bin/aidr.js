@@ -13,7 +13,7 @@
 
 const path = require('path');
 const { spawn } = require('child_process');
-const { resolveCommand, buildHelp } = require('../lib/cli-map');
+const { resolveCommand, resolveSpawnTarget, buildHelp } = require('../lib/cli-map');
 const { generateDashboardCreds } = require('../lib/dashboard-creds');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -28,7 +28,7 @@ function printVersion() {
 }
 
 function spawnNode(resolved) {
-  const cwd = resolved.cwd === 'dashboard' ? path.join(ROOT, 'dashboard') : ROOT;
+  const { cwd, args } = resolveSpawnTarget(resolved, ROOT);
   const env = { ...process.env };
   let onSpawn = null;
 
@@ -51,7 +51,7 @@ function spawnNode(resolved) {
     }
   }
 
-  const child = spawn(process.execPath, resolved.args, { cwd, env, stdio: 'inherit' });
+  const child = spawn(process.execPath, args, { cwd, env, stdio: 'inherit' });
   if (onSpawn) child.on('spawn', onSpawn);
   child.on('exit', (code, signal) => {
     if (signal) { process.exit(1); }

@@ -28,6 +28,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # test/cli-dashboard-boot.test.js runs `aidr dashboard` for real, which
+      # needs express from the dashboard's own manifest. Without this the test
+      # skips itself, and a skipped test is how `aidr dashboard` shipped broken.
+      - name: Install dashboard dependencies
+        working-directory: dashboard
+        run: npm ci
+
       - name: Run tests
         run: node --test test/*.test.js dashboard/validate.test.js dashboard/config-status.test.js
 
