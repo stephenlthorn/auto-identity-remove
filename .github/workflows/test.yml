@@ -100,7 +100,7 @@ jobs:
         # COPY . . runs after npm ci, so a .dockerignore gap bakes the
         # maintainer's own config into a layer that travels with the image.
         run: |
-          for f in config.json config.json.enc state.json state.json.bak .env .claude; do
+          for f in config.json config.json.enc state.json state.json.bak state.json.checkpoint state.json.checkpoint.tmp .env .claude; do
             if docker run --rm --entrypoint sh aidr-ci -c "test -e /app/$f"; then
               echo "SECURITY: /app/$f is baked into the image"
               exit 1

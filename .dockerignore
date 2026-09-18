@@ -14,6 +14,8 @@ config.json
 config.json.enc
 state.json
 state.json.bak
+state.json.checkpoint
+state.json.checkpoint.tmp
 state.json.tmp
 state.json.lock
 inbox/
