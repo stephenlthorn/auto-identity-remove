@@ -61,15 +61,47 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# ── What may be uploaded ─────────────────────────────────────────────────────
+#
+# One predicate, used both to pick review targets and to decide which untracked
+# files may enter the review checkout. Keep it narrow: everything it accepts is
+# sent to a third-party model.
+
+is_reviewable() {
+  case "$1" in
+    *.js|*.json|*.sh) return 0 ;;
+    Dockerfile|*/Dockerfile) return 0 ;;
+    docker-compose.yml|*/docker-compose.yml) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Stricter still for untracked files. A tracked .json is already public, or about
+# to be; an untracked one is whatever happens to be sitting in the working
+# directory, and on this project that is exactly the shape of the PII the tool
+# exists to protect - a config.backup.json, an addresses.json, a state file
+# saved under another name. Manifests are the only untracked JSON worth sending.
+may_upload_untracked() {
+  case "$1" in
+    package.json|*/package.json) return 0 ;;
+    package-lock.json|*/package-lock.json) return 0 ;;
+    *.json) return 1 ;;
+    *) is_reviewable "$1" ;;
+  esac
+}
+
+# ---- end predicates ----
+
 # ── Preflight ────────────────────────────────────────────────────────────────
 
 # Installed, authenticated, AND able to complete a request. The third check is
 # not pedantry: a codex that is present and logged in but fatally broken used to
 # fall through to "produced no findings file", which reads like the review ran
 # and found nothing. Exit codes 3, 4 and 7 come straight from the probe.
-if ! bash "$(dirname "$0")/cross-model-preflight.sh"; then
-  exit $?
-fi
+# Not `if ! ... ; then exit $?; fi`: inside the then-block of a negation, $? is
+# the status of the negation, i.e. always 0, so a dead reviewer exited 0 and a
+# git hook would read that as a passing review. Capture the status directly.
+bash "$(dirname "$0")/cross-model-preflight.sh" || exit $?
 
 # ── Scope ────────────────────────────────────────────────────────────────────
 
@@ -93,8 +125,16 @@ else
   # .sh is in scope because the shell here runs subprocesses, handles the
   # maintainer's crontab and builds the scrubbed review checkout. Adding the
   # preflight probe made the omission obvious: the reviewer could not see its
-  # own tooling.
-  TARGETS="$(git diff --name-only "$BASE"...HEAD -- '*.js' '*.json' '*.sh' 'Dockerfile' 'docker-compose.yml' || true)"
+  # own tooling. The extension list lives in is_reviewable(), so target
+  # selection and upload filtering cannot disagree.
+  # `|| true` here would turn a git failure into an empty change set, which
+  # prints "nothing to do" and exits 0 - a broken review reporting itself as a
+  # passing one, which is the failure this whole script keeps making.
+  if ! CHANGED="$(git diff --name-only "$BASE"...HEAD)"; then
+    echo "git diff against '$BASE' failed; refusing to report a clean review" >&2
+    exit 6
+  fi
+  TARGETS="$(printf '%s\n' "$CHANGED" | while read -r f; do is_reviewable "$f" && echo "$f"; done)"
 fi
 
 TARGETS="$(printf '%s\n' "$TARGETS" | sed '/^$/d' | while read -r f; do [ -f "$f" ] && echo "$f"; done || true)"
@@ -113,9 +153,12 @@ echo "cross-model review: $FILE_COUNT file(s) against $BASE"
 # maintainer's real name, home address and phone, and state.json holds their
 # broker history.
 #
-# The checkout is built from "everything git would commit" - tracked files plus
-# untracked-but-not-ignored files. That is scrubbed by construction, because
-# config.json, state.json, inbox/ and .claude/ are all gitignored. It also means
+# The checkout is built from tracked files, plus untracked-but-not-ignored files
+# that are reviewable code. It used to take every untracked non-ignored file and
+# call that scrubbed by construction because config.json, state.json, inbox/ and
+# .claude/ are gitignored - reasoning that only covers paths someone thought to
+# ignore, and left a scratch notes file or an addresses CSV going straight to a
+# third-party model. It also means
 # the reviewer sees your *current* content, including uncommitted edits and
 # brand-new files. An earlier version used `git worktree add --detach HEAD`,
 # which is scrubbed just as well but silently reviews the pre-edit version of
@@ -126,12 +169,29 @@ cleanup() { rm -rf "$(dirname "$WORK")" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 mkdir -p "$WORK"
 
-# Tracked + untracked-not-ignored, NUL-delimited so paths with spaces survive.
-{
-  git ls-files -z
-  git ls-files -z --others --exclude-standard
-} | sort -zu | while IFS= read -r -d '' f; do
+# Tracked files, NUL-delimited so paths with spaces survive.
+git ls-files -z | while IFS= read -r -d '' f; do
+  # Skip symlinks: cp follows them, so a tracked link pointing outside the repo
+  # would copy its target into the upload. The link itself is public; whatever
+  # it resolves to on this machine is not.
+  [ -L "$f" ] && { echo "  not uploading symlink: $f"; continue; }
   [ -f "$f" ] || continue
+  mkdir -p "$WORK/$(dirname "$f")"
+  cp "$f" "$WORK/$f"
+done
+
+# Untracked-but-not-ignored files, only when they are reviewable code. A new
+# module should be reviewed before it is committed; notes.txt, addresses.csv and
+# a draft complaint letter should never leave the machine, and "it is not
+# gitignored" is not evidence that they may.
+SKIPPED=0
+git ls-files -z --others --exclude-standard | while IFS= read -r -d '' f; do
+  [ -f "$f" ] || continue
+  [ -L "$f" ] && { echo "  not uploading symlink: $f"; continue; }
+  if ! may_upload_untracked "$f"; then
+    echo "  not uploading untracked non-code file: $f"
+    continue
+  fi
   mkdir -p "$WORK/$(dirname "$f")"
   cp "$f" "$WORK/$f"
 done
@@ -240,6 +300,16 @@ codex exec \
   "$(cat "$PROMPT_FILE")" >"$WORK/codex.log" 2>&1
 CODEX_STATUS=$?
 set -e
+
+# Status first, then the file. A reviewer that died part-way can still leave a
+# non-empty findings file behind, and rendering that would turn a truncated
+# review into a report with a clean exit. Everything in this script that has
+# gone wrong has gone wrong in that direction.
+if [ "$CODEX_STATUS" -ne 0 ]; then
+  echo "codex exited $CODEX_STATUS; treating the review as failed, not clean." >&2
+  tail -20 "$WORK/codex.log" >&2 || true
+  exit 6
+fi
 
 if [ ! -s "$OUT_JSON" ]; then
   echo "codex produced no findings file (exit $CODEX_STATUS). Last lines of its log:" >&2

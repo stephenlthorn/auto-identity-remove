@@ -28,7 +28,15 @@
 
 set -uo pipefail
 
-SENTINEL="CODEX_PROBE_OK"
+# The challenge must not contain its own answer. `codex exec` echoes the prompt
+# into its output - ask it for a literal token and that token comes back whether
+# or not the model ever replied, so grepping for it passes on a codex that only
+# got as far as printing the prompt. That is precisely the 0.137.0 case this
+# probe exists to catch, so the probe would have declared the broken CLI alive.
+# Asking for one trivial addition keeps the check cheap and makes the expected
+# string absent from the prompt.
+CHALLENGE="Reply with exactly the word PROBEOK, then a hyphen, then the result of 2+2. Nothing else."
+EXPECTED="PROBEOK-4"
 TIMEOUT="${CROSS_MODEL_PROBE_TIMEOUT:-45}"
 
 if [ "${SKIP_CROSS_MODEL:-}" = "1" ]; then
@@ -47,10 +55,18 @@ fi
 
 # ── 2. authenticated ─────────────────────────────────────────────────────────
 #
-# `codex login status` reports on stderr, not stdout - check both streams or
-# this reports every authenticated user as logged out.
+# Two traps here. `codex login status` reports on stderr, not stdout, so both
+# streams have to be read or every authenticated user looks logged out. And
+# "Not logged in" contains "logged in", so a substring match says yes to the
+# exact message that means no - that check only ever worked because the real CLI
+# also exits non-zero when logged out, which is luck, not logic.
 
-if ! codex login status 2>&1 | grep -qi "logged in"; then
+LOGIN_OUT="$(codex login status 2>&1)"
+LOGIN_STATUS=$?
+
+if [ "$LOGIN_STATUS" -ne 0 ] \
+   || printf '%s' "$LOGIN_OUT" | grep -qi "not logged in" \
+   || ! printf '%s' "$LOGIN_OUT" | grep -qi "logged in"; then
   echo "FAIL: codex is installed but not authenticated."
   echo "  Run: codex login"
   exit 4
@@ -64,7 +80,7 @@ fi
 PROBE_OUT="$(mktemp)"
 trap 'rm -f "$PROBE_OUT"' EXIT
 
-codex exec --sandbox read-only "Reply with exactly: $SENTINEL" >"$PROBE_OUT" 2>&1 &
+codex exec --sandbox read-only "$CHALLENGE" >"$PROBE_OUT" 2>&1 &
 PROBE_PID=$!
 
 waited=0
@@ -84,7 +100,10 @@ done
 wait "$PROBE_PID"
 PROBE_STATUS=$?
 
-if ! grep -q "$SENTINEL" "$PROBE_OUT"; then
+# Both conditions, not either: a non-zero exit is a failure even when the
+# expected string appears somewhere in the log, and the expected string appearing
+# is not enough on its own.
+if [ "$PROBE_STATUS" -ne 0 ] || ! grep -q "$EXPECTED" "$PROBE_OUT"; then
   echo "FAIL: codex could not complete a trivial round trip (exit $PROBE_STATUS)."
   echo "  It is installed and authenticated, so this is not a setup problem -"
   echo "  the reviewer itself is unusable and the cross-model policy is OFF."

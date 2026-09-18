@@ -57,10 +57,14 @@ function runProbe(body, extraEnv = {}) {
   }
 }
 
+// codex exec echoes the prompt into its own output (verified: a token asked for
+// in the prompt comes back three times on a successful run). So the probe must
+// not look for something the prompt already contains, and the stub answers the
+// challenge rather than parroting it.
 const WORKING = `#!/bin/sh
 case "$1" in
   "login") echo "Logged in using ChatGPT"; exit 0 ;;
-  "exec")  echo "CODEX_PROBE_OK"; exit 0 ;;
+  "exec")  for a in "$@"; do echo "$a"; done; echo "PROBEOK-4"; exit 0 ;;
 esac
 exit 1
 `;
@@ -131,4 +135,111 @@ exit 1
 `, { CROSS_MODEL_PROBE_TIMEOUT: '2' });
   assert.equal(r.code, 7, r.out);
   assert.match(r.out, /timed out|timeout/i);
+});
+
+/**
+ * The review script has to propagate the probe's verdict. The first version of
+ * that wiring was `if ! bash preflight; then exit $?; fi`, where `$?` inside the
+ * then-block is the status of the *negation* - always 0. So a dead reviewer made
+ * the review exit 0, which in a git hook reads as "review passed". The guard
+ * against a silently-clean review was itself silently clean. Caught by the
+ * cross-model review of 1994125.
+ */
+test('the review script exits with the probe status, not 0, when the reviewer is dead', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aidr-review-'));
+  try {
+    const r = spawnSync('bash', [path.join(ROOT, 'scripts', 'cross-model-review.sh')], {
+      cwd: ROOT,
+      encoding: 'utf8',
+      // No codex anywhere on PATH: the probe must fail with 3 and the review
+      // script must surface that exact code.
+      env: { ...process.env, PATH: `${dir}:/usr/bin:/bin:/usr/sbin:/sbin` },
+      timeout: 60000,
+    });
+    const out = (r.stdout || '') + (r.stderr || '');
+    assert.notEqual(r.status, 0, `a dead reviewer must never exit 0:\n${out}`);
+    assert.equal(r.status, 3, out);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a codex that only echoes the prompt back does not count as alive', () => {
+  // The failure this guards: `codex exec` prints the prompt before running, so
+  // a probe that greps its own sentinel passes whenever codex got far enough to
+  // print anything at all - including the 0.137.0 case it was written for. The
+  // challenge answer must not appear in the challenge.
+  const r = runProbe(`#!/bin/sh
+case "$1" in
+  "login") echo "Logged in using ChatGPT"; exit 0 ;;
+  "exec")  for a in "$@"; do echo "$a"; done; echo "ERROR: model list decode failed" >&2; exit 1 ;;
+esac
+exit 1
+`);
+  assert.equal(r.code, 7, r.out);
+});
+
+test('a codex that answers correctly but exits non-zero does not count as alive', () => {
+  const r = runProbe(`#!/bin/sh
+case "$1" in
+  "login") echo "Logged in using ChatGPT"; exit 0 ;;
+  "exec")  echo "PROBEOK-4"; exit 1 ;;
+esac
+exit 1
+`);
+  assert.equal(r.code, 7, r.out);
+});
+
+test('"Not logged in" is not read as logged in', () => {
+  // `grep -qi "logged in"` matches "Not logged in", so the auth check only ever
+  // worked because the real CLI also exits non-zero when logged out. A stub
+  // that reports logged-out on a zero exit walked straight past it.
+  const r = runProbe(`#!/bin/sh
+case "$1" in
+  "login") echo "Not logged in"; exit 0 ;;
+  "exec")  for a in "$@"; do echo "$a"; done; echo "PROBEOK-4"; exit 0 ;;
+esac
+exit 1
+`);
+  assert.equal(r.code, 4, r.out);
+  assert.match(r.out, /codex login/i);
+});
+
+test('a reviewer that exits non-zero is a failed review even if it wrote output', () => {
+  // The renderer only checked whether the findings file was non-empty, so a
+  // codex that died part-way through writing one still produced a report and a
+  // clean exit. A truncated review must never read as a passing review.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aidr-partial-'));
+  try {
+    fs.writeFileSync(path.join(dir, 'codex'), `#!/bin/sh
+case "$1" in
+  "login") echo "Logged in using ChatGPT"; exit 0 ;;
+  "--version") echo "codex-cli stub"; exit 0 ;;
+  "exec")
+    # Answer the preflight challenge; for the real review, write a partial
+    # findings file and then die, which is the case under test.
+    out=""
+    prev=""
+    for a in "$@"; do
+      if [ "$prev" = "-o" ]; then out="$a"; fi
+      prev="$a"
+    done
+    if [ -z "$out" ]; then echo "PROBEOK-4"; exit 0; fi
+    echo '{"findings":[' > "$out"
+    echo "stream ended unexpectedly" >&2
+    exit 1 ;;
+esac
+exit 1
+`, { mode: 0o755 });
+    const r = spawnSync('bash', [path.join(ROOT, 'scripts', 'cross-model-review.sh'), '--base', 'HEAD~1'], {
+      cwd: ROOT,
+      encoding: 'utf8',
+      env: { ...process.env, PATH: `${dir}:/usr/bin:/bin:/usr/sbin:/sbin` },
+      timeout: 120000,
+    });
+    const out = (r.stdout || '') + (r.stderr || '');
+    assert.notEqual(r.status, 0, `a reviewer that died must not exit 0:\n${out}`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
