@@ -22,6 +22,9 @@
 #   scripts/cross-model-review.sh --full               # whole tier-1 surface
 #   scripts/cross-model-review.sh --strict             # also fail on P2
 #
+# Preflight lives in scripts/cross-model-preflight.sh and runs first; run it on
+# its own with `npm run review:doctor` to check the reviewer is alive.
+#
 # Exit codes:
 #   0  clean (or advisory P2/P3 without --strict, or nothing to review)
 #   1  at least one P1
@@ -30,6 +33,7 @@
 #   4  codex not authenticated
 #   5  refused: the review checkout still contains PII
 #   6  codex ran but produced no parseable findings
+#   7  codex is installed and authenticated but cannot complete a request
 
 set -euo pipefail
 
@@ -59,17 +63,12 @@ done
 
 # ── Preflight ────────────────────────────────────────────────────────────────
 
-if ! command -v codex >/dev/null 2>&1; then
-  echo "codex CLI not found. Install it (npm i -g @openai/codex or brew install codex)"
-  echo "or set SKIP_CROSS_MODEL=1 to bypass."
-  exit 3
-fi
-
-# `codex login status` reports on stderr, not stdout - check both streams or this
-# probe reports every authenticated user as logged out.
-if ! codex login status 2>&1 | grep -qi "logged in"; then
-  echo "codex is not authenticated. Run: codex login"
-  exit 4
+# Installed, authenticated, AND able to complete a request. The third check is
+# not pedantry: a codex that is present and logged in but fatally broken used to
+# fall through to "produced no findings file", which reads like the review ran
+# and found nothing. Exit codes 3, 4 and 7 come straight from the probe.
+if ! bash "$(dirname "$0")/cross-model-preflight.sh"; then
+  exit $?
 fi
 
 # ── Scope ────────────────────────────────────────────────────────────────────
@@ -91,7 +90,11 @@ else
     BASE="HEAD~1"
   fi
   # Three-dot: changes on this branch only, not everything that landed on base.
-  TARGETS="$(git diff --name-only "$BASE"...HEAD -- '*.js' '*.json' 'Dockerfile' 'docker-compose.yml' || true)"
+  # .sh is in scope because the shell here runs subprocesses, handles the
+  # maintainer's crontab and builds the scrubbed review checkout. Adding the
+  # preflight probe made the omission obvious: the reviewer could not see its
+  # own tooling.
+  TARGETS="$(git diff --name-only "$BASE"...HEAD -- '*.js' '*.json' '*.sh' 'Dockerfile' 'docker-compose.yml' || true)"
 fi
 
 TARGETS="$(printf '%s\n' "$TARGETS" | sed '/^$/d' | while read -r f; do [ -f "$f" ] && echo "$f"; done || true)"
@@ -133,7 +136,7 @@ mkdir -p "$WORK"
   cp "$f" "$WORK/$f"
 done
 
-for leak in config.json config.json.enc state.json state.json.bak state.json.tmp inbox .claude .env; do
+for leak in config.json config.json.enc state.json state.json.bak state.json.tmp state.json.checkpoint state.json.checkpoint.tmp inbox .claude .env; do
   if [ -e "$WORK/$leak" ]; then
     echo "refusing to run: review checkout contains $leak" >&2
     echo "  (it is not gitignored, so it would also be committed)" >&2

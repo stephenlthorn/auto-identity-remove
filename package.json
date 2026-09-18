@@ -25,6 +25,7 @@
     "run": "bash run.sh",
     "test": "node --test test/*.test.js dashboard/validate.test.js dashboard/config-status.test.js",
     "aidr": "node bin/aidr.js",
+    "review:doctor": "bash scripts/cross-model-preflight.sh",
     "review:cross-model": "bash scripts/cross-model-review.sh"
   },
   "dependencies": {

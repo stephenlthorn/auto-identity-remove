@@ -55,8 +55,44 @@ npm run review:cross-model -- --strict                  # fail on P2 as well
 Runs locally against the maintainer's own `codex` auth. Writes a committed report
 to `docs/reviews/cross-model/<date>-<sha>.md` and exits non-zero on a P1.
 
-Exits 0 with a clear message when `codex` is absent or unauthenticated, and
-honours `SKIP_CROSS_MODEL=1`, so it is safe to wire into a git hook.
+Exits 3 when `codex` is absent, 4 when it is unauthenticated and 7 when it is
+present but unusable, each with a message saying what to do. Honours
+`SKIP_CROSS_MODEL=1`, so it is safe to wire into a git hook.
+
+### 2a. `npm run review:doctor` - is the reviewer actually alive?
+
+```bash
+npm run review:doctor
+```
+
+This policy rests on a binary on one machine, and on 2026-09-18 that binary had
+been broken for an unknown stretch: codex 0.137.0 could not decode the server's
+model list (`unknown variant 'max'`) and died before reviewing anything. The
+policy was off and still looked enforced, because **nothing asked**. The CI gate
+below checks for a commit trailer, which is paperwork, and CI cannot call a
+model here at all.
+
+The old preflight asked two questions, and a broken-but-present codex answered
+both correctly:
+
+| question | broken 0.137.0 |
+|---|---|
+| is it installed? | yes |
+| is it authenticated? | yes |
+| can it complete a request? | *never asked* |
+
+`review:doctor` adds the third. It makes a real round trip and requires the
+sentinel back, so exit 0 means the reviewer can do the job rather than merely
+exist. `review:cross-model` runs it first, which is why a dead reviewer now
+names itself instead of surfacing as "produced no findings file" - a message
+that reads, wrongly, like a clean review.
+
+A hang counts as dead: the probe is bounded (45s, `CROSS_MODEL_PROBE_TIMEOUT`)
+and kills the child rather than waiting forever. So does an exit 0 with no
+sentinel, because silence must never read as success.
+
+Run it when a review behaves oddly, after upgrading or reinstalling `codex`, or
+on any machine where you intend to merge a tier-1 change.
 
 ### 3. This document - the policy and the record
 
