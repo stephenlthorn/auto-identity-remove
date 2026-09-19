@@ -44,6 +44,16 @@ const LIST_MODE    = process.argv.includes('--list');
 const SCORE_MODE   = process.argv.includes('--score');
 
 const PENDING_MODE    = process.argv.includes('--pending');
+// ── --reverify [names]: quarantine ambiguous automated state entries so they
+// are re-checked next run instead of trusted. Optional comma-separated broker
+// names restrict the repair; bare --reverify flags every ambiguous entry. ────
+const reverifyIdx     = process.argv.indexOf('--reverify');
+const REVERIFY_MODE   = reverifyIdx !== -1;
+const REVERIFY_NAMES  = (() => {
+  if (!REVERIFY_MODE) return null;
+  const next = process.argv[reverifyIdx + 1];
+  return (next && !next.startsWith('--')) ? next : null;
+})();
 const UPDATE_BROKERS  = process.argv.includes('--update-brokers');
 const BREACH_CHECK    = process.argv.includes('--breach-check');
 const NO_CAPSOLVER    = process.argv.includes('--no-capsolver');
@@ -163,6 +173,62 @@ if (ENCRYPT_CONFIG || DECRYPT_CONFIG) {
     console.error(`Config migration failed: ${err.message}`);
     process.exit(1);
   }
+}
+
+// ── --reverify [names]: quarantine ambiguous automated state entries ────────
+// Repair path for automated results recorded under ambiguous conditions (a
+// navigation failure could have been misclassified). Flagged entries are
+// re-attempted on the next run (shouldSkip never skips them) and re-searched
+// immediately by --verify. Entries carrying verification markers or manual
+// provenance are never touched. Takes the state lock like every other
+// state-mutating mode; --dry-run reports without saving.
+if (REVERIFY_MODE) {
+  const { flagForReverification } = require('./lib/reverify');
+  const { parseList } = require('./lib/filter');
+  const names = REVERIFY_NAMES ? parseList(REVERIFY_NAMES) : null;
+
+  setDryRun(DRY_RUN);
+  const REVERIFY_LOCK_PATH = STATE_PATH + '.lock';
+  try {
+    lock.acquire(REVERIFY_LOCK_PATH);
+  } catch (err) {
+    const pidMatch = err.message.match(/pid (\d+)/);
+    console.error(`Another instance is running, pid=${pidMatch ? pidMatch[1] : '?'}. Exiting.`);
+    process.exit(1);
+  }
+
+  try {
+    const state = loadState();
+    const res = flagForReverification(state, { names });
+
+    console.log('\nRe-verification repair' + (DRY_RUN ? ' (dry run - nothing saved)' : ''));
+    console.log('-'.repeat(60));
+    if (names) console.log(`Scope: ${names.join(', ')}`);
+    if (res.flagged.length > 0) {
+      console.log(`Flagged for re-verification (${res.flagged.length}):`);
+      for (const k of res.flagged) console.log(`  - ${k}`);
+    } else {
+      console.log('No ambiguous automated entries needed flagging.');
+    }
+    if (res.alreadyFlagged.length > 0) {
+      console.log(`Already flagged (${res.alreadyFlagged.length}): ${res.alreadyFlagged.join(', ')}`);
+    }
+    if (res.verified.length > 0) {
+      console.log(`Protected - verified/manual entries untouched (${res.verified.length}):`);
+      for (const k of res.verified) console.log(`  - ${k}`);
+    }
+    if (res.missing.length > 0) {
+      console.log(`No state entry found for: ${res.missing.join(', ')}`);
+    }
+    if (res.flagged.length > 0 && !DRY_RUN) {
+      saveState();
+      console.log(`\n${res.flagged.length} entr${res.flagged.length === 1 ? 'y' : 'ies'} flagged. They will be re-checked on the next run.`);
+    }
+    console.log('');
+  } finally {
+    lock.release(REVERIFY_LOCK_PATH);
+  }
+  process.exit(0);
 }
 
 // ── --list: print all brokers + status from state.json, then exit ────────────
@@ -307,6 +373,7 @@ if (KNOW_STATUS) {
     installScheduler: INSTALL_SCHEDULER,
     encryptConfig:    ENCRYPT_CONFIG,
     decryptConfig:    DECRYPT_CONFIG,
+    reverify:         REVERIFY_MODE,
     freeze:           FREEZE_MODE,
   });
   if (conflict) {
@@ -363,10 +430,14 @@ if (COMPLAINTS_MODE) {
   const brokerMap = new Map(brokers.map(b => [b.name, b]));
   // Resolve the complaint's complainant back to the person named in the
   // composite state key (B2); fall back to the first person for bare keys.
+  // Keyed by personLabel (stateLabel when set, else "First Last") so same-name
+  // household members resolve to their own profile.
+  const { personLabel } = require('./lib/config');
   const personByName = new Map(
     persons
-      .filter(p => p && (p.firstName || p.lastName))
-      .map(p => [`${p.firstName || ''} ${p.lastName || ''}`.trim(), p])
+      .filter(p => p && (p.firstName || p.lastName || p.stateLabel))
+      .map(p => [personLabel(p), p])
+      .filter(([label]) => label)
   );
 
   const overdueList = findOverdue(state, { persons });
@@ -672,7 +743,10 @@ if (KNOW_MODE) {
     const emailBrokerCount = brokers.filter(b => b.method === 'email').length;
     console.log(`${emailBrokerCount} email broker(s) x ${persons.length} person(s)\n`);
 
-    const result = await sendKnowRequests(brokers, config, { dryRun: DRY_RUN });
+    // --only/--skip restrict which email brokers receive a request here too -
+    // an excluded broker must not be emailed from any mode.
+    const knowBrokers = applyFilter(brokers, { only: ONLY_ARG, skip: SKIP_ARG });
+    const result = await sendKnowRequests(knowBrokers, config, { dryRun: DRY_RUN });
 
     console.log('\n' + '='.repeat(54));
     console.log('Right-to-know results - ' + new Date().toLocaleString());
@@ -776,10 +850,31 @@ async function _mainBody() {
   const context = await chromium.launchPersistentContext(profileDir, buildLaunchOptions({ headless }));
   await context.addInitScript(buildStealthScript());
 
+  // ── Resolve --retry-failed broker set ──────────────────────────────────────
+  let retryFailedFromLog;
+  if (RETRY_FAILED) {
+    const log = loadLastLog(LOG_DIR);
+    if (!log) {
+      console.log('⚠️  --retry-failed: no previous log found in logs/ - running all brokers.');
+    } else {
+      retryFailedFromLog = extractFailedBrokers(log);
+      console.log(`🔄 --retry-failed: ${retryFailedFromLog.size} broker(s) from last log`);
+    }
+  }
+
+  // The run filter is resolved ONCE, up front, and applied to every broker
+  // list before that list can produce a side effect. A broker excluded by
+  // --only/--skip/--retry-failed must never be navigated, emailed, logged, or
+  // written to state - so filtering lives here, before the email phase, the
+  // verify loop, the explicit loop, and the generic pass, not inside them.
+  const filterOpts = { only: ONLY_ARG, skip: SKIP_ARG, retryFailedFromLog };
+  const filterActive = !!(ONLY_ARG || SKIP_ARG || retryFailedFromLog);
+  const filteredBrokers = applyFilter(brokers, filterOpts);
+
   // ── Verify mode: T+7 post-submit verification loop ───────────────────────
   if (VERIFY) {
     const { runVerify } = require('./lib/verify-loop');
-    const result = await runVerify(context, brokers, persons, { state, config });
+    const result = await runVerify(context, filteredBrokers, persons, { state, config });
     saveState();
     await context.close().catch(() => {});
 
@@ -870,16 +965,29 @@ async function _mainBody() {
     return;
   }
 
-  // ── Resolve --retry-failed broker set ──────────────────────────────────────
-  let retryFailedFromLog;
-  if (RETRY_FAILED) {
-    const log = loadLastLog(LOG_DIR);
-    if (!log) {
-      console.log('⚠️  --retry-failed: no previous log found in logs/ - running all brokers.');
-    } else {
-      retryFailedFromLog = extractFailedBrokers(log);
-      console.log(`🔄 --retry-failed: ${retryFailedFromLog.size} broker(s) from last log`);
+  // ── Email opt-outs (one pass for ALL persons) ────────────────────────────
+  // Hoisted out of the per-person loop: sendOptOutEmails already iterates
+  // every configured person internally, so calling it once per person re-sent
+  // every email broker once per household member. It receives the FILTERED
+  // broker list - an excluded email broker produces zero side effects (no
+  // SMTP send, no log line, no state write).
+  const submissionEmails = new Map();
+  if (!VERIFY) {
+    for (const p of persons) {
+      // Resolve masked/relay submission emails (cached in state.relayAliases
+      // by lib/relay). Returns person.email unchanged when no relay is
+      // configured, so existing setups are unaffected.
+      submissionEmails.set(p, await getSubmissionEmail({ config, person: p, state }));
     }
+    for (const [p, em] of submissionEmails) {
+      if (em && em !== p.email) {
+        console.log(`   Using masked email for ${p.firstName} ${p.lastName}: ${em}`);
+      }
+    }
+    console.log('── Email opt-outs ─────────────────────────────────────────');
+    await sendOptOutEmails(filteredBrokers, config, undefined, {
+      submissionEmailFor: (p) => submissionEmails.get(p),
+    });
   }
 
   for (const person of persons) {
@@ -889,40 +997,19 @@ async function _mainBody() {
       console.log('='.repeat(54));
     }
 
-    // Resolve a masked/relay submission email for this person (cached in
-    // state.relayAliases by lib/relay). Returns person.email unchanged when no
-    // relay is configured, so existing setups are unaffected. Persisted later
-    // by the run's saveState().
-    const submissionEmail = await getSubmissionEmail({ config, person, state });
-    if (submissionEmail && submissionEmail !== person.email) {
-      console.log(`   Using masked email for submissions: ${submissionEmail}`);
-    }
+    const submissionEmail = submissionEmails.get(person);
 
     brokerRunner.configure({ dryRun: DRY_RUN, preview: PREVIEW, person, capsolver: config.capsolver, noCapsolver: NO_CAPSOLVER, snapshot: SNAPSHOT, personCount: persons.length, config, submissionEmail });
 
-    // Rebuild the broker list for THIS person. brokers.js interpolates names,
+    // Rebuild the broker list for THIS person, then apply the run filter
+    // BEFORE anything in the list can act. brokers.js interpolates names,
     // city, state, zip and email into searchUrl and formFields, so reusing the
     // module-level array would submit persons[0]'s PII on every iteration.
-    const personBrokers = brokers.forPerson(person);
+    const personBrokers = applyFilter(brokers.forPerson(person), filterOpts);
 
-    // Email opt-outs (no browser needed - skipped in verify mode)
-    if (!VERIFY) {
-      console.log('── Email opt-outs ─────────────────────────────────────────');
-      await sendOptOutEmails(brokers, config, undefined, { submissionEmailFor: (p) => (p === person ? submissionEmail : undefined) });
-    }
-
-    const filterOpts = {
-      only:             ONLY_ARG,
-      skip:             SKIP_ARG,
-      retryFailedFromLog,
-    };
-
-    let sorted = applyFilter(
-      [...personBrokers]
-        .filter(b => b.method !== 'email')
-        .sort((a, b) => (a.priority || 9) - (b.priority || 9)),
-      filterOpts
-    );
+    let sorted = personBrokers
+      .filter(b => b.method !== 'email')
+      .sort((a, b) => (a.priority || 9) - (b.priority || 9));
 
     if (RESUME) {
       const ckpt = loadCheckpoint();
@@ -957,7 +1044,9 @@ async function _mainBody() {
     // Off by default (POLLUTE_COUNT === 0). See README for ToS warning.
     if (POLLUTE_COUNT > 0) {
       const { generateBogusPerson } = require('./lib/noise');
-      const bogBrokers = brokers.filter(b => b.acceptsBogus === true);
+      // Noise submissions respect the same run filter: --only/--skip must
+      // never let a bogus record land on an excluded broker.
+      const bogBrokers = personBrokers.filter(b => b.acceptsBogus === true);
 
       if (bogBrokers.length === 0) {
         console.log('\n⚠️  --pollute: no brokers tagged acceptsBogus: true - nothing to do.');
@@ -997,8 +1086,20 @@ async function _mainBody() {
   // generic pass N times, so wall-clock scales with N. Correct coverage beats a
   // faster run that quietly skips people. Domain-level toggles (cookie /
   // "Do Not Sell") get re-applied per person, which is harmless.
+  // The generic pass honors the same run filter. With --only (or a filter that
+  // matches no generic broker) the pass is skipped entirely - not even a page
+  // is opened - so an excluded generic broker can produce no side effects.
+  const { loadGenericBrokers } = require('./generic-runner');
+  const genericBrokers = filterActive
+    ? applyFilter(loadGenericBrokers(explicitHosts), filterOpts)
+    : null; // null = let runGenericBrokers load the full list itself
+
   const genericTotals = {};
+  if (filterActive && genericBrokers.length === 0) {
+    console.log('\n── Generic brokers skipped - filter excluded all generic brokers ──');
+  }
   for (const person of persons) {
+    if (filterActive && genericBrokers.length === 0) break;
     if (persons.length > 1) {
       console.log(`\n── Generic brokers for ${person.firstName} ${person.lastName} ──`);
     }
@@ -1006,6 +1107,7 @@ async function _mainBody() {
       dryRun: DRY_RUN,
       person,
       personCount: persons.length,
+      ...(genericBrokers ? { injectedBrokers: genericBrokers } : {}),
     });
     if (genericResult && genericResult.genericStats) {
       for (const [k, v] of Object.entries(genericResult.genericStats)) {

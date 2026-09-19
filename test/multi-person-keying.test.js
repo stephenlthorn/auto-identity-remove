@@ -206,3 +206,65 @@ test('broker-runner personCount:2 - saveCheckpoint called with composite key', a
     `saveCheckpoint must be called with composite key; got: ${JSON.stringify(recorded.checkpointKeys)}`
   );
 });
+
+// ── stateLabel: same-name household members must not collide ─────────────────
+//
+// config.json can carry two profiles with the same legal name (e.g. a personal
+// and a work identity for one person). stateLabel is what keeps their state
+// keys distinct; without it both collapse onto "Broker|First Last" and one
+// profile's recorded opt-out suppresses the other's submission.
+
+const { stateKey: stateKeyFn, personLabel } = require('../lib/config');
+
+// Mirrors the three profiles in config.json: Martin personal, Martin work, Anna.
+const MARTIN_PERSONAL = { firstName: 'Martin', lastName: 'Kessler', stateLabel: 'Martin Kessler (personal)' };
+const MARTIN_WORK     = { firstName: 'Martin', lastName: 'Kessler', stateLabel: 'Martin Kessler (work)' };
+const ANNA            = { firstName: 'Anna',   lastName: 'Kessler', stateLabel: 'Anna Kessler' };
+
+test('stateKey: person.stateLabel is used as the composite label when set', () => {
+  assert.equal(stateKeyFn('X', MARTIN_PERSONAL, 3), 'X|Martin Kessler (personal)');
+});
+
+test('stateKey: same-name persons with distinct stateLabels produce distinct keys', () => {
+  const k1 = stateKeyFn('Spokeo', MARTIN_PERSONAL, 3);
+  const k2 = stateKeyFn('Spokeo', MARTIN_WORK, 3);
+  assert.notEqual(k1, k2, 'two same-name profiles must not share a state key');
+  assert.equal(k1, 'Spokeo|Martin Kessler (personal)');
+  assert.equal(k2, 'Spokeo|Martin Kessler (work)');
+});
+
+test('stateKey: third household member gets their own key', () => {
+  assert.equal(stateKeyFn('Spokeo', ANNA, 3), 'Spokeo|Anna Kessler');
+});
+
+test('stateKey: without stateLabel, falls back to "First Last" (unchanged)', () => {
+  const p = { firstName: 'Jane', lastName: 'Doe' };
+  assert.equal(stateKeyFn('X', p, 3), 'X|Jane Doe');
+});
+
+test('stateKey: same-name persons WITHOUT stateLabel still collide (why the label exists)', () => {
+  // Documents the failure mode the invariant prevents: two profiles named
+  // "Martin Kessler" and no stateLabel map to the same key.
+  const a = { firstName: 'Martin', lastName: 'Kessler' };
+  const b = { firstName: 'Martin', lastName: 'Kessler' };
+  assert.equal(stateKeyFn('X', a, 3), stateKeyFn('X', b, 3));
+});
+
+test('stateKey: blank/whitespace stateLabel falls back to "First Last"', () => {
+  const p = { firstName: 'Jane', lastName: 'Doe', stateLabel: '   ' };
+  assert.equal(stateKeyFn('X', p, 3), 'X|Jane Doe');
+});
+
+test('personLabel: prefers stateLabel, falls back to trimmed "First Last"', () => {
+  assert.equal(personLabel(MARTIN_WORK), 'Martin Kessler (work)');
+  assert.equal(personLabel({ firstName: 'Jane', lastName: 'Doe' }), 'Jane Doe');
+  assert.equal(personLabel({ stateLabel: '  Solo  ' }), 'Solo');
+  assert.equal(personLabel(null), '');
+});
+
+test('findResumeIndex: checkpoint under a stateLabel key resumes the right broker', () => {
+  const { findResumeIndex } = require('../lib/config');
+  const brokers = [{ name: 'Spokeo' }, { name: 'Pipl' }];
+  const idx = findResumeIndex(brokers, 'Pipl|Martin Kessler (work)', MARTIN_WORK, 3);
+  assert.equal(idx, 1, 'composite stateLabel checkpoint must match its broker');
+});
