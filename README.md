@@ -266,7 +266,7 @@ This tool covers 500+ data brokers in two tiers:
 
 | Tier | Count | Confidence |
 |---|---|---|
-| **Explicit brokers** ([STATUS.md](STATUS.md)) | 44 | Hand-mapped with specific selectors. **None are currently marked `verified`** - the selectors compile and were correct when written, but none has been re-tested against the live site recently, so any of them may have drifted. |
+| **Explicit brokers** ([STATUS.md](STATUS.md)) | 52 | Hand-mapped with specific selectors. **None are currently marked `verified`** - the selectors compile and were correct when written, but none has been re-tested against the live site recently, so any of them may have drifted. |
 | **Generic runner** | ~490 | Best-effort heuristic - tries 4 strategies (Do Not Sell click, OneTrust/TrustArc, generic form, DSAR link). Many succeed; some fail silently. |
 
 Be skeptical of the counts this tool prints. Broker sites change their DOM
@@ -317,6 +317,23 @@ If you want to know exactly which brokers are hand-verified vs heuristic, see [S
 | **ZoomInfo** | Direct form (B2B professional data) |
 | **Clearbit** | Direct form (B2B enrichment data) |
 | Pipl | Email opt-out via Mail.app |
+
+### Phone numbers (caller ID and reverse phone lookup)
+
+Spam calls are aimed at your number, so these entries are keyed by `person.phone`, not your name. Caller-ID apps build their directories from uploaded contact books; reverse-lookup sites are where call lists get a name for a number.
+
+| Site | Method |
+|------|--------|
+| Truecaller | Manual - needs an SMS or WhatsApp message sent from your phone to prove it is yours |
+| Sync.ME | Removal form (US numbers) |
+| CallApp | Unlisting form (needs your number with its country code) |
+| NumLookup | Phone opt-out form (US numbers) |
+| Hiya | Email to its DPO (Hiya supplies caller ID to Samsung phones and several carriers) |
+| Eyecon | Email to its privacy contact |
+| National Do Not Call Registry | Manual, one time - stops legitimate telemarketers, not scammers |
+| Spy Dialer | Manual - multi-step wizard behind reCAPTCHA Enterprise |
+
+Without a phone number in `config.json` the phone forms are skipped with a reason in the log. A number outside the US and Canada needs a leading `+` and country code for CallApp. The generic runner also types your number into any deletion form that has a phone field, but only alongside your name or email, so a lone phone search box is never submitted.
 
 ### Generic - 500+ additional brokers (auto-detected)
 
@@ -514,6 +531,8 @@ The following brokers are flagged `usOnly: true` and are silently skipped when y
 | BeenVerified | US background-check (requires US state) |
 | USPhonebook | US phone directory |
 | PublicDataUSA | US public records |
+| Sync.ME, NumLookup | Country picker defaults to +1 and is not driven yet |
+| National Do Not Call Registry, Spy Dialer | US-only services |
 
 All other brokers in the list are attempted regardless of country.
 

@@ -76,6 +76,33 @@ function _primaryPerson() {
 const enc = s => encodeURIComponent(s == null ? '' : s);
 
 /**
+ * Split a phone number into the two shapes phone-lookup sites ask for.
+ *
+ *   national - 10 digits, for US forms whose country picker defaults to +1
+ *   e164     - "+<country code><number>", for caller-ID apps that want the
+ *              country code typed in
+ *
+ * Either is '' when it cannot be derived honestly: a non-US/CA number written
+ * without a leading "+" has no knowable country code, so it is not guessed.
+ *
+ * @param {string} [phone]
+ * @param {string} [country]  ISO 3166-1 alpha-2, default 'US'
+ * @returns {{ national: string, e164: string }}
+ */
+function phoneParts(phone, country) {
+  const raw = phone == null ? '' : String(phone).trim();
+  const digits = raw.replace(/\D/g, '');
+  const nanp = ['US', 'CA'].includes(String(country || 'US').toUpperCase());
+
+  if (nanp && digits.length === 10) return { national: digits, e164: `+1${digits}` };
+  if (nanp && digits.length === 11 && digits[0] === '1') {
+    return { national: digits.slice(1), e164: `+${digits}` };
+  }
+  if (raw.startsWith('+') && digits.length >= 8) return { national: '', e164: `+${digits}` };
+  return { national: '', e164: '' };
+}
+
+/**
  * Build the broker list for one person.
  *
  * These values must be resolved per person, not once at module load: watcher.js
@@ -94,6 +121,11 @@ function buildBrokers(person) {
   const s = (v) => (v == null ? '' : String(v));
   const F = s(p.firstName), L = s(p.lastName), N = s(p.fullName);
   const ST = s(p.state), C = s(p.city), E = s(p.email), Z = s(p.zip);
+  const { national: PN, e164: PE } = phoneParts(p.phone, p.country);
+  // Phone-keyed forms cannot do anything without the number, so a person
+  // without one gets a logged skip instead of an empty submission every month.
+  const needsPN = PN ? undefined : 'no US phone number in config.json (person.phone)';
+  const needsPE = PE ? undefined : 'no phone number with a country code in config.json (e.g. +44 20 7946 0000)';
 
   return [
 
@@ -292,10 +324,17 @@ function buildBrokers(person) {
   {
     name: 'USPhonebook',
     method: 'direct-form',
-    optOutUrl: 'https://www.usphonebook.com/opt-out',
-    formFields: { 'input[name*="name" i]': N, 'input[name*="email" i]': E },
-    submitSelector: 'button[type="submit"]',
-    captchaLikely: false,
+    // /opt-out redirects here. The page also carries name and phone SEARCH
+    // boxes, so the selectors name the removal form's own fields.
+    optOutUrl: 'https://www.usphonebook.com/removal',
+    formFields: {
+      '#subject-firstname': F,
+      '#subject-lastname': L,
+      '#subject-email': E,
+      '#agreement': 'yes',
+    },
+    submitSelector: '#BRP',
+    captchaLikely: true,
     priority: 2,
     usOnly: true,
   },
@@ -548,6 +587,96 @@ function buildBrokers(person) {
     submitSelector: 'button[type="submit"]',
     captchaLikely: false,
     priority: 2,
+  },
+
+  // ═══ Phone numbers - caller-ID apps, reverse phone lookups, Do Not Call ═══
+  // These are keyed by the phone number, not the name. Caller-ID apps build
+  // their directories from uploaded contact books, and reverse-lookup sites are
+  // where call lists get a name for a number.
+
+  {
+    // After the reCAPTCHA, Truecaller asks you to prove you own the number by
+    // sending an SMS or WhatsApp message from it, which no script can do.
+    name: 'Truecaller',
+    method: 'manual',
+    optOutUrl: 'https://www.truecaller.com/unlisting',
+    priority: 1,
+    notes: 'Click "No, I want to unlist", enter your number with its country code (e.g. +15125550000), solve the reCAPTCHA, then send the SMS or WhatsApp message it shows from that phone. Unlisting cannot be undone and takes up to 24 hours.',
+  },
+
+  {
+    name: 'Sync.ME',
+    method: 'direct-form',
+    optOutUrl: 'https://sync.me/unsubscribe/',
+    // A modal cookie <dialog> makes the form inert until it is dismissed.
+    preClickSelector: 'dialog[open] button:has-text("Accept All Cookies")',
+    formFields: { '#name': N, '#email': E, '#phoneNumber': PN },
+    submitSelector: 'button[type="submit"]:has-text("Send")',
+    captchaLikely: true,
+    priority: 1,
+    // The country picker defaults to +1 and is not driven yet.
+    usOnly: true,
+    skipReason: needsPN,
+  },
+
+  {
+    name: 'CallApp',
+    method: 'direct-form',
+    optOutUrl: 'https://callapp.com/how-to/unlist-phone-number',
+    formFields: { 'input[name="phone"]': PE, 'input[name="email"]': E },
+    submitSelector: 'button[type="submit"]:has-text("Send")',
+    captchaLikely: false,
+    priority: 2,
+    skipReason: needsPE,
+  },
+
+  {
+    name: 'NumLookup',
+    method: 'direct-form',
+    optOutUrl: 'https://www.numlookup.com/opt_out',
+    formFields: { 'input[name="optout_number"]': PN },
+    submitSelector: 'input[type="submit"]',
+    captchaLikely: false,
+    priority: 2,
+    // The country <select> defaults to USA and is not driven yet.
+    usOnly: true,
+    skipReason: needsPN,
+  },
+
+  {
+    // Hiya supplies caller ID to Samsung phones and several US carriers.
+    name: 'Hiya',
+    method: 'email',
+    emailTo: 'DPO@hiya.com',
+    emailSubjectPrefix: 'Advanced Data Management',
+    priority: 1,
+  },
+
+  {
+    // Eyecon's privacy policy (Annex B) gives this address for removing a
+    // number from its search database.
+    name: 'Eyecon',
+    method: 'email',
+    emailTo: 'privacy@instabridge.com',
+    priority: 2,
+  },
+
+  {
+    name: 'National Do Not Call Registry',
+    method: 'manual',
+    optOutUrl: 'https://www.donotcall.gov/register.html',
+    priority: 1,
+    usOnly: true,
+    notes: 'One-time and free: registrations never expire. Click "Register Your Phone", enter the number and your email, Submit, then Register. Click the link in the email from Register@donotcall.gov within 72 hours. Stops legitimate telemarketers, not scammers. Once registered, add this entry to your allowlist so it stops reopening.',
+  },
+
+  {
+    name: 'Spy Dialer',
+    method: 'manual',
+    optOutUrl: 'https://www.spydialer.com/consumers/wizards.aspx',
+    priority: 2,
+    usOnly: true,
+    notes: 'Multi-step wizard (state first, then the number) behind reCAPTCHA Enterprise.',
   },
 
   // ═══ Email-based opt-outs ═════════════════════════════════════════════════

@@ -218,7 +218,8 @@ function activePerson(person) {
 }
 
 function getFieldMap(person) {
-  const { firstName: F, lastName: L, fullName: N, email: E, state: ST, zip: Z } = activePerson(person);
+  const p = activePerson(person);
+  const { firstName: F, lastName: L, fullName: N, email: E, state: ST, zip: Z } = p;
   return [
     // email (try first - many sites only need this)
     { selectors: ['input[type="email"]', 'input[name*="email" i]', 'input[placeholder*="email" i]'], value: E },
@@ -232,6 +233,14 @@ function getFieldMap(person) {
     { selectors: ['select[name*="state" i]', 'input[name*="state" i]'], value: ST },
     // zip
     { selectors: ['input[name*="zip" i]', 'input[name*="postal" i]'], value: Z },
+    // phone - supplementary: filled only alongside a name or email, never on
+    // its own. A lone phone box is usually a reverse-lookup search, and
+    // submitting it would be recorded as a removal.
+    {
+      selectors: ['input[type="tel"]', 'input[name*="phone" i]', 'input[placeholder*="phone" i]'],
+      value: p.phoneFormatted || p.phone,
+      supplementary: true,
+    },
     // request type - select "Delete" or "Do Not Sell" where applicable
     {
       selectors: ['select[name*="request" i]', 'select[name*="type" i]', 'select[id*="request" i]'],
@@ -261,6 +270,9 @@ async function fillGenericForm(page, person) {
       }
       continue;
     }
+    // Supplementary fields sit after the primary ones in getFieldMap(), so this
+    // only types the phone into a form that already took a name or email.
+    if (field.supplementary && (!field.value || !filledAny)) continue;
     for (const sel of field.selectors) {
       try {
         const el = page.locator(sel).first();

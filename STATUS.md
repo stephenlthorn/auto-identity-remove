@@ -22,7 +22,7 @@
 - **Confidence** - `verified` means the selectors / flow have been manually confirmed against the live site. `untested` means the entry exists but has not been hand-verified end-to-end and depends on the broker not having changed its DOM.
 - **US-only** - site indexes US public records / voter data / phone directories; automatically skipped for non-US users.
 
-**This list covers the 42 explicit brokers in `brokers.js` only.** The other ~490 brokers in `data/markup-parsed.json` and `data/badbool-extra.json` are handled by the heuristic generic runner - every one of those is best-effort. Run `node watcher.js --verify` to spot-check whether opt-outs are still in effect.
+**This list covers the 52 explicit brokers in `brokers.js` only.** The other ~490 brokers in `data/markup-parsed.json` and `data/badbool-extra.json` are handled by the heuristic generic runner - every one of those is best-effort. Run `node watcher.js --verify` to spot-check whether opt-outs are still in effect.
 
 ---
 
@@ -45,7 +45,7 @@
 | FamilyTreeNow | direct-form | yes | untested | no |
 | CheckPeople | direct-form | no | untested | no |
 | ThatsThem | direct-form | no | untested | no |
-| USPhonebook | direct-form | no | untested | yes |
+| USPhonebook | direct-form | yes | untested | yes |
 | PublicDataUSA | direct-form | no | untested | yes |
 | SmartBackgroundChecks | direct-form | no | untested | no |
 | SearchPeopleFree | direct-form | no | untested | no |
@@ -69,6 +69,14 @@
 | Equifax (marketing) | direct-form | no | untested | no |
 | Experian (marketing) | direct-form | no | untested | no |
 | DataAxle | direct-form | no | untested | no |
+| Truecaller | manual | n/a | n/a | no |
+| Sync.ME | direct-form | yes | untested | yes |
+| CallApp | direct-form | no | untested | no |
+| NumLookup | direct-form | no | untested | yes |
+| Hiya | email | n/a | untested | no |
+| Eyecon | email | n/a | untested | no |
+| National Do Not Call Registry | manual | n/a | n/a | yes |
+| Spy Dialer | manual | n/a | n/a | yes |
 | Pipl | email | n/a | untested | no |
 | Spokeo (email) | email | n/a | untested | no |
 | Google - Results About You | manual | n/a | n/a | no |
