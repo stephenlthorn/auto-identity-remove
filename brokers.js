@@ -609,6 +609,8 @@ function buildBrokers(person) {
     method: 'direct-form',
     optOutUrl: 'https://sync.me/unsubscribe/',
     // A modal cookie <dialog> makes the form inert until it is dismissed.
+    // Its Turnstile passes on its own in a headed browser (token within ~3s)
+    // but never headless, where the site answers "reCAPTCHA is required".
     preClickSelector: 'dialog[open] button:has-text("Accept All Cookies")',
     formFields: { '#name': N, '#email': E, '#phoneNumber': PN },
     submitSelector: 'button[type="submit"]:has-text("Send")',
