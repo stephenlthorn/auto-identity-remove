@@ -46,7 +46,8 @@ test('envelope has the documented v/salt/iv/tag/ciphertext fields as hex strings
     assert.match(env[k], /^[0-9a-f]+$/, `${k} should be lowercase hex`);
   }
   assert.equal(env.alg, 'aes-256-gcm');
-  assert.equal(env.kdf, 'scrypt');
+  // CFG-14: the scrypt cost parameters are recorded in the envelope.
+  assert.deepEqual(env.kdf, { N: 131072, r: 8, p: 1 });
 });
 
 test('two encryptions of the same input use different salt + iv (non-deterministic)', () => {
