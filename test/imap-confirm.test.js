@@ -14,8 +14,12 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const path = require('node:path');
 
 const { processConfirmationEmails } = require('../lib/imap-confirm');
+
+// lib/imap-confirm.js builds file paths with path.join, so expected paths
+// must too: a hardcoded 'confirms/x.eml' never matches on Windows.
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -64,7 +68,7 @@ const WHITEPAGES_BROKER = {
 
 test('dryRun: matched .eml appears in processed, Playwright NOT called', async () => {
   const eml = makeEml('optout@spokeo.com', 'Please visit https://spokeo.com/confirm/abc123 to confirm.');
-  const files = { 'confirms/spokeo.eml': eml };
+  const files = { [path.join('confirms', 'spokeo.eml')]: eml };
   const ctx = makeContext();
 
   const result = await processConfirmationEmails(ctx, [SPOKEO_BROKER], {
@@ -97,7 +101,7 @@ test('unmatched: .eml sender has no matching broker -> unmatched with no_broker'
 
   assert.equal(result.processed.length, 0);
   assert.equal(result.unmatched.length, 1);
-  assert.equal(result.unmatched[0].file, 'confirms/random.eml');
+  assert.equal(result.unmatched[0].file, path.join('confirms', 'random.eml'));
   assert.equal(result.unmatched[0].reason, 'no_broker');
 });
 
@@ -191,9 +195,9 @@ test('URL keyword "delete" is recognised as a confirmation link', async () => {
 
 test('multiple .eml files processed in one call', async () => {
   const files = {
-    'confirms/spokeo.eml': makeEml('optout@spokeo.com', 'Click https://spokeo.com/confirm/aaa'),
-    'confirms/wp.eml': makeEml('noreply@whitepages.com', 'Go to https://whitepages.com/verify/bbb to complete'),
-    'confirms/unknown.eml': makeEml('info@nobody.org', 'Hello from nobody.'),
+    [path.join('confirms', 'spokeo.eml')]: makeEml('optout@spokeo.com', 'Click https://spokeo.com/confirm/aaa'),
+    [path.join('confirms', 'wp.eml')]: makeEml('noreply@whitepages.com', 'Go to https://whitepages.com/verify/bbb to complete'),
+    [path.join('confirms', 'unknown.eml')]: makeEml('info@nobody.org', 'Hello from nobody.'),
   };
   const ctx = makeContext();
 
