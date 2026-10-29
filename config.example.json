@@ -66,5 +66,9 @@
     "apiKey": "YOUR_SIMPLELOGIN_API_KEY"
   },
 
+  "retention": {
+    "_comment": "OPTIONAL. Run logs, audit reports, form screenshots and monthly report PDFs hold your name and the list of brokers that have your data, and they pile up. Add \"days\": 180 here (a number of days, or text like \"6m\" or \"1y\"; at least 7 days) to delete the ones older than that at the end of each successful run. With no \"days\" key, everything is kept forever (the default). Never deleted, whatever you set: the newest run log and its journal, the newest audit report, complaints, state and config. `aidr purge --older-than 180d --dry-run` shows what an age would delete without deleting anything."
+  },
+
   "profileDir": "~/.config/auto-identity-remove"
 }
