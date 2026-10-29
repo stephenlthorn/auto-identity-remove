@@ -44,7 +44,7 @@ const DEAD_URLS_PATH  = path.join(__dirname, 'data', 'dead-urls.json');
 const { looksLikeConfirmationRequired, PATTERN: CONFIRM_PATTERN } = require('./lib/confirm');
 const { classifyPostSubmit } = require('./lib/success');
 const { patternsFor, langOf } = require('./lib/locale-patterns');
-const { CONFIRM_RECHECK_DAYS, loadConfig, readEntry, CONFIG_PATH, CONFIG_ENC_PATH } = require('./lib/config');
+const { CONFIRM_RECHECK_DAYS, loadConfig, readEntry, brokerPart, CONFIG_PATH, CONFIG_ENC_PATH } = require('./lib/config');
 const { withRetry } = require('./lib/retry');
 const { isAllowlisted } = require('./lib/filter');
 const { acceptOptOutDialogs } = require('./lib/browser');
@@ -1302,6 +1302,51 @@ function hostOfBroker(broker) {
   }
 }
 
+// ─── Resume ───────────────────────────────────────────────────────────────────
+
+// The generic pass checkpoints at most this often. Rows that need no network
+// (cached-dead hosts, recently-done skips) fly past in microseconds, and an
+// fsync'd rename per row would be ~490 disk writes for nothing.
+const CHECKPOINT_MIN_INTERVAL_MS = 1000;
+
+/**
+ * Where in `queue` a resumed pass should start.
+ *
+ * The checkpoint holds { index, key }. The index is only a hint: the dataset (the
+ * Markup list, BADBOOL, the registry feeds) can change between an interrupted run
+ * and its --resume, and the --only/--skip filters change what is in `queue`. So the
+ * row at `index` must still carry `key`, else `key` is looked up by name. A key that
+ * cannot be found means we cannot tell what was already done, and the only safe
+ * answer is to start over: skipping on an unverified index could leave brokers
+ * that were never submitted looking handled.
+ *
+ * Two rows can share a name; the FIRST is taken, so a duplicate never makes a
+ * resume skip further than the interrupted run got.
+ *
+ * @param {Array<{ name: string }>} queue  the rows that will run, in order
+ * @param {{ index?: number|null, key?: string }|null|undefined} resumeFrom
+ * @param {(brokerName: string) => string} keyFor  broker name -> state key
+ * @returns {{ start: number, note: string|null }}  note is a line for the operator, or null
+ */
+function resolveResumeStart(queue, resumeFrom, keyFor) {
+  if (!resumeFrom) return { start: 0, note: null };
+  const { index, key } = resumeFrom;
+  if (typeof key !== 'string' || key === '') {
+    return { start: 0, note: '--resume: the generic checkpoint names no broker to verify, starting the generic pass over' };
+  }
+  const label = brokerPart(key);
+  const atIndex = Number.isInteger(index) && index >= 0 && index < queue.length && keyFor(queue[index].name) === key;
+  if (atIndex) return { start: index, note: null };
+  const found = queue.findIndex(b => keyFor(b.name) === key);
+  if (found === -1) {
+    return { start: 0, note: `--resume: checkpoint broker "${label}" is not in the generic list any more, starting the generic pass over` };
+  }
+  const note = Number.isInteger(index)
+    ? `--resume: "${label}" moved in the generic list (row ${index + 1} -> ${found + 1}); continuing there`
+    : `--resume: continuing the generic pass at "${label}" (row ${found + 1})`;
+  return { start: found, note };
+}
+
 async function runGenericBrokers(context, explicitBrokerHosts, state, logResult, recordSuccess, opts = {}) {
   const dryRun = !!opts.dryRun;
   // Which person this pass is for. fillGenericForm() submits a real name and
@@ -1333,6 +1378,39 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
   const queue = brokers.filter(b => include(b.name));
 
   console.log(`\n── Generic brokers (${queue.length} from Markup CSV + BADBOOL)${dryRun ? ' [DRY RUN]' : ''} ──`);
+
+  // --resume: pick the pass back up where an interrupted run left it (R2).
+  const { start, note: resumeNote } = resolveResumeStart(queue, opts.resumeFrom, keyFor);
+  if (resumeNote) console.log(resumeNote);
+  else if (start > 0) console.log(`--resume: skipping ${start} generic broker(s) already covered`);
+
+  // Checkpoint the pass as it advances so a kill leaves a resume point. The record
+  // is written BEFORE its broker runs, so it never points past an unprocessed row:
+  // a kill costs at most one repeat of the in-progress broker. `opts.saveCheckpoint`
+  // is injected (like recordSuccess), so callers that do not pass it write nothing;
+  // a preview never writes, and a failed write must not abort a 490-broker pass.
+  const checkpointClock = typeof opts.now === 'function' ? opts.now : Date.now;
+  let lastCheckpointAt = -Infinity;
+  let pendingCheckpoint = null;
+  let checkpointWarned = false;
+  const writeCheckpoint = (record) => {
+    pendingCheckpoint = null;
+    try {
+      opts.saveCheckpoint(record);
+    } catch (err) {
+      if (checkpointWarned) return;
+      checkpointWarned = true;
+      console.log(`⚠️  Could not write the --resume checkpoint (${((err && err.message) || 'error').slice(0, 120)}); if this run is interrupted, --resume will start the generic pass over`);
+    }
+  };
+  const checkpointRow = (index, broker) => {
+    if (dryRun || typeof opts.saveCheckpoint !== 'function') return;
+    const record = { phase: 'generic', personIndex: opts.personIndex === undefined ? 0 : opts.personIndex, key: keyFor(broker.name), index };
+    const at = checkpointClock();
+    if (at - lastCheckpointAt < CHECKPOINT_MIN_INTERVAL_MS) { pendingCheckpoint = record; return; }
+    lastCheckpointAt = at;
+    writeCheckpoint(record);
+  };
 
   // BRK-12: Playwright's default wait is 30 s per action, so one hidden toggle or
   // missing control stalled a broker for half a minute. Navigations keep their
@@ -1375,7 +1453,9 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
   let processed = 0;
 
   try {
-    for (const broker of queue) {
+    for (let rowIndex = start; rowIndex < queue.length; rowIndex++) {
+      const broker = queue[rowIndex];
+      checkpointRow(rowIndex, broker);
       process.stdout.write(`\n  [${broker.name.slice(0,40)}]… `);
 
       let result;
@@ -1430,12 +1510,17 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
       try { await page.waitForTimeout(400); } catch (_) {} // polite delay
     }
   } finally {
+    // The last row is always written, throttled or not: it is the one a resume
+    // would otherwise lose.
+    if (pendingCheckpoint) writeCheckpoint(pendingCheckpoint);
     await page.close().catch(() => {});
     await prunePopups();
   }
 
   return {
-    count: queue.length,
+    // The rows that ran (a resumed pass does not count the rows it skipped).
+    count: queue.length - start,
+    resumeSkipped: start,
     genericStats: {
       attempted: stats.attempted,
       submitted: stats.submitted,
@@ -1450,4 +1535,4 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
   };
 }
 
-module.exports = { runGenericBrokers, loadGenericBrokers, processGenericUrl, classifyNavError, classifyOutcome, isDeadStatus, loadDeadSet, DEAD_URLS_PATH, _setConfig, getFieldMap, fillGenericForm, checkBrokerUrl, isDisallowedAddress, newTextSince, classifyOptOutForm, describeFormElement, isHomepageUrl };
+module.exports = { runGenericBrokers, resolveResumeStart, loadGenericBrokers, processGenericUrl, classifyNavError, classifyOutcome, isDeadStatus, loadDeadSet, DEAD_URLS_PATH, _setConfig, getFieldMap, fillGenericForm, checkBrokerUrl, isDisallowedAddress, newTextSince, classifyOptOutForm, describeFormElement, isHomepageUrl };
