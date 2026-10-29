@@ -148,27 +148,32 @@ describe('headless launch through lib/browser.js, in a real browser', { skip: !E
   });
 
   test('two people never share cookies; the same person keeps theirs between launches', async () => {
-    const dirA = lib.profileDirFor({ baseDir: base, person: JANE, personIndex: 0 });
-    const dirB = lib.profileDirFor({ baseDir: base, person: JOHN, personIndex: 1 });
-    assert.notEqual(dirA, dirB);
-
-    await withContext(dirA, headlessOptions(), async (context) => {
-      const page = await context.newPage();
-      await page.goto(`${origin()}/set-cookie`);
-      assert.match(await page.evaluate(() => document.cookie), /aidr_probe=person-a/);
+    const provider = lib.createPersonContexts({
+      chromium,
+      baseDir: base,
+      persons: [JANE, JOHN],
+      launchOptions: () => headlessOptions(),
+      prepare: (context) => context.addInitScript(stealth.buildStealthScript()),
     });
+    try {
+      const a = await provider.forPerson(0);
+      const pageA = await a.newPage();
+      await pageA.goto(`${origin()}/set-cookie`);
+      assert.match(await pageA.evaluate(() => document.cookie), /aidr_probe=person-a/);
 
-    await withContext(dirB, headlessOptions(), async (context) => {
-      const page = await context.newPage();
-      await page.goto(`${origin()}/read`);
-      assert.equal(await page.evaluate(() => document.cookie), '', 'person B must not see the cookie a broker set for person A');
-    });
+      const b = await provider.forPerson(1);
+      assert.notEqual(a, b);
+      const pageB = await b.newPage();
+      await pageB.goto(`${origin()}/read`);
+      assert.equal(await pageB.evaluate(() => document.cookie), '', 'person B must not see the cookie a broker set for person A');
 
-    await withContext(dirA, headlessOptions(), async (context) => {
-      const page = await context.newPage();
-      await page.goto(`${origin()}/read`);
-      assert.match(await page.evaluate(() => document.cookie), /aidr_probe=person-a/, 'person A is still logged in on the next run');
-    });
+      const aAgain = await provider.forPerson(0);
+      const pageA2 = await aAgain.newPage();
+      await pageA2.goto(`${origin()}/read`);
+      assert.match(await pageA2.evaluate(() => document.cookie), /aidr_probe=person-a/, 'person A is still logged in on the next run');
+    } finally {
+      await provider.close();
+    }
   });
 
   test('browser.proxy reaches the browser: traffic goes through the proxy and its credentials are accepted', async () => {
