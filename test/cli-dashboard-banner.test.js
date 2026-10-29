@@ -142,7 +142,7 @@ test('DASH-12: a missing express is a readable install hint with no banner', asy
   fs.mkdirSync(path.join(dir, 'bin'));
   fs.mkdirSync(path.join(dir, 'lib'));
   fs.mkdirSync(path.join(dir, 'dashboard'));
-  for (const f of ['bin/aidr.js', 'lib/cli-map.js', 'lib/dashboard-creds.js', 'package.json']) {
+  for (const f of ['bin/aidr.js', 'lib/cli-map.js', 'lib/args.js', 'lib/dashboard-creds.js', 'package.json']) {
     fs.copyFileSync(path.join(ROOT, f), path.join(dir, f));
   }
   fs.writeFileSync(path.join(dir, 'dashboard', 'server.js'), "require('express');\n");

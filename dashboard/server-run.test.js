@@ -16,7 +16,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const http = require('http');
 const path = require('path');
-const { spawnSync } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const { startHarness, basicAuth, fakeChild } = require('./support/harness');
 const { createApp } = require('./server');
 
@@ -304,14 +304,21 @@ test('DASH-7: a freeze POST during a run is a 409 and state.json is untouched', 
 test('DASH-7: a freeze POST while a watcher holds the state lock is a 409', async () => {
   // A watcher started from the CLI or a scheduler: not our child, but it holds
   // state.json.lock with its live pid and will rewrite state.json on its own save.
-  await withServer({ stateContent: { optOuts: {} } }, async ({ request, paths }) => {
-    fs.writeFileSync(paths.state + '.lock', JSON.stringify({ pid: process.pid, ts: new Date().toISOString() }));
-    const before = fs.readFileSync(paths.state);
-    const r = await request({ method: 'POST', pathname: '/api/freeze', body: { key: 'equifax', action: 'done' } });
-    assert.equal(r.status, 409);
-    assert.ok(fs.readFileSync(paths.state).equals(before));
-    assert.ok(fs.existsSync(paths.state + '.lock'), "the holder's lock is not ours to remove");
-  });
+  // The holder must be a different live process: lib/lock.js treats a lock
+  // carrying our own pid as stale (a restarted container reuses low pids).
+  const holder = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+  try {
+    await withServer({ stateContent: { optOuts: {} } }, async ({ request, paths }) => {
+      fs.writeFileSync(paths.state + '.lock', JSON.stringify({ pid: holder.pid, ts: new Date().toISOString() }));
+      const before = fs.readFileSync(paths.state);
+      const r = await request({ method: 'POST', pathname: '/api/freeze', body: { key: 'equifax', action: 'done' } });
+      assert.equal(r.status, 409);
+      assert.ok(fs.readFileSync(paths.state).equals(before));
+      assert.ok(fs.existsSync(paths.state + '.lock'), "the holder's lock is not ours to remove");
+    });
+  } finally {
+    holder.kill();
+  }
 });
 
 test('DASH-7: a stale lock (dead pid) does not block, and the lock is released afterwards', async () => {
