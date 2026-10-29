@@ -8,6 +8,20 @@ It wraps the existing tooling rather than reimplementing it:
 - **Brokers** - reads `../brokers.js` and `../state.json` to show every broker,
   its method/priority/scope, and current opt-out status (success / pending /
   error / not-listed / manual), with a per-row "preview this broker" button.
+  When the config names more than one person the table gets a status column per
+  person (state keys `Broker|First Last`), headed by their initials. The ~490
+  generic brokers are not rows here; the summary counts them (loaded the way the
+  generic runner loads them) and totals their state, e.g. `507 generic: 40 opted
+  out, 3 pending, 464 not run yet`.
+- **History** - one row per finished run from `../logs/run-*.json`, newest first:
+  date, full or partial (and which filter), the count per status (submitted,
+  pending confirmation, unverified, not listed, manual, CAPTCHA failed, errors,
+  dead) and the same per person, as initials. A run that crashed before it wrote
+  its summary is listed from its `run-*.jsonl` journal and marked incomplete.
+  **View** lists that run's brokers; any URL in a result's detail is shown as its
+  host only. The page also says when the latest run left sites at a CAPTCHA
+  ("N sites need a CAPTCHA solved") with the command to run, `aidr captchas`; it
+  is text only, the dashboard starts nothing for it.
 - **Runs** - buttons for every CLI mode (preview, real, verify, doctor, list,
   pending, confirm-emails, retry-failed, serp-scan, snapshot) with live
   streamed output (SSE) and `--only` / `--skip` filters.
@@ -84,6 +98,26 @@ Example units are in [`examples/`](examples/):
 Copy them to `/etc/systemd/system/`, edit paths/creds, then
 `systemctl daemon-reload && systemctl enable --now aidr-dashboard`. After that
 the Schedule tab can enable/disable `aidr.timer` and switch cadence.
+
+## Run history API
+
+- `GET /api/runs?limit=20&offset=0` - runs newest first. `limit` is capped at 100;
+  each run carries `id`, `startedAt`, `source` (`summary` or `journal`),
+  `complete`, `mode` (`full`, `partial`, `incomplete`), `filter`, `total`,
+  `counts`, `captchaSites` and, when the log tags results with a person,
+  `people` (with `initials`). A log that cannot be read is listed with an
+  `error` instead of failing the page.
+- `GET /api/runs/:id` - that run's rows: broker, person, initials, status,
+  detail (URLs reduced to their host) and time. At most 5000 rows are returned
+  (`truncated` says when there were more). The id must look like `run-...`
+  (letters, digits, `-`, `_`); anything else is a `400`, so no path can be built
+  from it, and a symlink in `logs/` is never followed.
+- `GET /api/summary` also carries `people` (name and initials), `generic`
+  (totals) and `captchas` (`sites`, `runId`).
+
+Run logs hold the person's name and the brokers that list them. The raw files
+stay reachable in the Logs tab exactly as before; the History view is the one
+that trims URLs.
 
 ## What the dashboard writes
 

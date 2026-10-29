@@ -15,6 +15,7 @@
 
   <main>
     <div class="banner hidden" id="configBanner" role="alert"></div>
+    <div class="banner hidden" id="captchaBanner" role="status"></div>
     <section class="card exposure-card" id="exposureCard" aria-label="Exposure score">
       <div class="exposure-head">
         <div class="exposure-score">
@@ -58,6 +59,7 @@
 
     <nav class="tabs" role="tablist" aria-label="Dashboard sections">
       <button class="tab active" id="tabbtn-brokers" role="tab" aria-selected="true" aria-controls="tab-brokers" data-tab="brokers">Brokers</button>
+      <button class="tab" id="tabbtn-history" role="tab" aria-selected="false" aria-controls="tab-history" data-tab="history">History</button>
       <button class="tab" id="tabbtn-freeze" role="tab" aria-selected="false" aria-controls="tab-freeze" data-tab="freeze">Freeze</button>
       <button class="tab" id="tabbtn-config" role="tab" aria-selected="false" aria-controls="tab-config" data-tab="config">Config</button>
       <button class="tab" id="tabbtn-schedule" role="tab" aria-selected="false" aria-controls="tab-schedule" data-tab="schedule">Schedule</button>
@@ -76,9 +78,35 @@
         </div>
       </div>
       <table class="grid" id="brokerTable">
-        <thead><tr><th>Broker</th><th>Method</th><th>Pri</th><th>Scope</th><th>Status</th><th>Last action</th><th></th></tr></thead>
+        <thead><tr><th>Broker</th><th class="c-method">Method</th><th class="c-pri">Pri</th><th class="c-scope">Scope</th><th>Status</th><th class="c-last">Last action</th><th></th></tr></thead>
         <tbody></tbody>
       </table>
+    </section>
+
+    <section class="card tab-panel hidden" id="tab-history" role="tabpanel" aria-labelledby="tabbtn-history">
+      <div class="toolbar">
+        <p class="dim" id="historyState"></p>
+        <div class="pager">
+          <button class="btn" id="historyNewer" disabled>&larr; Newer</button>
+          <button class="btn" id="historyOlder" disabled>Older &rarr;</button>
+        </div>
+      </div>
+      <p class="dim">One row per finished run, from the run logs. A run that crashed before it wrote its summary is shown from its journal. Previews write no log.</p>
+      <table class="grid" id="historyTable">
+        <thead><tr><th>Run</th><th>Kind</th><th>Results</th><th>People</th><th></th></tr></thead>
+        <tbody><tr><td colspan="5" class="dim">Open this tab to load the run history.</td></tr></tbody>
+      </table>
+      <div class="run-detail hidden" id="runDetail">
+        <div class="toolbar">
+          <h3 id="runDetailTitle"></h3>
+          <label class="dim">Show <select id="runDetailFilter" aria-label="Filter this run's results by status"><option value="all">all</option></select></label>
+        </div>
+        <p class="dim" id="runDetailNote"></p>
+        <table class="grid" id="runDetailTable">
+          <thead><tr><th>Broker</th><th>Who</th><th>Status</th><th>Detail</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
     </section>
 
     <section class="card tab-panel hidden" id="tab-freeze" role="tabpanel" aria-labelledby="tabbtn-freeze">

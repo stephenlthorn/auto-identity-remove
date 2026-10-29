@@ -12,7 +12,9 @@
  *   GET  /api/version            -> tool version + node + broker count
  *   GET  /api/brokers            -> broker definitions + status (from ../brokers.js, state.json)
  *   GET  /api/state              -> state.json (raw; {error} if unparseable)
- *   GET  /api/summary            -> counts + config flags + run state
+ *   GET  /api/summary            -> counts + config flags + run state, the people the config
+ *                                   names (initials), generic-broker totals and how many sites
+ *                                   the latest run left at a CAPTCHA
  *   GET  /api/config             -> config.json with secrets masked
  *   PUT  /api/config             -> merge-write config.json (masked secrets preserved);
  *                                   409 when the stored config is unreadable unless
@@ -20,6 +22,9 @@
  *   GET  /api/config/status      -> first-run gate: { configured, missing, locked, unreadable }
  *   GET  /api/logs               -> list of files in ../logs
  *   GET  /api/logs/:name         -> one log file (size-capped, streamed)
+ *   GET  /api/runs               -> run history from logs/run-*.json(l), newest first,
+ *                                   paginated: ?limit (max 100) & ?offset
+ *   GET  /api/runs/:id           -> one run's per-broker rows (URLs reduced to their host)
  *   GET  /api/run/status         -> current/last run state
  *   GET  /api/run/stream         -> Server-Sent Events live output
  *   POST /api/run                -> { mode, only?, skip? } (modes: see MODE_ARGS)
@@ -94,6 +99,9 @@ const lock = require('../lib/lock');
 const { resolveAuthFile } = require('../lib/dashboard-creds');
 const { writeJsonAtomic, backupFile } = require('./safe-write');
 const { MASK, maskConfig, mergeConfig, applyConfigEdit } = require('./config-edit');
+const { listRuns, readRun, latestRun } = require('./runs');
+const { peopleFromConfig, peopleFromState } = require('./people');
+const { loadGenericList, tallyGeneric } = require('./generic');
 
 const DEFAULT_ROOT = path.resolve(__dirname, '..');
 const MAX_LOG_BYTES = 10 * 1024 * 1024; // cap log file reads (avoid OOM / event-loop block)
@@ -208,6 +216,7 @@ async function makeCred(user, pw) {
  * @param {string}   [options.watcherScript]  default "watcher.js" (relative to cwd)
  * @param {string}   [options.cwd]         working directory of runs; default root
  * @param {Array|Function} [options.brokers]  broker list instead of requiring brokers.js
+ * @param {Array|Function} [options.genericBrokers]  generic-broker rows instead of loading the shipped datasets
  * @param {number}   [options.authFailLimit]
  * @param {number}   [options.authFailWindowMs]
  * @param {Function} [options.warn]        stderr writer
@@ -413,6 +422,24 @@ function createApp(options = {}) {
     return brokersCache;
   }
 
+  // The ~490 generic brokers, loaded the way generic-runner loads them (deduped
+  // against the explicit list). null when the datasets cannot be read: the summary
+  // then omits the totals instead of failing. Cached like brokers.js: the datasets
+  // only change with an --update-brokers run.
+  let genericCache = null;
+  let genericCacheAt = 0;
+  function loadGeneric() {
+    if (typeof options.genericBrokers === 'function') {
+      try { return options.genericBrokers(); } catch (_) { return null; }
+    }
+    if (Array.isArray(options.genericBrokers)) return options.genericBrokers;
+    const now = Date.now();
+    if (genericCacheAt && now - genericCacheAt < BROKERS_CACHE_TTL) return genericCache;
+    genericCache = loadGenericList({ explicitBrokers: loadBrokers(), root: ROOT });
+    genericCacheAt = now;
+    return genericCache;
+  }
+
   // ---- run management -------------------------------------------------------
   let run = { running: false, mode: null, startedAt: null, endedAt: null, exitCode: null, pid: null, lines: [] };
   let child = null;
@@ -602,9 +629,17 @@ function createApp(options = {}) {
       if (cls === 'ok') opted++;
       else if (cls === 'pending') pending++;
     }
+    // Who the table has columns for: the config's people, or - when the config is
+    // locked or unreadable - whoever state.json has results for.
+    const fromConfig = peopleFromConfig(cfg);
+    const generic = loadGeneric();
+    const latest = latestRun(LOGS);
     res.json({
       brokers: brokers.length,
       optedOut: opted, pending, manual,
+      people: fromConfig.length ? fromConfig : peopleFromState(opts),
+      generic: generic ? tallyGeneric(opts, generic) : null,
+      captchas: { sites: latest ? latest.captchaSites : 0, runId: latest ? latest.id : null },
       configured: !!cfg,
       configLocked: !!cm.locked,
       capsolver: !!(cfg && cfg.capsolver && cfg.capsolver.apiKey && cfg.capsolver.apiKey !== 'CAP-YOUR_KEY_HERE'),
@@ -717,6 +752,20 @@ function createApp(options = {}) {
     if (st.size > MAX_LOG_BYTES) return res.status(413).json({ error: `log too large (${st.size} bytes)` });
     res.type(name.endsWith('.json') ? 'application/json' : 'text/plain');
     fs.createReadStream(file).on('error', () => { if (!res.headersSent) res.status(500).end(); }).pipe(res);
+  });
+
+  // Run history. dashboard/runs.js owns the parsing and the path guarding: the id
+  // is matched against a strict pattern and looked up with lstat, so nothing in
+  // the request is ever joined into a path, and details leave with URLs reduced
+  // to their host.
+  app.get('/api/runs', (req, res) => {
+    res.json(listRuns(LOGS, { limit: req.query.limit, offset: req.query.offset }));
+  });
+
+  app.get('/api/runs/:id', (req, res) => {
+    const r = readRun(LOGS, req.params.id);
+    if (!r.ok) return res.status(r.status).json({ error: r.error });
+    res.json({ run: r.run, rows: r.rows, truncated: r.truncated, rowCount: r.rowCount });
   });
 
   app.get('/api/run/status', (_req, res) => {

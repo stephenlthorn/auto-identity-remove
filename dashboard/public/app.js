@@ -23,17 +23,57 @@ const safeUrl = u => /^https?:\/\//i.test(u || '') ? u : null;
 const MASK = '••••••••';
 
 let brokers = [];
+let brokersLoaded = false;
+// The people the config names, [{ name, initials }], once there is more than one:
+// the broker table then gets a status column per person, headed by initials.
+let peopleCols = [];
 
 // ---------- summary ----------
+// "511 generic: 40 opted out, 3 pending, 1 error, 467 not run yet". The ~490
+// generic brokers are not rows in the broker table, so the summary is where they
+// show up at all. Empty when the server could not load the datasets.
+function genericPillText(g) {
+  if (!g || !Number.isFinite(g.total)) return '';
+  const parts = [
+    [g.optedOut, 'opted out'], [g.pending, 'pending'], [g.error, g.error === 1 ? 'error' : 'errors'],
+    [g.notListed, 'not listed'], [g.manual, 'manual'], [g.other, 'other'], [g.untried, 'not run yet'],
+  ].filter(([n]) => Number(n) > 0).map(([n, label]) => `${n} ${label}`);
+  return `${g.total} generic${parts.length ? ': ' + parts.join(', ') : ''}`;
+}
+
+// A CAPTCHA the run could not pass needs a person. Text only on purpose: the
+// command is `aidr captchas` on a machine with a display, not a button here.
+// The only interpolated value is a number, escaped like everything else.
+function renderCaptchaBanner(c) {
+  const el = $('#captchaBanner');
+  const n = c && Number.isFinite(c.sites) ? Math.max(0, Math.floor(c.sites)) : 0;
+  if (!n) { el.innerHTML = ''; el.classList.add('hidden'); return; }
+  el.innerHTML = `${esc(n)} ${n === 1 ? 'site needs' : 'sites need'} a CAPTCHA solved. `
+    + `On a computer with a display, run <code>aidr captchas</code> to solve ${n === 1 ? 'it' : 'them'} by hand.`;
+  el.classList.remove('hidden');
+}
+
+// The broker table is only redrawn when the set of people changes, not on every
+// 15 s summary poll.
+function setPeople(list) {
+  const named = Array.isArray(list) ? list.filter(p => p && typeof p.name === 'string') : [];
+  const next = named.length > 1 ? named : [];
+  if (JSON.stringify(next) === JSON.stringify(peopleCols)) return;
+  peopleCols = next;
+  if (brokersLoaded) renderBrokers();
+}
+
 async function loadSummary() {
   try {
     const s = await api('/summary');
     const pill = (txt, cls) => `<span class="pill ${cls}">${esc(txt)}</span>`;
+    const generic = genericPillText(s.generic);
     $('#summary').innerHTML = [
       pill(`${s.brokers} brokers`, 'muted'),
       pill(`${s.optedOut} opted out`, s.optedOut ? 'good' : 'muted'),
       pill(`${s.pending} pending`, s.pending ? 'warn' : 'muted'),
       pill(`${s.manual} manual`, 'muted'),
+      generic ? pill(generic, s.generic.optedOut ? 'good' : 'muted') : '',
       s.configLocked
         ? pill('config locked', 'bad')
         : pill(s.configured ? 'config ✓' : 'no config', s.configured ? 'good' : 'bad'),
@@ -41,6 +81,8 @@ async function loadSummary() {
       pill(s.smtp ? 'SMTP ✓' : 'SMTP ✗', s.smtp ? 'good' : 'warn'),
       s.stateError ? pill('state.json unreadable', 'bad') : '',
     ].join('');
+    renderCaptchaBanner(s.captchas);
+    setPeople(s.people);
   } catch (_) { $('#summary').innerHTML = '<span class="pill bad">API error</span>'; }
 }
 
@@ -59,14 +101,39 @@ function statusOf(b) {
   if (b.method === 'manual') return { key: 'manual', label: 'manual', date: '', count: 0, people: [] };
   return b.status || NO_STATUS;
 }
+// Broker, Method, Pri, Scope, Status, Last action, and the row's own button.
+const BROKER_COLS = 7;
+const brokerColspan = () => BROKER_COLS + peopleCols.length;
+// The column classes (c-*) are what the narrow-screen CSS hides by; they used to
+// be nth-child positions, which a per-person column would have shifted.
+function brokerHead() {
+  // The full name is the header's tooltip only; the cells below carry initials.
+  const people = peopleCols.map(p => `<th class="person-col" title="${esc(p.name)}">${esc(p.initials || '?')}</th>`).join('');
+  return '<tr><th>Broker</th><th class="c-method">Method</th><th class="c-pri">Pri</th><th class="c-scope">Scope</th>'
+    + `<th>Status</th>${people}<th class="c-last">Last action</th><th></th></tr>`;
+}
+// One person's status for one broker. state.json keeps a bare "Broker" key from
+// before the config had a second person; like lib/config readEntry, it is the
+// first person's.
+function personCell(b, st, p, index) {
+  if (b.method === 'manual') return '<td class="person-col"><span class="badge manual">manual</span></td>';
+  const own = st.people || [];
+  const mine = own.find(x => x.person === p.name) || (index === 0 ? own.find(x => x.person === null) : undefined);
+  const initials = esc(p.initials || '?');
+  if (!mine) return `<td class="person-col"><span class="badge none" title="${initials}: not yet">-</span></td>`;
+  return `<td class="person-col"><span class="badge ${esc(mine.key)}" title="${initials}: ${esc(mine.label)}">${esc(mine.label)}</span></td>`;
+}
 function renderBrokers() {
   const q = $('#brokerSearch').value.toLowerCase();
   const rows = brokers.filter(b => b.name.toLowerCase().includes(q)).map(b => {
     const st = statusOf(b);
-    // More than one person: show the worst status and list each person on hover.
+    // One person (or no config to say otherwise): the worst status, with each
+    // person listed on hover. Several: the person columns say it, so the status
+    // column is just the worst one.
+    const columns = peopleCols.length > 0;
     const people = (st.people || []).filter(p => p.person);
-    const detail = people.map(p => `${p.person}: ${p.label}`).join('; ');
-    const label = st.count > 1 ? `${st.label} (${st.count} people)` : st.label;
+    const detail = columns ? '' : people.map(p => `${p.person}: ${p.label}`).join('; ');
+    const label = !columns && st.count > 1 ? `${st.label} (${st.count} people)` : st.label;
     const url = safeUrl(b.optOutUrl);
     const nameCell = url
       ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(b.name)}</a>`
@@ -75,15 +142,17 @@ function renderBrokers() {
       : `<button class="row-run" data-name="${esc(b.name)}" aria-label="Preview ${esc(b.name)} only" title="Preview this broker only">▶</button>`;
     return `<tr>
       <td>${nameCell}</td>
-      <td class="method">${esc(b.method || '')}</td>
-      <td>${esc(b.priority ?? '')}</td>
-      <td>${b.usOnly ? 'US' : 'intl'}</td>
+      <td class="c-method method">${esc(b.method || '')}</td>
+      <td class="c-pri">${esc(b.priority ?? '')}</td>
+      <td class="c-scope">${b.usOnly ? 'US' : 'intl'}</td>
       <td><span class="badge ${esc(st.key)}"${detail ? ` title="${esc(detail)}"` : ''}>${esc(label)}</span></td>
-      <td class="dim">${esc(fmtDate(st.date))}</td>
+      ${peopleCols.map((p, i) => personCell(b, st, p, i)).join('')}
+      <td class="c-last dim">${esc(fmtDate(st.date))}</td>
       <td>${action}</td>
     </tr>`;
   }).join('');
-  $('#brokerTable tbody').innerHTML = rows || '<tr><td colspan="7" class="dim">no brokers</td></tr>';
+  $('#brokerTable thead').innerHTML = brokerHead();
+  $('#brokerTable tbody').innerHTML = rows || `<tr><td colspan="${brokerColspan()}" class="dim">no brokers</td></tr>`;
   $$('.row-run').forEach(btn => btn.addEventListener('click', () => {
     $('#onlyInput').value = btn.dataset.name; $('#skipInput').value = '';
     $$('.tab').forEach(x => x.classList.remove('active')); document.querySelector('.tab[data-tab="brokers"]').classList.add('active');
@@ -96,9 +165,10 @@ async function loadBrokers() {
     const list = await api('/brokers');
     if (!Array.isArray(list)) throw new Error((list && list.error) || 'unexpected response');
     brokers = list;
+    brokersLoaded = true;
     renderBrokers();
   } catch (err) {
-    $('#brokerTable tbody').innerHTML = `<tr><td colspan="7" class="dim">failed to load brokers: ${esc(err && err.message || String(err))}</td></tr>`;
+    $('#brokerTable tbody').innerHTML = `<tr><td colspan="${brokerColspan()}" class="dim">failed to load brokers: ${esc(err && err.message || String(err))}</td></tr>`;
   }
 }
 
@@ -175,6 +245,7 @@ async function finishRun(code) {
   setRunning(false); stopRunPoll(); closeStream();
   $('#runStatus').textContent = `last run exited ${code}`;
   await loadSummary(); await loadBrokers(); loadLogs();
+  if (!$('#tab-history').classList.contains('hidden')) loadHistory();
 }
 // Live modes perform real, outward-facing actions; the server requires an
 // explicit confirm:true for them (defense against stray/forged/replayed requests).
@@ -266,6 +337,7 @@ $$('.tab').forEach(t => t.addEventListener('click', () => {
   $('#tab-' + t.dataset.tab).classList.remove('hidden');
   if (t.dataset.tab === 'config') loadConfig();
   if (t.dataset.tab === 'logs') loadLogs();
+  if (t.dataset.tab === 'history') loadHistory(0);
   if (t.dataset.tab === 'schedule') loadSchedule();
   if (t.dataset.tab === 'admin') loadWhoami();
   if (t.dataset.tab === 'freeze') loadFreeze();
@@ -437,6 +509,113 @@ async function loadLogs() {
     $('#logView').textContent = out; // textContent - safe, never innerHTML for log bodies
   }));
 }
+
+// ---------- run history ----------
+// GET /api/runs reads logs/run-*.json (and the crash-safe run-*.jsonl journals).
+// Everything in those files is outside data: every value below goes through
+// esc() before innerHTML, people are shown as the initials the server chose, and
+// the server has already cut URLs in a result's detail down to their host.
+const HISTORY_PAGE = 20;
+let historyOffset = 0;
+// [count key from the API, label, badge class]. Presentation only; the counts
+// themselves are the server's.
+const RUN_COUNTS = [
+  ['submitted', 'submitted', 'ok'], ['pendingConfirm', 'pending confirmation', 'pending'], ['unverified', 'unverified', 'pending'],
+  ['notListed', 'not listed', 'notfound'], ['manual', 'manual', 'manual'], ['captchaFailed', 'CAPTCHA failed', 'error'],
+  ['errors', 'errors', 'error'], ['dead', 'dead', 'error'], ['skipped', 'skipped', 'none'],
+];
+function countPills(counts) {
+  const c = counts || {};
+  const pills = RUN_COUNTS.filter(([k]) => Number(c[k]) > 0)
+    .map(([k, label, cls]) => `<span class="badge ${cls}">${esc(c[k])} ${esc(k === 'errors' && Number(c[k]) === 1 ? 'error' : label)}</span>`);
+  return pills.length ? pills.join(' ') : '<span class="dim">no results</span>';
+}
+// Why the server could not describe a run (dashboard/runs.js error codes).
+const RUN_ERRORS = { unreadable: 'could not be parsed', 'too large': 'too large to read', unrecognized: 'not a run log' };
+function modeLabel(r) {
+  if (r.error) return `unreadable log (${RUN_ERRORS[r.error] || r.error})`;
+  if (r.mode === 'incomplete') return 'incomplete (no summary: crashed or still running)';
+  if (r.mode !== 'partial') return 'full run';
+  const f = r.filter || {};
+  const parts = [f.retryFailed ? 'retry failed' : '', f.resume ? 'resume' : '', f.only ? `only ${f.only}` : '', f.skip ? `skip ${f.skip}` : ''].filter(Boolean);
+  return parts.length ? `partial: ${parts.join(', ')}` : 'partial';
+}
+function historyRowHtml(r) {
+  const people = (r.people || []).map(p => `<div class="hist-person"><span class="initials">${esc(p.initials)}</span> ${countPills(p.counts)}</div>`).join('');
+  return `<tr>
+    <td>${esc(fmtDate(r.startedAt))}<div class="dim hist-id">${esc(r.id)}</div></td>
+    <td>${esc(modeLabel(r))}</td>
+    <td>${r.error ? '' : countPills(r.counts)}</td>
+    <td>${people || '<span class="dim">-</span>'}</td>
+    <td><button class="btn run-view" data-run="${esc(r.id)}">View</button></td>
+  </tr>`;
+}
+async function loadHistory(offset) {
+  if (offset !== undefined) historyOffset = Math.max(0, offset);
+  const body = $('#historyTable tbody');
+  try {
+    const r = await api(`/runs?limit=${HISTORY_PAGE}&offset=${historyOffset}`);
+    if (!r || r.error || !Array.isArray(r.runs)) throw new Error((r && r.error) || 'unexpected response');
+    historyOffset = Number.isFinite(r.offset) ? r.offset : historyOffset;
+    let empty = '';
+    if (r.runs.length === 0) {
+      empty = r.total
+        ? '<tr><td colspan="5" class="dim">No runs on this page.</td></tr>'
+        : '<tr><td colspan="5" class="dim">No runs yet - a log is written when a real run finishes (a preview writes none).</td></tr>';
+    }
+    body.innerHTML = empty || r.runs.map(historyRowHtml).join('');
+    $('#historyState').textContent = r.runs.length
+      ? `Showing ${historyOffset + 1}-${historyOffset + r.runs.length} of ${r.total} runs, newest first.` : '';
+    $('#historyNewer').disabled = historyOffset <= 0;
+    $('#historyOlder').disabled = !r.hasMore;
+  } catch (err) {
+    body.innerHTML = `<tr><td colspan="5" class="dim">failed to load run history: ${esc(err && err.message || String(err))}</td></tr>`;
+    $('#historyState').textContent = '';
+  }
+}
+
+let runRows = [];
+function runRowHtml(r) {
+  const host = r.host ? ` <span class="dim">${esc(r.host)}</span>` : '';
+  return `<tr>
+    <td>${esc(r.broker)}${host}</td>
+    <td>${esc(r.initials || '')}</td>
+    <td><span class="badge ${esc(r.key)}">${esc(r.status)}</span></td>
+    <td class="dim">${esc(r.detail)}</td>
+  </tr>`;
+}
+function renderRunRows() {
+  const want = $('#runDetailFilter').value || 'all';
+  const shown = runRows.filter(r => want === 'all' || r.status === want);
+  $('#runDetailTable tbody').innerHTML = shown.map(runRowHtml).join('') || '<tr><td colspan="4" class="dim">no rows</td></tr>';
+}
+async function viewRun(id) {
+  $('#runDetail').classList.remove('hidden');
+  $('#runDetailTitle').textContent = `Run ${id}`;
+  $('#runDetailNote').textContent = '';
+  $('#runDetailTable tbody').innerHTML = '<tr><td colspan="4" class="dim">loading...</td></tr>';
+  let r;
+  try { r = await api('/runs/' + encodeURIComponent(id)); } catch (err) { r = { error: err && err.message || String(err) }; }
+  if (!r || r.error) {
+    runRows = [];
+    $('#runDetailTable tbody').innerHTML = `<tr><td colspan="4" class="dim">${esc((r && r.error) || 'unexpected response')}</td></tr>`;
+    return;
+  }
+  runRows = Array.isArray(r.rows) ? r.rows : [];
+  const statuses = [...new Set(runRows.map(x => x.status))];
+  $('#runDetailFilter').innerHTML = ['<option value="all">all</option>']
+    .concat(statuses.map(s => `<option value="${esc(s)}">${esc(s)}</option>`)).join('');
+  $('#runDetailFilter').value = 'all';
+  $('#runDetailNote').textContent = r.truncated ? `Showing the first ${runRows.length} of ${r.rowCount} results.` : '';
+  renderRunRows();
+}
+$('#historyTable').addEventListener('click', e => {
+  const btn = e.target && e.target.closest ? e.target.closest('[data-run]') : null;
+  if (btn && btn.dataset.run) return viewRun(btn.dataset.run);
+});
+$('#historyNewer').addEventListener('click', () => loadHistory(historyOffset - HISTORY_PAGE));
+$('#historyOlder').addEventListener('click', () => loadHistory(historyOffset + HISTORY_PAGE));
+$('#runDetailFilter').addEventListener('change', renderRunRows);
 
 // ---------- exposure score ----------
 // Build a tiny inline SVG sparkline from numeric history scores only. Every
