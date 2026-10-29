@@ -66,10 +66,21 @@ attacker at all.
 # 1. Encrypt the config at rest. Needs AIDR_PASSPHRASE set when running.
 node watcher.js --encrypt-config
 
-# 2. Confirm the PII files are owner-only. The tool writes 0600, but a file you
-#    copied in from another machine keeps whatever mode it arrived with.
+# 2. Confirm the PII files are owner-only. The tool writes 0600 files in 0700
+#    directories, but a file you copied in from another machine, or a log written
+#    by an older version, keeps whatever mode it arrived with.
 chmod 600 config.json config.json.enc state.json 2>/dev/null
+chmod -R go-rwx logs 2>/dev/null
 ls -l config.json state.json
+
+# 2b. Unattended runs on an encrypted config (cron, launchd, DSM Task Scheduler)
+#     cannot type the passphrase. Put it on the first line of a 0600 file and set
+#     AIDR_PASSPHRASE_FILE to its path instead of leaving AIDR_PASSPHRASE in a
+#     crontab or compose file, where `ps` and `docker inspect` show it. The file
+#     protects a stolen copy of config.json.enc, not someone who can read the
+#     directory it sits in.
+printf '%s\n' 'your passphrase' > ~/.aidr.passphrase && chmod 600 ~/.aidr.passphrase
+export AIDR_PASSPHRASE_FILE=~/.aidr.passphrase
 
 # 3. Use a relay/alias email for submissions rather than your real address.
 #    See docs/relay.md.
@@ -77,6 +88,10 @@ ls -l config.json state.json
 # 4. Never commit config.json or state.json. Both are gitignored; verify with:
 git check-ignore -v config.json state.json
 ```
+
+In Docker, keep everything in one directory (`aidr-home`, see the README), owned
+by the container user (`chown -R 1001:1001`) and not readable by anyone else. It
+is gitignored and dockerignored.
 
 If you run the dashboard, keep it bound to localhost and set `AIDR_USER` /
 `AIDR_PASS`. On a NAS or shared box, assume anything on the LAN can reach an

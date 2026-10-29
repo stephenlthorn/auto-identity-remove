@@ -3,6 +3,17 @@
 # One-off run:        docker compose run --rm watcher
 # Preview only:       docker compose run --rm watcher node watcher.js --dry-run
 #
+# First-time setup, once, from this directory:
+#
+#   mkdir -p aidr-home/logs
+#   cp config.json aidr-home/config.json       # made on a laptop with `node setup.js`
+#   chmod 700 aidr-home && chmod 600 aidr-home/config.json
+#   sudo chown -R 1001:1001 aidr-home          # the image user is uid 1001
+#
+# ./aidr-home is the ONE place this container keeps anything: config, state, the
+# state .bak, .lock and resume .checkpoint, run logs and audit reports. Back it
+# up and treat it like config.json - it is full of PII.
+#
 # For a scheduled monthly run, use cron/systemd on the host (or DSM Task
 # Scheduler on a Synology) to invoke `docker compose run --rm watcher`.
 # docs/SYNOLOGY.md has a worked NAS example.
@@ -13,14 +24,32 @@ services:
     # node runs as PID 1 without this, so `docker stop` cannot reap the Chromium
     # children and the state lock is left behind - wedging the next run.
     init: true
+    # The files in ./aidr-home are 0600. The image user is uid 1001, so they must
+    # be owned by 1001 (the chown above) - or run as whoever owns them instead:
+    #   AIDR_UID=$(id -u) AIDR_GID=$(id -g) docker compose run --rm watcher
+    # (on a Synology: AIDR_UID=1026 AIDR_GID=100 or whatever `id` prints for you).
+    user: "${AIDR_UID:-1001}:${AIDR_GID:-1001}"
     volumes:
-      # Not :ro - config.json is written back by --encrypt-config and by the
-      # right-to-know pending-request bookkeeping.
-      - ./config.json:/app/config.json
-      - ./state.json:/app/state.json
-      - ./logs:/app/logs
+      # Directories only. rename() onto a single-file mount fails with EBUSY, and
+      # then the lock, .bak and checkpoint would live in the container layer.
+      # Never mount over /app/data: it holds the shipped broker datasets.
+      # Not :ro - state, the checkpoint and --encrypt-config all write here.
+      - ./aidr-home:/home/aidr
+      # The run logs, audit reports and snapshots are written under /app/logs.
+      - ./aidr-home/logs:/app/logs
     environment:
       - NODE_ENV=production
+      - AIDR_CONFIG_PATH=/home/aidr/config.json
+      - AIDR_CONFIG_ENC_PATH=/home/aidr/config.json.enc
+      - AIDR_STATE_PATH=/home/aidr/state.json
+      # Encrypted config on a schedule: put the passphrase on the first line of a
+      # 0600 file inside ./aidr-home and uncomment this. See the README. For a
+      # one-off, `docker compose run --rm -e AIDR_PASSPHRASE watcher ...` works.
+      # - AIDR_PASSPHRASE_FILE=/home/aidr/aidr.passphrase
+      # A uid with no passwd entry has no writable home, and Chromium wants one
+      # for its profile. /tmp is thrown away with the container, which is what
+      # you want: broker-site cookies should not outlive a run.
+      - HOME=/tmp
       # Container clocks are UTC. The scheduler and the report timestamps use
       # local time, so set this to your zone or a "1st of the month, 9am" run
       # lands at the wrong hour.

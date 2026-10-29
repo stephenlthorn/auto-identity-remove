@@ -16,6 +16,7 @@ are measured, not estimated.
 | `docker build` aborted | `groupadd: GID '1001' already exists` - the Dockerfile created a user at uid/gid 1001, which the official Playwright base image already uses for `pwuser`. The image never built, for anyone. |
 | Browser could not launch | The base image was pinned to Playwright v1.52.0 (ships chromium build 1169) while `npm ci` installed the Playwright client 1.60.0 (needs build 1223). Even with the build fixed, every run died with `Executable doesn't exist at /ms-playwright/chromium-1223/...`. |
 | No state was ever saved | Every durable write is tmp-file + `rename()`. `rename()` onto a Docker **single-file** bind mount returns `EBUSY`, and the documented recipe mounted `state.json` exactly that way. Nothing persisted, so each scheduled run re-submitted every broker from scratch. |
+| The documented recipe still could not work | It mounted the project over `/app/data` (hiding the shipped broker datasets), never told the app where `config.json` was, left the lock, `.bak` and resume checkpoint in the throwaway container layer, and ignored that the container runs as uid 1001 while DSM files you create are owned by your own uid (1026 for the first admin) at mode `0600`: `EACCES` on the config. Step 3 and 4 below fix all of it. |
 
 `test/docker-build-contract.test.js` and the `docker` job in CI now build the
 image and launch a real browser on every push, so this class of failure cannot
@@ -73,33 +74,58 @@ cd auto-identity-remove
 
 ### 2. Create your config on a machine with a browser
 
-Run `node setup.js` on your laptop, then copy the resulting `config.json` to the
-NAS. The wizard is interactive and wants a browser for the account-creation
-steps, so it is not a good fit for a headless NAS.
+Run `node setup.js` on your laptop, then copy the resulting `config.json` into a
+new `aidr-home` directory on the NAS. The wizard is interactive and wants a
+browser for the account-creation steps, so it is not a good fit for a headless
+NAS.
 
 ```bash
-scp config.json admin@nas.local:/volume1/docker/auto-identity-remove/
+ssh admin@nas.local 'mkdir -p /volume1/docker/auto-identity-remove/aidr-home/logs'
+scp config.json admin@nas.local:/volume1/docker/auto-identity-remove/aidr-home/
 ```
 
-### 3. Lock down the files
+`aidr-home` is the one place the container keeps anything: your config,
+`state.json` and its `.bak`, `.lock` and resume `.checkpoint`, and (through a
+second mount) the run logs. Back it up and treat it like `config.json`.
+
+### 3. Lock down the files and give the container access
 
 `config.json` holds your legal name, home address, phone and API keys. On a NAS
-with family accounts this matters more than on a laptop:
+with family accounts this matters more than on a laptop. The container runs as
+uid 1001, so the directory has to belong to it:
 
 ```bash
-chmod 600 config.json
-touch state.json && chmod 600 state.json
+cd /volume1/docker/auto-identity-remove
+chmod 700 aidr-home && chmod 600 aidr-home/config.json
+sudo chown -R 1001:1001 aidr-home
 ```
 
-The tool now writes both files `0600` itself, but the copy you scp'd in has
-whatever mode it arrived with.
+The tool writes its own files `0600` too, but the copy you scp'd in has whatever
+mode it arrived with. If you would rather not hand the files to uid 1001, leave
+them yours and run the container as you instead: `AIDR_UID=$(id -u)
+AIDR_GID=$(id -g) docker compose run ...` (compose passes it as `user:`), or
+`--user "$(id -u):$(id -g)"` with `docker run`. Without one of the two, the first
+run fails with `EACCES` reading `config.json`.
+
+**Encrypted config on a schedule.** If you ran `--encrypt-config`, DSM Task
+Scheduler has no terminal to type the passphrase into. Put it on the first line
+of a `0600` file inside `aidr-home` and point `AIDR_PASSPHRASE_FILE` at it:
+
+```bash
+printf '%s\n' 'your passphrase' > aidr-home/aidr.passphrase
+chmod 600 aidr-home/aidr.passphrase && sudo chown 1001:1001 aidr-home/aidr.passphrase
+# then uncomment AIDR_PASSPHRASE_FILE=/home/aidr/aidr.passphrase in docker-compose.yml
+```
+
+The file sits next to the config it unlocks, so it protects a stolen copy of
+`config.json.enc`, not someone who can read the whole directory.
 
 ### 4. Mount the directory, not individual files
 
 This is the one thing to get right. Mounting `state.json` as a file breaks
-atomic writes (`EBUSY`, see above). There is now a fallback that keeps state
-working anyway, but it gives up crash-atomicity - so mount the directory and
-keep the guarantee:
+atomic writes (`EBUSY`, see above) and leaves the lock, `.bak` and checkpoint in
+the container layer. Mounting anything over `/app/data` hides the shipped broker
+datasets. Mount `aidr-home` and point the app inside it:
 
 ```bash
 docker build -t auto-identity-remove .
@@ -107,13 +133,17 @@ docker build -t auto-identity-remove .
 docker run --rm --init \
   -e TZ=America/New_York \
   -e AIDR_LOW_MEMORY=1 \
-  -v /volume1/docker/auto-identity-remove:/app/data \
-  -e AIDR_STATE_PATH=/app/data/state.json \
+  -v /volume1/docker/auto-identity-remove/aidr-home:/home/aidr \
+  -v /volume1/docker/auto-identity-remove/aidr-home/logs:/app/logs \
+  -e AIDR_CONFIG_PATH=/home/aidr/config.json \
+  -e AIDR_CONFIG_ENC_PATH=/home/aidr/config.json.enc \
+  -e AIDR_STATE_PATH=/home/aidr/state.json \
+  -e HOME=/tmp \
   --memory=1g \
   auto-identity-remove node watcher.js --dry-run
 ```
 
-Or with compose, from the project directory:
+Or with compose, from the project directory, which already carries all of that:
 
 ```bash
 TZ=America/New_York AIDR_LOW_MEMORY=1 docker compose run --rm watcher node watcher.js --dry-run
@@ -121,6 +151,11 @@ TZ=America/New_York AIDR_LOW_MEMORY=1 docker compose run --rm watcher node watch
 
 Always do a `--dry-run` first. It navigates and confirms the brokers are
 reachable without submitting anything.
+
+Not everything is kept: `serp-history.json`, `exposure-history.json` and
+`feeds-brokers.json` are written under `/app/data` inside the container and do
+not survive `--rm` (see the README's table of what persists). Opt-outs, state,
+resume and logs are unaffected.
 
 ### 5. Schedule it
 
@@ -133,7 +168,10 @@ cd /volume1/docker/auto-identity-remove && /usr/local/bin/docker compose run --r
 ```
 
 Check the docker path with `which docker` over SSH; DSM has moved it between
-versions.
+versions. The task runs as root by default, but the container itself still runs
+as the `user:` in `docker-compose.yml` (uid 1001 unless you set `AIDR_UID`), so
+`aidr-home` must belong to that uid. On an encrypted config the task needs
+`AIDR_PASSPHRASE_FILE` (step 3); it has no terminal to ask.
 
 ## Settings that matter on a small box
 
@@ -142,6 +180,7 @@ versions.
 | `AIDR_LOW_MEMORY=1` | Adds `--disable-gpu`, `--no-zygote` and friends. Saved ~13 MB peak in testing - small, but it also cuts background work on slow cores. |
 | `TZ=<your zone>` | Containers are UTC. Without this a "1st of the month, 9am" schedule and every report timestamp land in the wrong hour. |
 | `--init` / `init: true` | Otherwise node is PID 1, `docker stop` cannot reap the Chromium children, and the state lock is left behind - wedging the next run. |
+| `user:` / `--user` | The image runs as uid 1001. Either `chown -R 1001:1001 aidr-home` or run as your own uid, otherwise `EACCES` on the config and on every state write. Keep `HOME=/tmp` when you override it. |
 | `--memory=1g` | Not required (peak is ~250 MB) but it turns a runaway into a container restart instead of DSM killing something else. |
 | `shm_size` | The compose file sets 512 MB. Not strictly needed - the code passes `--disable-dev-shm-usage`, so a plain `docker run` with the default 64 MB `/dev/shm` works - but real shared memory is faster. |
 
@@ -165,9 +204,11 @@ docker run --rm auto-identity-remove node -e \
 # Does the image agree with the client about Playwright versions?
 docker run --rm auto-identity-remove sh -c 'ls /ms-playwright; node -p "require(\"playwright-core/package.json\").version"'
 
-# Is state actually being written?
+# Is state actually being written? (look for aidr-home/state.json afterwards,
+# then delete the "probe" entry from it - or just `rm aidr-home/state.json` if
+# this is a brand new install)
 docker compose run --rm watcher node -e \
-  "const c=require('/app/lib/config');c.recordSuccess('probe','t');c.saveState();console.log('state write OK')"
+  "const c=require('/app/lib/config');c.recordSuccess('probe','t');c.saveState();console.log('state write OK ->', c.getStatePath())"
 ```
 
 If you have a DS720+ and run this, please report back on

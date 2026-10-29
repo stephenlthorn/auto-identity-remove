@@ -16,7 +16,9 @@
     "generic-runner.js",
     "run.sh",
     "config.example.json",
-    "data/",
+    "data/badbool-extra.json",
+    "data/dead-urls.json",
+    "data/markup-parsed.json",
     "README.md"
   ],
   "scripts": {
@@ -30,6 +32,7 @@
   },
   "dependencies": {
     "axios": "^1.7.2",
+    "express": "^4.21.2",
     "playwright": "1.60.0"
   },
   "optionalDependencies": {

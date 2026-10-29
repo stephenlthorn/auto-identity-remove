@@ -141,59 +141,124 @@ The `Dockerfile` uses the official Playwright image, so Chromium and all system
 dependencies are pre-installed. No Mac required. Builds for `linux/amd64` and
 `linux/arm64`; the amd64 image is about 940 MB.
 
-```bash
-# Build the image (once)
-docker build -t auto-identity-remove .
+### One directory holds everything
 
+Keep everything the container must remember in a single host directory,
+`aidr-home/`, and mount that. It holds your config, `state.json` and its `.bak`,
+`.lock` and resume `.checkpoint`, and (through a second mount) the run logs.
+Back it up and treat it like `config.json`: it is full of PII.
+
+```bash
+# Once, from the project directory
+mkdir -p aidr-home/logs
+cp config.json aidr-home/config.json        # made on a laptop with `node setup.js`
+chmod 700 aidr-home && chmod 600 aidr-home/config.json
+sudo chown -R 1001:1001 aidr-home           # the container user is uid 1001
+
+docker build -t auto-identity-remove .
+```
+
+```bash
 # Dry-run - navigates and checks reachability, submits nothing
 docker run --rm --init \
-  -v "$(pwd)/config.json:/app/config.json" \
-  -v "$(pwd)/state.json:/app/state.json" \
-  -v "$(pwd)/logs:/app/logs" \
+  -v "$(pwd)/aidr-home:/home/aidr" \
+  -v "$(pwd)/aidr-home/logs:/app/logs" \
+  -e AIDR_CONFIG_PATH=/home/aidr/config.json \
+  -e AIDR_CONFIG_ENC_PATH=/home/aidr/config.json.enc \
+  -e AIDR_STATE_PATH=/home/aidr/state.json \
+  -e HOME=/tmp \
   -e TZ="$(date +%Z)" \
   auto-identity-remove node watcher.js --dry-run
 
-# Full run
-docker run --rm --init \
-  -v "$(pwd)/config.json:/app/config.json" \
-  -v "$(pwd)/state.json:/app/state.json" \
-  -v "$(pwd)/logs:/app/logs" \
-  -e TZ="$(date +%Z)" \
-  auto-identity-remove
+# Full run: the same command without the trailing `node watcher.js --dry-run`
 ```
 
-Or with compose: `docker compose run --rm watcher node watcher.js --dry-run`.
+Or with compose, which already carries all of those mounts and variables:
+`docker compose run --rm watcher node watcher.js --dry-run`.
 
-**Create `state.json` before the first run** - `touch state.json` is enough. If
-the path does not exist, Docker creates a *directory* there and the run fails on
-a confusing `EISDIR`.
+**Why a directory, and why not `/app/data`.**
+- `rename()` onto a Docker single-file bind mount fails with `EBUSY`. A mounted
+  `state.json` forces a non-atomic fallback, and the lock, `.bak` and
+  `.checkpoint` that sit beside it would live in the container's throwaway
+  layer: `--resume` could never find a checkpoint and two containers could not
+  see each other's lock. A mounted directory has none of those problems.
+- `/app/data` holds the broker datasets that ship with the image
+  (`markup-parsed.json`, `badbool-extra.json`, `dead-urls.json`). Mounting
+  anything over it hides them and the generic runner loses its broker list.
+
+**The container runs as uid 1001** (`pwuser`), and the files above are mode
+`0600` and owned by you, so without help the container gets `EACCES` on
+`config.json` and on every state write. Pick one:
+
+- `sudo chown -R 1001:1001 aidr-home` (shown above), or
+- run as the directory's owner instead: add `--user "$(id -u):$(id -g)"` to
+  `docker run`, or `AIDR_UID=$(id -u) AIDR_GID=$(id -g) docker compose run ...`.
+  Keep `-e HOME=/tmp`; an arbitrary uid has no writable home directory.
 
 **`--init` matters.** Without it node is PID 1, `docker stop` cannot reap the
-Chromium children, and the state lock is left behind, wedging the next run.
+Chromium children, and the state lock is left behind, wedging the next run. If a
+run is killed anyway, `aidr-home/state.json.lock` can be left behind; delete it
+once you are sure no run is active.
 
 **`TZ` matters.** Containers are UTC. Without it a "1st of the month, 9am"
 schedule and every report timestamp land in the wrong hour.
-
-**Prefer mounting a directory over individual files.** `rename()` onto a Docker
-single-file bind mount fails with `EBUSY`, which is how every state write in
-Docker used to be silently discarded. There is now a fallback that keeps state
-working with file mounts, but it gives up crash-atomicity. To keep the
-guarantee, mount a directory and point `AIDR_STATE_PATH` inside it:
-
-```bash
-docker run --rm --init \
-  -v "$(pwd):/app/data" \
-  -e AIDR_STATE_PATH=/app/data/state.json \
-  auto-identity-remove
-```
 
 **Low-RAM hosts** (NAS, Raspberry Pi, small VPS): add `-e AIDR_LOW_MEMORY=1`. A
 full 40-broker run peaks at about 250 MB either way; the flag trades some render
 fidelity for less background work on slow cores.
 
+#### What survives a `--rm` container, and what does not
+
+| Path in the container | Persists? | Notes |
+|---|---|---|
+| `/home/aidr/config.json` or `config.json.enc` | yes | the mounted directory |
+| `/home/aidr/state.json`, `.bak`, `.lock`, `.checkpoint` | yes | the mounted directory |
+| `/app/logs` (run logs, audit reports, snapshots, complaints, reports) | yes | the second mount, `aidr-home/logs` |
+| `/app/inbox` (confirmation `.eml` files for `--confirm-emails`) | no | pass a directory inside the mount: `--confirm-emails /home/aidr/inbox` |
+| `/app/data/serp-history.json`, `exposure-history.json`, `feeds-brokers.json` | no | see below |
+| the Chromium profile (`~/.config/auto-identity-remove`) | no | set `profileDir` in the config to a path under `/home/aidr` if you want it kept |
+
+The three history and cache files under `/app/data` are written next to the
+shipped datasets, and that directory cannot be mounted over. Until they can be
+pointed elsewhere they do not survive a container: `--serp-watch` has nothing to
+diff against, the exposure score has no trend, and `--update-brokers` has no
+lasting effect. Opt-outs, state, resume and logs are unaffected.
+
+A relative `email.smtp.ca` path resolves against `/app`; use an absolute path
+under `/home/aidr` for a certificate you keep in the mounted directory.
+
 > **Synology / NAS users:** see [docs/SYNOLOGY.md](docs/SYNOLOGY.md) for a full
 > DSM Container Manager walkthrough, measured memory numbers, DSM Task Scheduler
 > setup, and the three defects that used to make the container unusable.
+
+### Encrypted config and unattended runs
+
+`node watcher.js --encrypt-config` replaces `config.json` with `config.json.enc`
+(AES-256-GCM). Every later run needs the passphrase. For a one-off, set
+`AIDR_PASSPHRASE` in the environment. A scheduled job has no terminal and never
+sets it, so give it a file instead:
+
+```bash
+printf '%s\n' 'your passphrase' > aidr-home/aidr.passphrase
+chmod 600 aidr-home/aidr.passphrase && sudo chown 1001:1001 aidr-home/aidr.passphrase
+# then add to the environment of the run (compose: uncomment the line):
+#   AIDR_PASSPHRASE_FILE=/home/aidr/aidr.passphrase
+```
+
+`AIDR_PASSPHRASE_FILE` points at a `0600` file whose first line is the
+passphrase; it is read only when `AIDR_PASSPHRASE` is unset. Be clear about what
+it buys you: a passphrase file next to the encrypted config protects a stolen
+copy of `config.json.enc` (a backup, a cloud sync), not someone who can read the
+whole directory. Keep the two in directories with different access if that
+matters to you. Both `*.passphrase` and `aidr-home/` are gitignored and
+dockerignored.
+
+To encrypt inside Docker:
+
+```bash
+AIDR_PASSPHRASE='your passphrase' docker compose run --rm -e AIDR_PASSPHRASE \
+  watcher node watcher.js --encrypt-config
+```
 
 ### Webhook notifications (any OS)
 
@@ -404,23 +469,22 @@ Or to run in the background and log output:
 
 ### Verifying removals (`--verify`)
 
-Run a read-only spot-check to see whether previous opt-outs are still in effect:
+Re-search the brokers to see whether previous opt-outs are still in effect:
 
 ```bash
 node watcher.js --verify
 ```
 
-This opens a browser, searches each broker where you have a recorded successful opt-out, and reports what it finds. No forms are submitted, nothing is written to `state.json`.
+This opens a browser and, for each broker where a submission was recorded at least 7 days ago, searches for your listing. No forms are submitted. It **does** write to `state.json`: each checked entry gets `verifiedDeletedAt` (not found) or `verifiedStillListedAt` (found) plus a short `verifyHistory`, which is what `aidr report`, `aidr score` and `aidr complaints` read. It writes no report file; the result is printed to the console only.
 
-Output is grouped into three sections:
+The console shows a count for each outcome, then lists every broker that is still listed:
 
-| Section | Meaning |
+| Outcome | Meaning |
 |---------|---------|
-| `VERIFIED CLEAR` | Your name was not found in the broker's search today |
-| `STILL LISTED` | A listing was found - the opt-out may have failed, or your data was re-added |
-| `UNVERIFIABLE` | The broker uses a direct-form, email, or manual method - no automated search signal exists to check |
-
-A dated JSON report is saved to `logs/verify-YYYY-MM-DD.json`.
+| `verified_clear` | Your name was not found in the broker's search today |
+| `still_listed` | A listing was found - the opt-out may have failed, or your data was re-added |
+| `unverifiable` | The broker uses a direct-form, email, or manual method (no automated search signal exists), or its search page could not be read |
+| `skipped` | Nothing to check yet: no recorded submission, submitted fewer than 7 days ago, already verified since the last submission, or allowlisted |
 
 **Important caveats:**
 

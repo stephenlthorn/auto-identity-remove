@@ -41,6 +41,29 @@ Your `config.json` is listed in `.gitignore` and is never committed to version c
 
 ---
 
+## Where your data sits on disk
+
+Everything below stays on your machine. The tool creates these files owner-only
+(`0600`) inside directories it creates `0700`, and tightens a file or directory
+an older version left looser the next time it writes it. A file you copy in
+yourself keeps whatever mode it arrived with, so check it (see
+[SECURITY.md](../SECURITY.md)).
+
+| Path | Holds |
+|---|---|
+| `config.json` / `config.json.enc` | your identity details and API keys (the `.enc` form is AES-256-GCM, see `AIDR_PASSPHRASE` / `AIDR_PASSPHRASE_FILE`) |
+| `state.json`, `.bak`, `.checkpoint` | which brokers you contacted, when, and the outcome |
+| `logs/run-*.json` | one run's results: broker names, outcomes, and per-person tags in a multi-person run |
+| `logs/audit-*.md` | a readable record of who asked which broker to remove what |
+| `logs/snapshots/*.png` | screenshots of each opt-out form as it was filled in |
+| `logs/complaints/`, `logs/reports/` | regulator complaints and monthly reports |
+| `inbox/` | raw confirmation emails when `--confirm-emails` is used |
+
+In Docker all of this lives in the one `aidr-home` directory you mount, apart
+from the three history and cache files under `/app/data` (see the README).
+
+---
+
 ## What data is NOT sent
 
 - No telemetry or usage analytics
@@ -122,7 +145,7 @@ git ls-files | grep -E 'config|state'
 # any network requests
 node watcher.js --dry-run --preview
 
-# Re-check your opt-out status on all brokers in read-only mode
-# (no form submissions, no state changes)
+# Re-check your opt-out status on all brokers. No forms are submitted;
+# the outcome of each check is recorded in state.json
 node watcher.js --verify
 ```
