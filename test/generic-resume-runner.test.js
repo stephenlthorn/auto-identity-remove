@@ -245,6 +245,11 @@ test('writes are throttled to one per second, and the last row is always written
   assert.deepEqual(checkpoints.map(c => c.index), [0, 3, 4]);
 });
 
+test('a clock that steps backwards does not mute the checkpoint', async () => {
+  const { checkpoints } = await pass({ now: clock([10000, 9000, 8000, 7000, 6000]) });
+  assert.deepEqual(checkpoints.map(c => c.index), [0, 1, 2, 3, 4], 'every row is due once time runs backwards');
+});
+
 test('a burst of instant rows writes the first and, at the end, the last', async () => {
   const { checkpoints } = await pass({ now: () => 0 });
   assert.deepEqual(checkpoints.map(c => c.index), [0, 4]);

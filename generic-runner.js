@@ -16,7 +16,9 @@
  *         categories and save
  *      c. an opt-out / deletion / privacy-request <form> -> fill it and click ITS
  *         submit control. Never a newsletter / login / search / contact / checkout
- *         form, never for a row classified manual or pointing at a bare homepage
+ *         form, never for a row classified manual or pointing at a bare homepage.
+ *         A CAPTCHA in front of the form goes to opts.handleCaptcha first; if it is
+ *         not cleared (or there is no handler) the row is captcha_failed, unsent
  *      d. a DSAR / privacy-request link -> hand it to the user
  *   4. If nothing automatable -> manual list
  *
@@ -25,7 +27,11 @@
  * error text -> error, confirmation-email wording -> pending_confirm, anything
  * else -> unverified (no 90-day cooldown).
  *
- * Returns: { count, genericStats }
+ * Returns: { count, genericStats, resumeSkipped }
+ *
+ * --resume: opts.resumeFrom { index, key } skips the rows already done, and
+ * opts.saveCheckpoint(record) is called as the loop advances so a kill leaves a
+ * resume point (see resolveResumeStart and lib/config.js planResume).
  */
 
 'use strict';
@@ -1481,7 +1487,9 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
     if (dryRun || typeof opts.saveCheckpoint !== 'function') return;
     const record = { phase: 'generic', personIndex: opts.personIndex === undefined ? 0 : opts.personIndex, key: keyFor(broker.name), index };
     const at = checkpointClock();
-    if (at - lastCheckpointAt < CHECKPOINT_MIN_INTERVAL_MS) { pendingCheckpoint = record; return; }
+    // A clock that stepped backwards (NTP) must not mute checkpoints until it catches up.
+    const sinceLast = at - lastCheckpointAt;
+    if (sinceLast >= 0 && sinceLast < CHECKPOINT_MIN_INTERVAL_MS) { pendingCheckpoint = record; return; }
     lastCheckpointAt = at;
     writeCheckpoint(record);
   };
