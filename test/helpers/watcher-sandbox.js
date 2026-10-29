@@ -130,6 +130,8 @@ function createSandbox(options = {}) {
     readState: () => JSON.parse(fs.readFileSync(paths.state, 'utf8')),
     fakeEvents: () => readLines(paths.fakeLog).map(line => JSON.parse(line)),
     notificationCalls: () => readLines(paths.notifications),
+    // Lookups, fetches and navigations the run attempted (all refused by the fake).
+    networkAttempts: () => readLines(paths.fakeLog).map(line => JSON.parse(line)).filter(e => ['dns', 'fetch', 'goto'].includes(e.event)),
     runLogs: () => (fs.existsSync(paths.logs) ? fs.readdirSync(paths.logs).filter(f => /^run-.*\.json$/.test(f)) : []),
     cleanup: () => fs.rmSync(dir, { recursive: true, force: true }),
   };

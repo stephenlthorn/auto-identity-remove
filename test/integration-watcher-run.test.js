@@ -55,7 +55,7 @@ test('a run launches the browser once, closes it, writes private logs and releas
     const events = sandbox.fakeEvents().map(e => e.event);
     assert.equal(events.filter(e => e === 'launch').length, 1);
     assert.ok(events.includes('close'), 'the browser context is closed');
-    assert.equal(events.includes('goto'), false, 'a filter that matches nothing must navigate nowhere');
+    assert.deepEqual(sandbox.networkAttempts(), [], 'a filter that matches nothing must reach nowhere');
     assert.equal(fs.existsSync(sandbox.lock), false, 'the lock is released');
 
     // Both persons ran, in the same run.
@@ -149,6 +149,7 @@ test('--retry-failed re-runs the last log\'s errors AND unconfirmed submissions,
     assert.equal(body.partial, true);
     assert.equal(body.filter.retryFailed, true);
     assert.equal(body.genericStats.attempted, 0, 'the generic pass honours the filter too');
+    assert.deepEqual(sandbox.networkAttempts(), [], 'not one DNS lookup, fetch or navigation');
   });
 });
 
@@ -233,6 +234,7 @@ test('relay.failOpen: true is the explicit opt-in to the real address, with a lo
     assert.match(r.stderr, /relay\.failOpen is true, so your REAL email address is being sent/);
     const { body } = readRunLog(sandbox);
     assert.equal(body.skipped.filter(e => e.broker === 'Spokeo').length, 2, 'both persons ran');
+    assert.deepEqual(sandbox.networkAttempts(), []);
   });
 });
 
@@ -248,6 +250,37 @@ test('a cached alias is used for every path and no second one is created', async
     assert.match(r.stdout, new RegExp(`Using masked email for ${ADA}'s submissions: ada\\.alias@relay\\.test`));
     assert.match(r.stdout, new RegExp(`Using masked email for ${ALAN}'s submissions: alan\\.alias@relay\\.test`));
     assert.deepEqual(sandbox.readState().relayAliases, state.relayAliases);
+    assert.deepEqual(sandbox.networkAttempts(), [], 'the cached alias means no call to the relay provider');
+  });
+});
+
+test('the generic pass gets each person\'s own alias, index and the run\'s include test', async () => {
+  const config = runnableConfig({ relay: { provider: 'simplelogin', apiKey: 'k' } });
+  const state = {
+    optOuts: {},
+    relayAliases: { 'ada@lovelace-test.example': 'ada.alias@relay.test', 'alan@turing-test.example': 'alan.alias@relay.test' },
+  };
+  await inSandbox({ config, state }, async (sandbox) => {
+    const r = await runWatcher(sandbox, ['--only', 'zzz-no-such-broker']);
+    assert.equal(r.code, 0, r.stderr);
+
+    const generic = sandbox.fakeEvents().filter(e => e.event === 'generic');
+    assert.deepEqual(generic.map(e => [e.person, e.personIndex, e.personCount, e.submissionEmail]), [
+      [ADA, 0, 2, 'ada.alias@relay.test'],
+      [ALAN, 1, 2, 'alan.alias@relay.test'],
+    ], 'the masked address, never person.email, reaches every generic form');
+    for (const e of generic) {
+      assert.deepEqual(e.includeNamed, ['zzz-no-such-broker'], '--only is applied to the generic pass');
+      assert.ok(e.explicitBrokers > 10, 'the explicit list is passed so same-company rows are not run twice');
+    }
+  });
+});
+
+test('without a relay the generic pass uses each person\'s own email', async () => {
+  await inSandbox({}, async (sandbox) => {
+    await runWatcher(sandbox, ['--only', 'zzz-no-such-broker']);
+    const generic = sandbox.fakeEvents().filter(e => e.event === 'generic');
+    assert.deepEqual(generic.map(e => e.submissionEmail), ['ada@lovelace-test.example', 'alan@turing-test.example']);
   });
 });
 
