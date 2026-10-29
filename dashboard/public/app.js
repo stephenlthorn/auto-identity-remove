@@ -384,6 +384,7 @@ $$('.btn-clear-secret').forEach(btn => {
 
 function collectConfigForm() {
   const cfg = {};
+  const stored = formView(loadedConfig);
   $$('#configForm input').forEach(inp => {
     let v = inp.value;
     // Skip only the mask sentinel (untouched secret fields - preserve on server).
@@ -391,15 +392,15 @@ function collectConfigForm() {
     if (v === MASK) return;
     if (inp.name === 'person.aliases' || inp.name === 'allowlist') v = v.split(',').map(s => s.trim()).filter(Boolean);
     if (inp.name === 'email.smtp.port') v = parseInt(v, 10) || v;
+    // A blank for a field the stored config never had clears nothing, so it is
+    // not sent. Sending it is how a blank SMTP form became email.smtp:{host:'',
+    // port:'',...} - which the runtime reads as "send through SMTP" and then
+    // errors on every email. A field that exists is still sent blank, so
+    // emptying the form clears it. (The server also refuses to store a blank
+    // section, for clients other than this page.)
+    if (isBlank(v) && getPath(stored, inp.name) == null) return;
     setPath(cfg, inp.name, v);
   });
-  // A blank SMTP section the stored config never had is not sent at all. (The
-  // server also refuses to store one, because the runtime reads a bare
-  // email.smtp as "send through SMTP" and a blank host then errors every email.)
-  // A section that DOES exist is still sent blank, so blanking the form clears it.
-  const hadSmtp = !!(loadedConfig.email && loadedConfig.email.smtp);
-  if (cfg.email && cfg.email.smtp && isBlank(cfg.email.smtp) && !hadSmtp) delete cfg.email.smtp;
-  if (cfg.email && isBlank(cfg.email) && !loadedConfig.email) delete cfg.email;
   return cfg;
 }
 const putConfig = (cfg, overwrite) => api('/config', {

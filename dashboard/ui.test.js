@@ -184,6 +184,31 @@ test('DASH-4: blanking an existing SMTP section is still sent, so it can be clea
   assert.equal(put.body.config.email.smtp.pass, '');
 });
 
+test('DASH-4: blank inputs for fields the stored config never had are not sent at all', async () => {
+  const app = await loadApp({
+    routes: { '/config': { exists: true, config: PERSONS_CONFIG }, '/config/status': { configured: true, missing: [] }, '/summary': {}, '/brokers': [] },
+    configInputs: [...CONFIG_INPUTS, 'person.fullName', 'notify.webhook'],
+  });
+  await app.run('loadConfig()');
+  await app.els('#saveConfig').click();
+  const [put] = putRequests(app);
+  assert.equal(put.body.config.person.fullName, undefined, 'no fullName:"" written into persons[0]');
+  assert.equal(put.body.config.notify, undefined);
+  assert.equal(put.body.config.allowlist, undefined);
+  assert.equal(put.body.config.email, undefined);
+});
+
+test('a field that exists can still be cleared by emptying it', async () => {
+  const app = await loadApp({
+    routes: { '/config': { exists: true, config: PERSONS_CONFIG }, '/config/status': { configured: true, missing: [] }, '/summary': {}, '/brokers': [] },
+    configInputs: CONFIG_INPUTS,
+  });
+  await app.run('loadConfig()');
+  app.input(app.configEls, 'person.city').value = '';
+  await app.els('#saveConfig').click();
+  assert.equal(putRequests(app)[0].body.config.person.city, '');
+});
+
 // ---- DASH-1 ---------------------------------------------------------------------
 
 test('DASH-1: an unreadable config asks before it is replaced, then resends with overwrite', async () => {
