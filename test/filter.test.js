@@ -42,9 +42,12 @@ test('applyFilter with only returns matching brokers', () => {
   assert.deepEqual(result.map(b => b.name), ['A', 'C']);
 });
 
-test('applyFilter with only is case-sensitive', () => {
+// Was "is case-sensitive": `--only spokeo` silently matched nothing. The shared
+// broker predicate (CORE-4) is case-insensitive, and applyFilter now uses it so
+// the explicit list and the generic/email passes can never disagree.
+test('applyFilter with only is case-insensitive', () => {
   const result = applyFilter(ALL, { only: 'a,c' });
-  assert.equal(result.length, 0);
+  assert.deepEqual(result.map(b => b.name), ['A', 'C']);
 });
 
 test('applyFilter with only single broker returns one broker', () => {
