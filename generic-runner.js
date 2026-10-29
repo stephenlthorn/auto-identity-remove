@@ -853,13 +853,70 @@ async function clickFormSubmit(form) {
   }
 }
 
+// ─── CAPTCHA in front of a form (R2, the generic side of R1's contract) ───────
+//
+// A CAPTCHA the runner does not clear makes the broker reject the submit, and a
+// run that guesses at the outcome has nothing to base it on. So the form is
+// checked before it is sent; opts.handleCaptcha (lib/manual-captcha.js, via the
+// watcher) clears it, and without one the broker is reported captcha_failed.
+
+// Inside the form: a challenge frame, its container, or the hidden response field
+// the widget writes its token to. Any of them means the submit needs a token.
+const CAPTCHA_IN_FORM_SELECTOR = [
+  'iframe[src*="recaptcha"]', 'iframe[src*="hcaptcha"]', 'iframe[src*="challenges.cloudflare.com"]',
+  '.g-recaptcha', '.h-captcha', '.cf-turnstile', '[data-sitekey]',
+  'textarea[name="g-recaptcha-response"]', 'textarea[name="h-captcha-response"]', 'input[name="cf-turnstile-response"]',
+].join(', ');
+
+// Beside the form: only a widget loose on the page (not inside some OTHER form) and
+// a visible one. The reCAPTCHA v3 badge, an invisible v2 button and a newsletter
+// form's own widget are on the page without guarding this form, and treating them as
+// a CAPTCHA would block a form that can be sent.
+const CAPTCHA_ON_PAGE_SELECTOR = [
+  'iframe[src*="recaptcha"]:not([src*="size=invisible"])', 'iframe[src*="hcaptcha"]', 'iframe[src*="challenges.cloudflare.com"]',
+  '.g-recaptcha:not(button):not(input):not([data-size="invisible"])', '.h-captcha:not([data-size="invisible"])', '.cf-turnstile',
+].map(sel => `${sel}:not(form *)`).join(', ');
+
+/**
+ * Does the form about to be submitted have a CAPTCHA widget? A detector that
+ * throws (a closing page) answers no: today's behaviour, and the post-submit check
+ * still judges the result.
+ */
+async function hasCaptchaWidget(page, form) {
+  try {
+    if ((await form.locator(CAPTCHA_IN_FORM_SELECTOR).count()) > 0) return true;
+  } catch (_) {}
+  try {
+    const loose = page.locator(CAPTCHA_ON_PAGE_SELECTOR).first();
+    if ((await loose.count()) > 0 && (await loose.isVisible())) return true;
+  } catch (_) {}
+  return false;
+}
+
+/**
+ * Run the CAPTCHA handler. Only 'none' (nothing to solve) and 'solved' clear the
+ * form; every other answer, an unknown one and a throw included, does not: a form
+ * submitted into an unsolved CAPTCHA is how a run ends up guessing.
+ * @returns {Promise<{ cleared: boolean, detail?: string }>}
+ */
+async function clearCaptcha(handleCaptcha, page, broker) {
+  try {
+    const outcome = await handleCaptcha(page, { broker });
+    if (outcome === 'none' || outcome === 'solved') return { cleared: true };
+    const why = typeof outcome === 'string' && outcome ? outcome : 'unexpected result';
+    return { cleared: false, detail: `CAPTCHA not solved (${why}) - finish this one by hand` };
+  } catch (err) {
+    return { cleared: false, detail: `CAPTCHA handling failed (${((err && err.message) || 'error').slice(0, 60)}) - finish this one by hand` };
+  }
+}
+
 /**
  * Find the opt-out form on the page, fill it, click ITS submit control, and judge
  * the outcome from the text that appeared. Returns null when no eligible form
  * with a fillable field exists, so the caller can fall through to the next
  * strategy; otherwise a { status, detail } result.
  */
-async function submitOptOutForm(page, { person, submissionEmail, checkUrl, formCtx = {}, label }) {
+async function submitOptOutForm(page, { person, submissionEmail, checkUrl, formCtx = {}, label, broker, handleCaptcha }) {
   const found = await describeForms(page);
   if (found.length === 0) return null;
 
@@ -885,8 +942,22 @@ async function submitOptOutForm(page, { person, submissionEmail, checkUrl, formC
       if (!target.ok) { skipped.push(`form posts to a blocked address (${target.reason})`); continue; }
     }
 
+    // Look before typing: with nothing to clear a CAPTCHA, the person's details are
+    // not typed into a form that cannot be sent.
+    const captcha = await hasCaptchaWidget(page, locator);
+    if (captcha && typeof handleCaptcha !== 'function') {
+      return { status: 'captcha_failed', detail: 'CAPTCHA on the opt-out form and this run cannot solve it - finish this one by hand' };
+    }
+
     const filled = await fillGenericForm(page, person, { submissionEmail, scope: locator });
     if (!filled) { skipped.push('no fillable field'); continue; }
+
+    // Filled first, so a person solving it by hand only has the CAPTCHA left. The
+    // baseline below is read after, so a "verified" banner is not the broker's answer.
+    if (captcha) {
+      const cleared = await clearCaptcha(handleCaptcha, page, broker);
+      if (!cleared.cleared) return { status: 'captcha_failed', detail: cleared.detail };
+    }
 
     const before = await readBodyText(page);
     const click = await clickFormSubmit(locator);
@@ -1005,7 +1076,7 @@ async function processGenericUrl(page, broker, state, dryRun = false, injectedDe
       const movedBad = await guardLanding();
       if (movedBad) return movedBad;
       const submitted = await submitOptOutForm(page, {
-        person, submissionEmail, checkUrl,
+        person, submissionEmail, checkUrl, broker, handleCaptcha: opts.handleCaptcha,
         formCtx: { afterOptOutClick: true, beforeSigs: formsBeforeClick },
         label: 'Do Not Sell clicked, form submitted',
       });
@@ -1032,7 +1103,7 @@ async function processGenericUrl(page, broker, state, dryRun = false, injectedDe
     const methodAllowsForms = broker.method === undefined || broker.method === null || broker.method === 'direct-form';
     if (methodAllowsForms && !isHomepageUrl(broker.url)) {
       const submitted = await submitOptOutForm(page, {
-        person, submissionEmail, checkUrl,
+        person, submissionEmail, checkUrl, broker, handleCaptcha: opts.handleCaptcha,
         formCtx: { afterOptOutClick: false },
         label: 'Form submitted',
       });
@@ -1264,6 +1335,7 @@ function loadGenericBrokers(explicitBrokerHosts, extra = {}) {
  * Outcome buckets (WP5):
  *   submitted        - form found and submitted (success / pending_confirm)
  *   unverified       - submitted but not confirmed; never a success, no cooldown
+ *   captcha_failed   - a CAPTCHA stood in front of the form and was not cleared; nothing sent
  *   no_form_found    - page loaded but nothing automatable (manual / dead)
  *   error            - exception during processing
  *   dry-run-skipped  - submit deferred because dryRun=true
@@ -1281,6 +1353,8 @@ function classifyOutcome(status, detail) {
       return 'error';
     case 'unverified':
       return 'unverified';
+    case 'captcha_failed':
+      return 'captcha_failed';
     case 'allowlisted':
       return 'allowlisted';
     case 'skipped':
@@ -1431,6 +1505,7 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
     submitted: 0,
     no_form_found: 0,
     unverified: 0,
+    captcha_failed: 0,
     error: 0,
     'dry-run-skipped': 0,
     'skipped-recent': 0,
@@ -1460,7 +1535,7 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
 
       let result;
       try {
-        result = await processFn(page, broker, state, dryRun, opts.injectedDeadSet, { person, personCount, personIndex: opts.personIndex, stateKey: keyFor(broker.name), submissionEmail: opts.submissionEmail || undefined, dnsLookup: opts.dnsLookup });
+        result = await processFn(page, broker, state, dryRun, opts.injectedDeadSet, { person, personCount, personIndex: opts.personIndex, stateKey: keyFor(broker.name), submissionEmail: opts.submissionEmail || undefined, dnsLookup: opts.dnsLookup, handleCaptcha: opts.handleCaptcha });
       } catch (err) {
         // One broker must never abort the whole run or skip the cleanup below.
         result = { status: 'error', detail: (err && err.message ? err.message.slice(0, 80) : 'error') };
@@ -1491,11 +1566,14 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
       } else if (result.status === 'pending_confirm') {
         const { recordPendingConfirmation } = require('./lib/config');
         recordPendingConfirmation(recordKey, result.detail || '');
-      } else if (result.status === 'error' || result.status === 'dead') {
+      } else if (result.status === 'error' || result.status === 'dead' || result.status === 'captcha_failed') {
         const { recordFailure } = require('./lib/config');
         // B24: record the real status so defunct/drift can tell a gone site
         // ('dead') from a transient error, rather than collapsing both to 'error'.
-        recordFailure(recordKey, result.status === 'dead' ? 'dead' : 'error');
+        // A CAPTCHA failure keeps its own kind, as the explicit runner records it:
+        // the site is up and the CAPTCHA is the problem, so it must not count
+        // toward "defunct".
+        recordFailure(recordKey, result.status);
       }
 
       await prunePopups(); // reap any popups / tabs this broker opened
@@ -1526,6 +1604,7 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
       submitted: stats.submitted,
       no_form_found: stats.no_form_found,
       unverified: stats.unverified,
+      captcha_failed: stats.captcha_failed,
       error: stats.error,
       'dry-run-skipped': stats['dry-run-skipped'],
       'skipped-recent': stats['skipped-recent'],
@@ -1535,4 +1614,4 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
   };
 }
 
-module.exports = { runGenericBrokers, resolveResumeStart, loadGenericBrokers, processGenericUrl, classifyNavError, classifyOutcome, isDeadStatus, loadDeadSet, DEAD_URLS_PATH, _setConfig, getFieldMap, fillGenericForm, checkBrokerUrl, isDisallowedAddress, newTextSince, classifyOptOutForm, describeFormElement, isHomepageUrl };
+module.exports = { runGenericBrokers, resolveResumeStart, CAPTCHA_IN_FORM_SELECTOR, CAPTCHA_ON_PAGE_SELECTOR, loadGenericBrokers, processGenericUrl, classifyNavError, classifyOutcome, isDeadStatus, loadDeadSet, DEAD_URLS_PATH, _setConfig, getFieldMap, fillGenericForm, checkBrokerUrl, isDisallowedAddress, newTextSince, classifyOptOutForm, describeFormElement, isHomepageUrl };
