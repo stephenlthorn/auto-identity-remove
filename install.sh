@@ -17,14 +17,14 @@ echo "--------------------------------"
 # 1. Node present?
 if ! command -v node >/dev/null 2>&1; then
   echo "ERROR: Node.js is not installed."
-  echo "Install Node 18 or newer from https://nodejs.org and re-run: bash install.sh"
+  echo "Install Node 20 or newer from https://nodejs.org and re-run: bash install.sh"
   exit 1
 fi
 
-# 2. Node version >= 18 ?
+# 2. Node version >= 20 ?
 NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
-if [ "$NODE_MAJOR" -lt 18 ]; then
-  echo "ERROR: Node.js 18 or newer is required (found $(node -v))."
+if [ "$NODE_MAJOR" -lt 20 ]; then
+  echo "ERROR: Node.js 20 or newer is required (found $(node -v))."
   echo "Upgrade from https://nodejs.org and re-run: bash install.sh"
   exit 1
 fi

@@ -30,7 +30,7 @@ Beyond the monthly run, it can also:
 
 ## Requirements
 
-- Node.js 18+
+- Node.js 20+
 - macOS, Linux, or Windows (scheduling adapts automatically)
 - [Playwright](https://playwright.dev) browsers installed
 

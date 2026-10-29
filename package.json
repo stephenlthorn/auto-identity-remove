@@ -36,10 +36,10 @@
     "playwright": "1.60.0"
   },
   "optionalDependencies": {
-    "nodemailer": "^8.0.9"
+    "nodemailer": "^10.3.1"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.0.0"
   },
   "keywords": ["privacy", "data-broker", "opt-out", "gdpr", "ccpa", "automation", "playwright"],
   "license": "MIT"
