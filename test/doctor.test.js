@@ -30,6 +30,11 @@ const {
   runDoctor,
 } = require('../lib/doctor');
 
+// R4: runDoctor also reads the installed schedule. These tests are about other
+// checks, so the schedule is stubbed and nothing here asks the real crontab,
+// launchd or systemd anything.
+const NO_SCHEDULE = { installed: false, kind: null, kinds: [], schedule: null, target: null, active: null, env: {}, plaintextPassphrase: false, lastRun: null };
+
 // ─────────────────────────────────────────────────────────────────────────────
 // checkConfig
 // ─────────────────────────────────────────────────────────────────────────────
@@ -380,6 +385,7 @@ describe('runDoctor', () => {
       tcpProbe: () => Promise.resolve(true),
       headRequest: () => Promise.resolve(200),
       printOutput: false,
+      scheduleStatus: NO_SCHEDULE,
     });
 
     assert.ok(Array.isArray(results));
@@ -405,6 +411,7 @@ describe('runDoctor', () => {
       tcpProbe: () => Promise.resolve(true),
       headRequest: () => Promise.resolve(200),
       printOutput: false,
+      scheduleStatus: NO_SCHEDULE,
     });
 
     assert.equal(exitCode, 0);
@@ -421,6 +428,7 @@ describe('runDoctor', () => {
       tcpProbe: () => Promise.resolve(true),
       headRequest: () => Promise.resolve(200),
       printOutput: false,
+      scheduleStatus: NO_SCHEDULE,
     });
 
     assert.equal(exitCode, 1);
@@ -436,6 +444,7 @@ describe('runDoctor', () => {
       tcpProbe: () => Promise.resolve(true),
       headRequest: () => Promise.resolve(200),
       printOutput: false,
+      scheduleStatus: NO_SCHEDULE,
     });
 
     assert.ok(summary.failed >= 1, `expected >=1 failed, got: ${summary.failed}`);
