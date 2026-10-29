@@ -91,6 +91,19 @@ function _isBlankPerson(p) {
 // instead of searching brokers for a person named "undefined".
 const enc = s => encodeURIComponent(s == null ? '' : s);
 
+// A bare input[name*="name" i] also matches firstname, lastname, company_name,
+// username and nickname, and fillForm takes the first match, so the person's
+// full name could land in a company or username box (BRK-8). These are the
+// words that make a "*name*" field somebody else's name or not a person's name.
+// :not() is evaluated per attribute, so the placeholder variant excludes
+// "Last name" / "Company name" placeholders the same way.
+const NOT_A_FULL_NAME = [
+  'first', 'last', 'fname', 'lname', 'surname', 'family', 'given', 'middle',
+  'user', 'nick', 'company', 'business', 'organi', 'file', 'maiden',
+];
+const fullNameInput = (attr) =>
+  `input[${attr}*="name" i]${NOT_A_FULL_NAME.map(w => `:not([${attr}*="${w}" i])`).join('')}`;
+
 /**
  * Split a phone number into the two shapes phone-lookup sites ask for.
  *
@@ -197,7 +210,7 @@ function buildBrokers(person) {
     searchUrl: `https://www.fastpeoplesearch.com/name/${enc(F)}-${enc(L)}_${ST}`,
     listingPattern: /fastpeoplesearch\.com\/name\//i,
     optOutUrl: 'https://www.fastpeoplesearch.com/optout',
-    formFields: { 'input[id="optout_name"],input[name*="name"]': N, 'input[type="email"]': E },
+    formFields: { [`input[id="optout_name"],${fullNameInput('name')}`]: N, 'input[type="email"]': E },
     submitSelector: 'button[type="submit"]',
     captchaLikely: false,
     priority: 1,
@@ -208,7 +221,7 @@ function buildBrokers(person) {
     name: 'TruePeopleSearch',
     method: 'direct-form',
     optOutUrl: 'https://www.truepeoplesearch.com/removal',
-    formFields: { 'input[name*="name"],input[placeholder*="name" i]': N, 'input[type="email"]': E },
+    formFields: { [`${fullNameInput('name')},${fullNameInput('placeholder')}`]: N, 'input[type="email"]': E },
     submitSelector: 'button[type="submit"]',
     captchaLikely: false,
     priority: 1,
@@ -329,7 +342,7 @@ function buildBrokers(person) {
     name: 'ThatsThem',
     method: 'direct-form',
     optOutUrl: 'https://thatsthem.com/optout',
-    formFields: { 'input[name*="name" i]': N, 'input[name*="email" i]': E },
+    formFields: { [fullNameInput('name')]: N, 'input[name*="email" i]': E },
     submitSelector: 'button[type="submit"]',
     captchaLikely: false,
     priority: 2,
@@ -375,7 +388,7 @@ function buildBrokers(person) {
     name: 'SearchPeopleFree',
     method: 'direct-form',
     optOutUrl: 'https://www.searchpeoplefree.com/opt-out',
-    formFields: { 'input[name*="name" i]': N, 'input[name*="email" i]': E },
+    formFields: { [fullNameInput('name')]: N, 'input[name*="email" i]': E },
     submitSelector: 'button[type="submit"]',
     captchaLikely: false,
     priority: 2,
@@ -387,7 +400,7 @@ function buildBrokers(person) {
     name: 'PeopleSearchNow',
     method: 'direct-form',
     optOutUrl: 'https://www.peoplesearchnow.com/opt-out',
-    formFields: { 'input[name*="name" i]': N, 'input[name*="email" i]': E },
+    formFields: { [fullNameInput('name')]: N, 'input[name*="email" i]': E },
     submitSelector: 'button[type="submit"]',
     captchaLikely: false,
     priority: 2,
@@ -411,7 +424,7 @@ function buildBrokers(person) {
     name: 'SocialCatfish',
     method: 'direct-form',
     optOutUrl: 'https://socialcatfish.com/opt-out/',
-    formFields: { 'input[name*="name" i]': N, 'input[name*="email" i]': E },
+    formFields: { [fullNameInput('name')]: N, 'input[name*="email" i]': E },
     submitSelector: 'button[type="submit"]',
     captchaLikely: false,
     priority: 2,
@@ -612,7 +625,7 @@ function buildBrokers(person) {
     name: 'Experian (marketing)',
     method: 'direct-form',
     optOutUrl: 'https://www.experian.com/privacy/opting_out.html',
-    formFields: { 'input[name*="first" i]': F, 'input[name*="last" i]': L, 'input[name*="addr" i]': C, 'input[name*="zip" i]': Z },
+    formFields: { 'input[name*="first" i]': F, 'input[name*="last" i]': L, 'input[name*="city" i]': C, 'input[name*="zip" i]': Z },
     submitSelector: 'button[type="submit"],input[type="submit"]',
     captchaLikely: false,
     priority: 2,
