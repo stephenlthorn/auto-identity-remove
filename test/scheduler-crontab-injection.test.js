@@ -129,7 +129,8 @@ test('the crontab is written as argv + stdin, never as a shell string', () => {
 test('the installer appends exactly one aidr entry', () => {
   const { calls, result } = runCrontabInstall();
   const write = calls.find(c => c.cmd === 'crontab');
-  const aidr = write.input.split('\n').filter(l => /^0 9 1 \* \* \/bin\/bash /.test(l));
+  // The line now pins PATH (and may carry AIDR_* paths) before /bin/bash (CORE-13).
+  const aidr = write.input.split('\n').filter(l => /^0 9 1 \* \* (\S+ )*\/bin\/bash /.test(l));
   assert.equal(aidr.length, 1, 'exactly one aidr entry, never duplicated');
   assert.equal(result.method, 'crontab');
 });
