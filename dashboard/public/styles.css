@@ -182,3 +182,8 @@ html, body { max-width: 100%; overflow-x: hidden; }
   .wizard-actions { flex-wrap: wrap; }
   .wizard-actions #wizSkip { margin-left: 0; }
 }
+
+/* ---------- config banner + confirm modal action line ---------- */
+.banner { background: #2d1f06; border: 1px solid #9e6a03; color: #f0c674; border-radius: 10px;
+  padding: 12px 14px; margin-bottom: 18px; font-size: 13px; }
+.confirm-action { font-weight: 600; margin-bottom: 4px; }

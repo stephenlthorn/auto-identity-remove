@@ -6,7 +6,8 @@
  * Maps subcommands (setup, run, preview, verify, dashboard, score, report,
  * doctor) to the existing entrypoints via lib/cli-map.js, then spawns them.
  * The dashboard subcommand generates one-time credentials so the local web UI
- * is never unauthenticated, and prints the URL + login once.
+ * is never unauthenticated, and prints the URL (+ the login, when it made one)
+ * once the server is actually listening.
  *
  * Usage: aidr <command> [options]   (run `aidr --help` for the full list)
  */
@@ -14,7 +15,10 @@
 const path = require('path');
 const { spawn } = require('child_process');
 const { resolveCommand, resolveSpawnTarget, buildHelp } = require('../lib/cli-map');
-const { generateDashboardCreds } = require('../lib/dashboard-creds');
+const {
+  generateDashboardCreds, resolveAuthFile, hasSavedCredentials,
+  findExpress, expressMissingMessage, formatBanner,
+} = require('../lib/dashboard-creds');
 
 const ROOT = path.resolve(__dirname, '..');
 
@@ -27,32 +31,16 @@ function printVersion() {
   process.stdout.write(`${pkg.name} v${pkg.version} (node ${process.version})\n`);
 }
 
-function spawnNode(resolved) {
-  const { cwd, args } = resolveSpawnTarget(resolved, ROOT);
-  const env = { ...process.env };
-  let onSpawn = null;
-
-  if (resolved.command === 'dashboard') {
-    // Boot the dashboard authenticated. server.js reads AIDR_USER/AIDR_PASS
-    // (see dashboard/server.js) and stays open if neither is set.
-    if (!env.AIDR_USER || !env.AIDR_PASS) {
-      const creds = generateDashboardCreds();
-      env.AIDR_USER = creds.user;
-      env.AIDR_PASS = creds.pass;
-      const host = env.AIDR_HOST || '127.0.0.1';
-      const port = env.AIDR_PORT || '8080';
-      onSpawn = () => {
-        process.stdout.write('\n  Dashboard starting...\n');
-        process.stdout.write(`  URL:      http://${host}:${port}\n`);
-        process.stdout.write(`  Username: ${creds.user}\n`);
-        process.stdout.write(`  Password: ${creds.pass}\n`);
-        process.stdout.write('  (these credentials are shown once; re-run to get new ones)\n\n');
-      };
-    }
+// Stopping the dispatcher (systemd stop, `kill`, Ctrl-C) must stop what it
+// started: a watcher left running unsupervised is mid-submission with nothing
+// left to stop it.
+function forwardSignals(child) {
+  for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+    process.on(sig, () => { try { child.kill(sig); } catch (_) { /* already gone */ } });
   }
+}
 
-  const child = spawn(process.execPath, args, { cwd, env, stdio: 'inherit' });
-  if (onSpawn) child.on('spawn', onSpawn);
+function superviseChild(child, resolved) {
   child.on('exit', (code, signal) => {
     if (signal) { process.exit(1); }
     process.exit(code === null ? 1 : code);
@@ -61,6 +49,50 @@ function spawnNode(resolved) {
     process.stderr.write(`aidr: failed to start ${resolved.file}: ${err.message}\n`);
     process.exit(1);
   });
+  forwardSignals(child);
+}
+
+// `aidr dashboard`: boot the dashboard authenticated, and only announce it once it
+// is actually listening. The banner used to print on the child's `spawn` event,
+// i.e. before the server had bound anything, so a port already in use or a
+// missing express printed a URL and a password and then crashed.
+function startDashboard(resolved) {
+  const { cwd, args } = resolveSpawnTarget(resolved, ROOT);
+  const dashboardDir = path.join(ROOT, 'dashboard');
+
+  if (!findExpress(dashboardDir)) {
+    process.stderr.write(expressMissingMessage());
+    process.exit(1);
+  }
+
+  const env = { ...process.env };
+  // dashboard/.auth.json (credentials changed in the Admin tab) overrides
+  // AIDR_USER/AIDR_PASS, so inventing a password next to one would print a login
+  // that 401s. With a saved file, or credentials already in the environment,
+  // generate nothing and say which one applies.
+  const savedCredentials = hasSavedCredentials(resolveAuthFile(env, dashboardDir));
+  const envCredentials = !!(env.AIDR_USER && env.AIDR_PASS);
+  let generated = null;
+  if (!savedCredentials && !envCredentials) {
+    generated = generateDashboardCreds();
+    env.AIDR_USER = generated.user;
+    env.AIDR_PASS = generated.pass;
+  }
+
+  // server.js sends { type: 'aidr-dashboard-listening', host, port } over IPC once
+  // listen() has succeeded; a bind failure exits instead and prints its own reason.
+  const child = spawn(process.execPath, args, { cwd, env, stdio: ['inherit', 'inherit', 'inherit', 'ipc'] });
+  child.on('message', msg => {
+    if (!msg || msg.type !== 'aidr-dashboard-listening') return;
+    process.stdout.write(formatBanner({ host: msg.host, port: msg.port, generated, savedCredentials, envCredentials }));
+  });
+  superviseChild(child, resolved);
+}
+
+function spawnNode(resolved) {
+  if (resolved.command === 'dashboard') return startDashboard(resolved);
+  const { cwd, args } = resolveSpawnTarget(resolved, ROOT);
+  superviseChild(spawn(process.execPath, args, { cwd, env: { ...process.env }, stdio: 'inherit' }), resolved);
 }
 
 function main() {

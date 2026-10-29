@@ -1,229 +1,53 @@
 /**
  * dashboard/server.test.js
  *
- * Hermetic endpoint tests for the dashboard server. Uses a real express app
- * bound to port 0 (OS-assigned ephemeral port). No real watcher process is
- * spawned and no real config/state files are touched: CONFIG + STATE paths are
- * redirected to temp files, which are cleaned up after each test.
+ * Hermetic endpoint tests for the dashboard server. Each test starts a real
+ * express app on an ephemeral port against its OWN temp directory (see
+ * support/harness.js): config, config.json.enc, state, logs and .auth.json all
+ * live there, so no real repo-root file is ever read-modified-restored. This
+ * file used to overwrite the real config.json / state.json / config.json.enc and
+ * put them back in a finally block; a Ctrl-C mid-test left fixtures in place of
+ * a maintainer's real PII. support/fs-guard.js now makes such a write throw.
  *
  * Run with: node --test (from the dashboard/ directory)
- *
- * Dependencies: node built-ins only (http, fs, path, os, crypto) + express
- * (already in dashboard/node_modules).
  */
 
 'use strict';
 
-const { test, before, after, beforeEach, afterEach } = require('node:test');
+const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const http = require('http');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const crypto = require('crypto');
+const { startHarness, basicAuth } = require('./support/harness');
+const secrets = require('../lib/secrets');
+const { readConfigMeta, maskConfig, mergeConfig, MASK } = require('./server');
 
-// ---- helpers ----------------------------------------------------------------
-
-function tmpFile(suffix) {
-  return path.join(os.tmpdir(), `aidr-test-${crypto.randomBytes(6).toString('hex')}${suffix}`);
+/** Run `fn` against a fresh harness and always clean it up. */
+async function withServer(opts, fn) {
+  const h = await startHarness(opts);
+  try { return await fn(h); } finally { await h.close(); }
 }
 
-function basicAuth(user, pass) {
-  return 'Basic ' + Buffer.from(`${user}:${pass}`).toString('base64');
-}
+const readJson = file => JSON.parse(fs.readFileSync(file, 'utf8'));
 
-function request(server, { method = 'GET', pathname, headers = {}, body } = {}) {
-  return new Promise((resolve, reject) => {
-    const addr = server.address();
-    const opts = {
-      hostname: '127.0.0.1',
-      port: addr.port,
-      path: pathname,
-      method,
-      headers: { 'Content-Type': 'application/json', ...headers },
-    };
-    const req = http.request(opts, (res) => {
-      const chunks = [];
-      res.on('data', c => chunks.push(c));
-      res.on('end', () => {
-        const raw = Buffer.concat(chunks).toString();
-        let json;
-        try { json = JSON.parse(raw); } catch (_) { json = null; }
-        resolve({ status: res.statusCode, json, raw });
-      });
-    });
-    req.on('error', reject);
-    if (body !== undefined) req.write(JSON.stringify(body));
-    req.end();
-  });
-}
-
-// ---- server setup -----------------------------------------------------------
-// We need to isolate the server module from real filesystem paths. The approach:
-// set env vars for credentials, then require the module. Between tests we
-// reload with fresh temp files. Because node caches modules we need to purge
-// and re-require for each test that needs a clean state. We isolate by using a
-// helper that re-requires with fresh env state.
-
-// Temp config used across the session (restored to default before each test).
-let cfgPath, statePath;
-
-function purgeServerModule() {
-  // Remove all server.js + validate.js entries from the require cache.
-  for (const key of Object.keys(require.cache)) {
-    if (/dashboard[/\\](server|validate)\.js$/.test(key)) {
-      delete require.cache[key];
-    }
-  }
-}
-
-function buildServer({ user = 'testuser', pass = 'testpass', cfgContent, stateContent, encContent, passphrase } = {}) {
-  // Write temp files.
-  cfgPath = tmpFile('.json');
-  statePath = tmpFile('.json');
-  if (cfgContent !== undefined) {
-    fs.writeFileSync(cfgPath, JSON.stringify(cfgContent, null, 2));
-  }
-  if (stateContent !== undefined) {
-    fs.writeFileSync(statePath, JSON.stringify(stateContent, null, 2));
-  }
-
-  // Set env vars before requiring the module.
-  process.env.AIDR_USER = user;
-  process.env.AIDR_PASS = pass;
-  process.env.AIDR_PORT = '0'; // ephemeral
-  delete process.env.AIDR_TOKEN;
-  if (passphrase !== undefined) {
-    process.env.AIDR_PASSPHRASE = passphrase;
-  } else {
-    delete process.env.AIDR_PASSPHRASE;
-  }
-
-  purgeServerModule();
-
-  // Monkey-patch the path constants BEFORE requiring by overriding within
-  // the module's closure. The cleanest approach that avoids real filesystem
-  // access: we patch the module's ROOT-relative paths by overriding require
-  // so that when server.js reads CONFIG / STATE it uses our temp files.
-  // We do this by replacing the module's bindings via a custom require wrapper.
-  //
-  // Simpler approach: after require, reach into the module to patch constants.
-  // But those are `const` at module level. Instead, we stub `fs.readFileSync`
-  // for the specific paths.
-  //
-  // Cleanest: just copy the temp files to the paths server.js hardcodes.
-  // server.js uses: path.resolve(__dirname, '..') as ROOT. In our worktree
-  // that resolves to the project root. We don't want to write real files there.
-  //
-  // Solution: re-require server.js with the ROOT-pointing paths replaced by
-  // patching node's module system at require time using a thin proxy module.
-  // This is over-engineered for tests. Instead: use the simplest approach -
-  // write the temp content to the ACTUAL paths (which exist in the worktree)
-  // and restore them after. The worktree is throwaway.
-
-  // Determine the actual paths that server.js will use.
-  const serverDir = path.resolve(__dirname);
-  const projectRoot = path.resolve(serverDir, '..');
-  const realConfig = path.join(projectRoot, 'config.json');
-  const realConfigEnc = path.join(projectRoot, 'config.json.enc');
-  const realState = path.join(projectRoot, 'state.json');
-
-  // Stash original content.
-  let origConfig = null, origConfigEnc = null, origState = null;
-  try { origConfig = fs.readFileSync(realConfig, 'utf8'); } catch (_) {}
-  try { origConfigEnc = fs.readFileSync(realConfigEnc, 'utf8'); } catch (_) {}
-  try { origState = fs.readFileSync(realState, 'utf8'); } catch (_) {}
-
-  // Write test content.
-  if (cfgContent !== undefined) {
-    fs.writeFileSync(realConfig, JSON.stringify(cfgContent, null, 2));
-  } else {
-    try { fs.unlinkSync(realConfig); } catch (_) {}
-  }
-  if (encContent !== undefined) {
-    fs.writeFileSync(realConfigEnc, JSON.stringify(encContent, null, 2));
-  } else {
-    try { fs.unlinkSync(realConfigEnc); } catch (_) {}
-  }
-  if (stateContent !== undefined) {
-    fs.writeFileSync(realState, JSON.stringify(stateContent, null, 2));
-  } else {
-    try { fs.unlinkSync(realState); } catch (_) {}
-  }
-
-  // Clean up the temp files we created (no longer needed since we wrote to real paths).
-  try { fs.unlinkSync(cfgPath); } catch (_) {}
-  try { fs.unlinkSync(statePath); } catch (_) {}
-
-  purgeServerModule();
-  const { app } = require('./server');
-
-  const server = http.createServer(app);
-  return new Promise((resolve) => {
-    server.listen(0, '127.0.0.1', () => {
-      resolve({
-        server,
-        close: () => new Promise(r => {
-          server.close(r);
-          // Restore original files.
-          if (origConfig !== null) {
-            try { fs.writeFileSync(realConfig, origConfig); } catch (_) {}
-          } else {
-            try { fs.unlinkSync(realConfig); } catch (_) {}
-          }
-          if (origConfigEnc !== null) {
-            try { fs.writeFileSync(realConfigEnc, origConfigEnc); } catch (_) {}
-          } else {
-            try { fs.unlinkSync(realConfigEnc); } catch (_) {}
-          }
-          if (origState !== null) {
-            try { fs.writeFileSync(realState, origState); } catch (_) {}
-          } else {
-            try { fs.unlinkSync(realState); } catch (_) {}
-          }
-          // Restore AIDR_PASSPHRASE env var.
-          delete process.env.AIDR_PASSPHRASE;
-        }),
-        realConfig,
-        realConfigEnc,
-        realState,
-        projectRoot,
-      });
-    });
-  });
-}
-
-// ---- tests ------------------------------------------------------------------
+// ---- auth + basics -----------------------------------------------------------
 
 test('/api/health is reachable without auth', async () => {
-  const { server, close } = await buildServer();
-  try {
-    const r = await request(server, { pathname: '/api/health' });
+  await withServer({}, async ({ request }) => {
+    const r = await request({ pathname: '/api/health', noAuth: true });
     assert.equal(r.status, 200);
     assert.deepEqual(r.json, { ok: true });
-  } finally {
-    await close();
-  }
+  });
 });
 
 test('all other routes return 401 without auth', async () => {
-  const { server, close } = await buildServer();
-  try {
-    const routes = [
-      '/api/version',
-      '/api/config',
-      '/api/state',
-      '/api/run/status',
-      '/api/schedule',
-      '/api/auth/whoami',
-    ];
-    for (const pathname of routes) {
-      const r = await request(server, { pathname });
+  await withServer({}, async ({ request }) => {
+    for (const pathname of ['/api/version', '/api/config', '/api/state', '/api/run/status', '/api/schedule', '/api/auth/whoami']) {
+      const r = await request({ pathname, noAuth: true });
       assert.equal(r.status, 401, `${pathname} should be 401 without auth`);
     }
-  } finally {
-    await close();
-  }
+  });
 });
 
 test('/api/config with auth returns secrets masked', async () => {
@@ -233,118 +57,60 @@ test('/api/config with auth returns secrets masked', async () => {
     email: { smtp: { host: 'smtp.example.com', user: 'jane@example.com', pass: 'REAL-SMTP-PASS' } },
     notify: { webhook: 'https://hooks.example.com/real-token' },
   };
-  const { server, close } = await buildServer({ cfgContent });
-  try {
-    const r = await request(server, {
-      pathname: '/api/config',
-      headers: { Authorization: basicAuth('testuser', 'testpass') },
-    });
+  await withServer({ cfgContent }, async ({ request }) => {
+    const r = await request({ pathname: '/api/config' });
     assert.equal(r.status, 200);
     const cfg = r.json.config;
-    // Secrets must be masked.
     assert.notEqual(cfg.capsolver.apiKey, 'REAL-SECRET-KEY', 'capsolver.apiKey must be masked');
     assert.notEqual(cfg.email.smtp.pass, 'REAL-SMTP-PASS', 'smtp.pass must be masked');
     assert.notEqual(cfg.notify.webhook, 'https://hooks.example.com/real-token', 'webhook must be masked');
-    // Non-secret PII must be present.
     assert.equal(cfg.person.firstName, 'Jane');
     assert.equal(cfg.person.lastName, 'Doe');
     assert.equal(cfg.email.smtp.host, 'smtp.example.com');
-  } finally {
-    await close();
-  }
+  });
 });
 
 test('POST /api/run mode real without confirm returns 400', async () => {
-  const { server, close } = await buildServer();
-  try {
-    const r = await request(server, {
-      method: 'POST',
-      pathname: '/api/run',
-      headers: {
-        Authorization: basicAuth('testuser', 'testpass'),
-        Origin: `http://127.0.0.1:${server.address().port}`,
-      },
-      body: { mode: 'real' },
-    });
+  await withServer({}, async ({ request }) => {
+    const r = await request({ method: 'POST', pathname: '/api/run', body: { mode: 'real' } });
     assert.equal(r.status, 400);
     assert.match(r.json.error, /confirm/i);
-  } finally {
-    await close();
-  }
+  });
 });
 
+// ---- PUT /api/config merge semantics -----------------------------------------
+
 test('mergeConfig: masked secret left as sentinel is preserved on disk', async () => {
-  const MASK = '••••••••';
-  const cfgContent = {
-    capsolver: { apiKey: 'ORIGINAL-SECRET' },
-    person: { firstName: 'Jane' },
-  };
-  const { server, close, realConfig } = await buildServer({ cfgContent });
-  try {
-    // Send masked sentinel for apiKey (as browser does when not retyped).
-    const r = await request(server, {
-      method: 'PUT',
-      pathname: '/api/config',
-      headers: {
-        Authorization: basicAuth('testuser', 'testpass'),
-        Origin: `http://127.0.0.1:${server.address().port}`,
-      },
+  const cfgContent = { capsolver: { apiKey: 'ORIGINAL-SECRET' }, person: { firstName: 'Jane' } };
+  await withServer({ cfgContent }, async ({ request, paths }) => {
+    const r = await request({
+      method: 'PUT', pathname: '/api/config',
       body: { capsolver: { apiKey: MASK }, person: { firstName: 'Updated' } },
     });
     assert.equal(r.status, 200, `expected 200, got ${r.status}: ${JSON.stringify(r.json)}`);
-    const saved = JSON.parse(fs.readFileSync(realConfig, 'utf8'));
+    const saved = readJson(paths.config);
     assert.equal(saved.capsolver.apiKey, 'ORIGINAL-SECRET', 'masked sentinel must preserve original secret on disk');
     assert.equal(saved.person.firstName, 'Updated', 'non-secret field must be updated');
-  } finally {
-    await close();
-  }
+  });
 });
 
 test('mergeConfig: retyped secret is updated on disk', async () => {
-  const cfgContent = {
-    capsolver: { apiKey: 'OLD-SECRET' },
-  };
-  const { server, close, realConfig } = await buildServer({ cfgContent });
-  try {
-    const r = await request(server, {
-      method: 'PUT',
-      pathname: '/api/config',
-      headers: {
-        Authorization: basicAuth('testuser', 'testpass'),
-        Origin: `http://127.0.0.1:${server.address().port}`,
-      },
-      body: { capsolver: { apiKey: 'NEW-SECRET' } },
-    });
+  await withServer({ cfgContent: { capsolver: { apiKey: 'OLD-SECRET' } } }, async ({ request, paths }) => {
+    const r = await request({ method: 'PUT', pathname: '/api/config', body: { capsolver: { apiKey: 'NEW-SECRET' } } });
     assert.equal(r.status, 200);
-    const saved = JSON.parse(fs.readFileSync(realConfig, 'utf8'));
-    assert.equal(saved.capsolver.apiKey, 'NEW-SECRET', 'retyped secret must be updated on disk');
-  } finally {
-    await close();
-  }
+    assert.equal(readJson(paths.config).capsolver.apiKey, 'NEW-SECRET', 'retyped secret must be updated on disk');
+  });
 });
 
 test('mergeConfig: non-secret field set to empty string is cleared', async () => {
-  const cfgContent = {
-    person: { firstName: 'Jane', lastName: 'Doe' },
-  };
-  const { server, close, realConfig } = await buildServer({ cfgContent });
-  try {
-    const r = await request(server, {
-      method: 'PUT',
-      pathname: '/api/config',
-      headers: {
-        Authorization: basicAuth('testuser', 'testpass'),
-        Origin: `http://127.0.0.1:${server.address().port}`,
-      },
-      body: { person: { firstName: 'Jane', lastName: '' } },
-    });
+  await withServer({ cfgContent: { person: { firstName: 'Jane', lastName: 'Doe' } } }, async ({ request, paths }) => {
+    const r = await request({ method: 'PUT', pathname: '/api/config', body: { person: { firstName: 'Jane', lastName: '' } } });
     assert.equal(r.status, 200);
-    const saved = JSON.parse(fs.readFileSync(realConfig, 'utf8'));
-    assert.equal(saved.person.lastName, '', 'clearing a non-secret field to "" must be preserved');
-  } finally {
-    await close();
-  }
+    assert.equal(readJson(paths.config).person.lastName, '', 'clearing a non-secret field to "" must be preserved');
+  });
 });
+
+// ---- exposure ----------------------------------------------------------------
 
 test('/api/exposure returns a current score, breakdown and history array', async () => {
   const stateContent = {
@@ -353,41 +119,27 @@ test('/api/exposure returns a current score, breakdown and history array', async
       MyLife: { lastSuccess: '2026-01-01T00:00:00.000Z', verifiedDeletedAt: '2026-02-01T00:00:00.000Z' }, // gone
     },
   };
-  const { server, close } = await buildServer({ stateContent });
-  try {
-    const r = await request(server, {
-      pathname: '/api/exposure',
-      headers: { Authorization: basicAuth('testuser', 'testpass') },
-    });
+  await withServer({ stateContent }, async ({ request }) => {
+    const r = await request({ pathname: '/api/exposure' });
     assert.equal(r.status, 200);
     assert.equal(typeof r.json.score, 'number');
     assert.equal(r.json.listedCount, 1); // Spokeo still listed, MyLife gone
     assert.ok(r.json.breakdown && typeof r.json.breakdown.listed === 'number');
     assert.ok(Array.isArray(r.json.history));
-  } finally {
-    await close();
-  }
+  });
 });
 
 test('/api/exposure requires auth', async () => {
-  const { server, close } = await buildServer();
-  try {
-    const r = await request(server, { pathname: '/api/exposure' });
-    assert.equal(r.status, 401);
-  } finally {
-    await close();
-  }
+  await withServer({}, async ({ request }) => {
+    assert.equal((await request({ pathname: '/api/exposure', noAuth: true })).status, 401);
+  });
 });
 
-// ---- freeze checklist endpoints --------------------------------------------
+// ---- freeze checklist endpoints ----------------------------------------------
 
 test('GET /api/freeze returns 7 targets with done:false for empty state', async () => {
-  const { server, close } = await buildServer({ stateContent: { optOuts: {} } });
-  try {
-    const r = await request(server, {
-      pathname: '/api/freeze',
-      headers: { Authorization: basicAuth('testuser', 'testpass') },
-    });
+  await withServer({ stateContent: { optOuts: {} } }, async ({ request }) => {
+    const r = await request({ pathname: '/api/freeze' });
     assert.equal(r.status, 200, `expected 200, got ${r.status}: ${r.raw}`);
     assert.ok(Array.isArray(r.json.targets), 'response.targets must be an array');
     assert.equal(r.json.targets.length, 7);
@@ -395,399 +147,231 @@ test('GET /api/freeze returns 7 targets with done:false for empty state', async 
     const eq = r.json.targets.find(t => t.key === 'equifax');
     assert.match(eq.url, /equifax\.com/);
     assert.equal(eq.type, 'credit-bureau');
-  } finally {
-    await close();
-  }
+  });
 });
 
 test('GET /api/freeze reflects completed targets from state.freezes', async () => {
-  const { server, close } = await buildServer({
-    stateContent: { optOuts: {}, freezes: { experian: { doneAt: '2026-06-02T00:00:00.000Z' } } },
-  });
-  try {
-    const r = await request(server, {
-      pathname: '/api/freeze',
-      headers: { Authorization: basicAuth('testuser', 'testpass') },
-    });
+  const stateContent = { optOuts: {}, freezes: { experian: { doneAt: '2026-06-02T00:00:00.000Z' } } };
+  await withServer({ stateContent }, async ({ request }) => {
+    const r = await request({ pathname: '/api/freeze' });
     assert.equal(r.status, 200);
     const ex = r.json.targets.find(t => t.key === 'experian');
     assert.equal(ex.done, true);
     assert.equal(ex.doneAt, '2026-06-02T00:00:00.000Z');
-  } finally {
-    await close();
-  }
+  });
 });
 
 test('POST /api/freeze action=done records the target on disk', async () => {
-  const { server, close, realState } = await buildServer({ stateContent: { optOuts: {} } });
-  try {
-    const r = await request(server, {
-      method: 'POST',
-      pathname: '/api/freeze',
-      headers: {
-        Authorization: basicAuth('testuser', 'testpass'),
-        Origin: `http://127.0.0.1:${server.address().port}`,
-      },
-      body: { key: 'equifax', action: 'done' },
-    });
+  await withServer({ stateContent: { optOuts: {} } }, async ({ request, paths }) => {
+    const r = await request({ method: 'POST', pathname: '/api/freeze', body: { key: 'equifax', action: 'done' } });
     assert.equal(r.status, 200, `expected 200, got ${r.status}: ${r.raw}`);
     assert.equal(r.json.ok, true);
-    const saved = JSON.parse(fs.readFileSync(realState, 'utf8'));
+    const saved = readJson(paths.state);
     assert.ok(saved.freezes.equifax, 'equifax freeze must be persisted');
     assert.match(saved.freezes.equifax.doneAt, /^\d{4}-\d{2}-\d{2}T/);
-  } finally {
-    await close();
-  }
+  });
 });
 
 test('POST /api/freeze action=clear removes a recorded target', async () => {
-  const { server, close, realState } = await buildServer({
-    stateContent: { optOuts: {}, freezes: { equifax: { doneAt: '2026-06-01T00:00:00.000Z' } } },
-  });
-  try {
-    const r = await request(server, {
-      method: 'POST',
-      pathname: '/api/freeze',
-      headers: {
-        Authorization: basicAuth('testuser', 'testpass'),
-        Origin: `http://127.0.0.1:${server.address().port}`,
-      },
-      body: { key: 'equifax', action: 'clear' },
-    });
+  const stateContent = { optOuts: {}, freezes: { equifax: { doneAt: '2026-06-01T00:00:00.000Z' } } };
+  await withServer({ stateContent }, async ({ request, paths }) => {
+    const r = await request({ method: 'POST', pathname: '/api/freeze', body: { key: 'equifax', action: 'clear' } });
     assert.equal(r.status, 200, `expected 200, got ${r.status}: ${r.raw}`);
-    const saved = JSON.parse(fs.readFileSync(realState, 'utf8'));
-    assert.ok(!saved.freezes.equifax, 'equifax freeze must be cleared on disk');
-  } finally {
-    await close();
-  }
+    assert.ok(!readJson(paths.state).freezes.equifax, 'equifax freeze must be cleared on disk');
+  });
 });
 
 test('POST /api/freeze does not disturb the existing optOuts namespace', async () => {
-  const { server, close, realState } = await buildServer({
-    stateContent: { optOuts: { spokeo: { history: ['success'], lastSuccess: '2026-01-01T00:00:00.000Z' } } },
-  });
-  try {
-    const r = await request(server, {
-      method: 'POST',
-      pathname: '/api/freeze',
-      headers: {
-        Authorization: basicAuth('testuser', 'testpass'),
-        Origin: `http://127.0.0.1:${server.address().port}`,
-      },
-      body: { key: 'innovis', action: 'done' },
-    });
+  const stateContent = { optOuts: { spokeo: { history: ['success'], lastSuccess: '2026-01-01T00:00:00.000Z' } } };
+  await withServer({ stateContent }, async ({ request, paths }) => {
+    const r = await request({ method: 'POST', pathname: '/api/freeze', body: { key: 'innovis', action: 'done' } });
     assert.equal(r.status, 200);
-    const saved = JSON.parse(fs.readFileSync(realState, 'utf8'));
+    const saved = readJson(paths.state);
     assert.ok(saved.optOuts.spokeo, 'optOuts must survive a freeze write');
     assert.equal(saved.optOuts.spokeo.lastSuccess, '2026-01-01T00:00:00.000Z');
     assert.ok(saved.freezes.innovis, 'innovis recorded alongside optOuts');
-  } finally {
-    await close();
-  }
+  });
 });
 
 test('POST /api/freeze with an unknown key returns 400', async () => {
-  const { server, close } = await buildServer({ stateContent: { optOuts: {} } });
-  try {
-    const r = await request(server, {
-      method: 'POST',
-      pathname: '/api/freeze',
-      headers: {
-        Authorization: basicAuth('testuser', 'testpass'),
-        Origin: `http://127.0.0.1:${server.address().port}`,
-      },
-      body: { key: 'bogus', action: 'done' },
-    });
+  await withServer({ stateContent: { optOuts: {} } }, async ({ request }) => {
+    const r = await request({ method: 'POST', pathname: '/api/freeze', body: { key: 'bogus', action: 'done' } });
     assert.equal(r.status, 400);
     assert.match(r.json.error, /unknown freeze target|bad key/i);
-  } finally {
-    await close();
-  }
+  });
 });
 
 test('POST /api/freeze with a bad action returns 400', async () => {
-  const { server, close } = await buildServer({ stateContent: { optOuts: {} } });
-  try {
-    const r = await request(server, {
-      method: 'POST',
-      pathname: '/api/freeze',
-      headers: {
-        Authorization: basicAuth('testuser', 'testpass'),
-        Origin: `http://127.0.0.1:${server.address().port}`,
-      },
-      body: { key: 'equifax', action: 'nope' },
-    });
+  await withServer({ stateContent: { optOuts: {} } }, async ({ request }) => {
+    const r = await request({ method: 'POST', pathname: '/api/freeze', body: { key: 'equifax', action: 'nope' } });
     assert.equal(r.status, 400);
     assert.match(r.json.error, /bad action|action/i);
-  } finally {
-    await close();
-  }
+  });
 });
 
 test('GET /api/freeze requires auth (401 without credentials)', async () => {
-  const { server, close } = await buildServer({ stateContent: { optOuts: {} } });
-  try {
-    const r = await request(server, { pathname: '/api/freeze' });
-    assert.equal(r.status, 401);
-  } finally {
-    await close();
-  }
+  await withServer({ stateContent: { optOuts: {} } }, async ({ request }) => {
+    assert.equal((await request({ pathname: '/api/freeze', noAuth: true })).status, 401);
+  });
 });
 
+// ---- first-run gate ----------------------------------------------------------
+
 test('GET /api/config/status: no config file -> not configured, person fields missing', async () => {
-  const { server, close } = await buildServer(); // no cfgContent -> config.json absent
-  try {
-    const r = await request(server, {
-      pathname: '/api/config/status',
-      headers: { Authorization: basicAuth('testuser', 'testpass') },
-    });
+  await withServer({}, async ({ request }) => {
+    const r = await request({ pathname: '/api/config/status' });
     assert.equal(r.status, 200);
     assert.equal(r.json.configured, false);
     assert.ok(Array.isArray(r.json.missing));
     assert.ok(r.json.missing.includes('person.firstName'), 'should report person.firstName missing');
     assert.ok(r.json.missing.includes('person.lastName'), 'should report person.lastName missing');
     assert.ok(r.json.missing.includes('person.email'), 'should report person.email missing');
-  } finally {
-    await close();
-  }
+  });
 });
 
 test('GET /api/config/status: a complete person -> configured with no missing fields', async () => {
-  const cfgContent = {
-    person: { firstName: 'Alice', lastName: 'Smith', email: 'alice@example.com' },
-  };
-  const { server, close } = await buildServer({ cfgContent });
-  try {
-    const r = await request(server, {
-      pathname: '/api/config/status',
-      headers: { Authorization: basicAuth('testuser', 'testpass') },
-    });
+  const cfgContent = { person: { firstName: 'Alice', lastName: 'Smith', email: 'alice@example.com' } };
+  await withServer({ cfgContent }, async ({ request }) => {
+    const r = await request({ pathname: '/api/config/status' });
     assert.equal(r.status, 200);
     assert.equal(r.json.configured, true);
     assert.deepEqual(r.json.missing, []);
-  } finally {
-    await close();
-  }
+  });
 });
 
 test('GET /api/config/status: unedited example placeholder -> not configured', async () => {
-  const cfgContent = {
-    person: { firstName: 'Jane', lastName: 'Doe', email: 'jane.doe@example.com' },
-  };
-  const { server, close } = await buildServer({ cfgContent });
-  try {
-    const r = await request(server, {
-      pathname: '/api/config/status',
-      headers: { Authorization: basicAuth('testuser', 'testpass') },
-    });
+  const cfgContent = { person: { firstName: 'Jane', lastName: 'Doe', email: 'jane.doe@example.com' } };
+  await withServer({ cfgContent }, async ({ request }) => {
+    const r = await request({ pathname: '/api/config/status' });
     assert.equal(r.status, 200);
     assert.equal(r.json.configured, false);
     assert.ok(r.json.missing.length > 0);
-  } finally {
-    await close();
-  }
+  });
 });
 
 test('GET /api/config/status requires auth (401 without credentials)', async () => {
-  const { server, close } = await buildServer();
-  try {
-    const r = await request(server, { pathname: '/api/config/status' });
-    assert.equal(r.status, 401);
-  } finally {
-    await close();
-  }
+  await withServer({}, async ({ request }) => {
+    assert.equal((await request({ pathname: '/api/config/status', noAuth: true })).status, 401);
+  });
 });
 
 // B5: /api/config/status must use the decryption-aware reader so an encrypted
 // config with a complete person reports configured:true (does NOT re-trigger the
 // first-run wizard). A non-decrypting reader sees ciphertext and reports missing.
 test('GET /api/config/status: encrypted config with complete person -> configured', async () => {
-  const _secrets = require('../lib/secrets');
   const PASSPHRASE = 'test-passphrase-b5';
   const plain = { person: { firstName: 'Alice', lastName: 'Smith', email: 'alice@example.com' } };
-  const envelope = _secrets.encryptConfig(plain, PASSPHRASE);
-  const { server, close } = await buildServer({ encContent: envelope, passphrase: PASSPHRASE });
-  try {
-    const r = await request(server, {
-      pathname: '/api/config/status',
-      headers: { Authorization: basicAuth('testuser', 'testpass') },
-    });
+  const encContent = secrets.encryptConfig(plain, PASSPHRASE);
+  await withServer({ encContent, passphrase: PASSPHRASE }, async ({ request }) => {
+    const r = await request({ pathname: '/api/config/status' });
     assert.equal(r.status, 200);
     assert.equal(r.json.configured, true, 'encrypted config with a complete person must report configured');
     assert.deepEqual(r.json.missing, []);
-  } finally {
-    await close();
-  }
+    assert.equal(r.json.locked, false);
+  });
 });
 
-// -- At-rest config encryption (added for encrypt-config-at-rest) -------------
-const _encFs = require('node:fs');
-const _encOs = require('node:os');
-const _encPath = require('node:path');
-const secrets = require('../lib/secrets');
-const { readConfigMeta, maskConfig, MASK } = require('./server');
+// ---- At-rest config encryption -----------------------------------------------
 
-function _encTmpDir() {
-  return _encFs.mkdtempSync(_encPath.join(_encOs.tmpdir(), 'aidr-dash-'));
+function encTmpDir() {
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'aidr-dash-'));
 }
 
 test('readConfigMeta returns plaintext config when config.json is plaintext', () => {
-  const dir = _encTmpDir();
-  const configPath = _encPath.join(dir, 'config.json');
-  const encPath = _encPath.join(dir, 'config.json.enc');
+  const dir = encTmpDir();
+  const configPath = path.join(dir, 'config.json');
+  const encPath = path.join(dir, 'config.json.enc');
   const plain = { person: { firstName: 'Katherine' }, capsolver: { apiKey: 'CAP-A' } };
-  _encFs.writeFileSync(configPath, JSON.stringify(plain));
+  fs.writeFileSync(configPath, JSON.stringify(plain));
   const m = readConfigMeta({ configPath, encPath, passphrase: '' });
   assert.equal(m.exists, true);
   assert.deepEqual(m.data, plain);
 });
 
 test('readConfigMeta decrypts config.json.enc when a passphrase is supplied', () => {
-  const dir = _encTmpDir();
-  const configPath = _encPath.join(dir, 'config.json');
-  const encPath = _encPath.join(dir, 'config.json.enc');
+  const dir = encTmpDir();
+  const configPath = path.join(dir, 'config.json');
+  const encPath = path.join(dir, 'config.json.enc');
   const plain = { person: { firstName: 'Katherine' }, capsolver: { apiKey: 'CAP-A' } };
-  _encFs.writeFileSync(encPath, JSON.stringify(secrets.encryptConfig(plain, 'pw')));
+  fs.writeFileSync(encPath, JSON.stringify(secrets.encryptConfig(plain, 'pw')));
   const m = readConfigMeta({ configPath, encPath, passphrase: 'pw' });
   assert.equal(m.exists, true);
   assert.deepEqual(m.data, plain);
 });
 
 test('readConfigMeta flags parseError when an encrypted config has no passphrase', () => {
-  const dir = _encTmpDir();
-  const configPath = _encPath.join(dir, 'config.json');
-  const encPath = _encPath.join(dir, 'config.json.enc');
-  const plain = { person: { firstName: 'Katherine' } };
-  _encFs.writeFileSync(encPath, JSON.stringify(secrets.encryptConfig(plain, 'pw')));
+  const dir = encTmpDir();
+  const configPath = path.join(dir, 'config.json');
+  const encPath = path.join(dir, 'config.json.enc');
+  fs.writeFileSync(encPath, JSON.stringify(secrets.encryptConfig({ person: { firstName: 'Katherine' } }, 'pw')));
   const m = readConfigMeta({ configPath, encPath, passphrase: '' });
   assert.equal(m.exists, true);
   assert.equal(m.parseError, true);
+  assert.equal(m.locked, true);
 });
 
 test('maskConfig still masks the capsolver key after decrypting', () => {
-  const plain = { capsolver: { apiKey: 'CAP-SECRET' } };
-  const masked = maskConfig(plain);
-  assert.equal(masked.capsolver.apiKey, MASK);
+  assert.equal(maskConfig({ capsolver: { apiKey: 'CAP-SECRET' } }).capsolver.apiKey, MASK);
 });
 
-// -- Fix 1: PUT /api/config is encryption-aware --------------------------------
+// -- PUT /api/config is encryption-aware ---------------------------------------
 
 test('PUT /api/config with encrypted config preserves untouched fields and re-encrypts', async () => {
-  // Build an encrypted config.json.enc with an existing secret and person field.
   const plain = {
     person: { firstName: 'Alice', lastName: 'Smith' },
     capsolver: { apiKey: 'ORIGINAL-SECRET' },
     notify: { webhook: 'https://hooks.example.com/original' },
   };
   const PASSPHRASE = 'test-passphrase-fix1';
-  const envelope = secrets.encryptConfig(plain, PASSPHRASE);
-  // buildServer with encContent (no cfgContent) so server sees an encrypted config.
-  const { server, close, realConfig, realConfigEnc } = await buildServer({
-    encContent: envelope,
-    passphrase: PASSPHRASE,
-  });
-  try {
-    // PUT only updates person.firstName; leaves capsolver.apiKey as MASK (untouched).
-    const r = await request(server, {
-      method: 'PUT',
-      pathname: '/api/config',
-      headers: {
-        Authorization: basicAuth('testuser', 'testpass'),
-        Origin: `http://127.0.0.1:${server.address().port}`,
-      },
+  const encContent = secrets.encryptConfig(plain, PASSPHRASE);
+  await withServer({ encContent, passphrase: PASSPHRASE }, async ({ request, paths }) => {
+    const r = await request({
+      method: 'PUT', pathname: '/api/config',
       body: { config: { person: { firstName: 'Updated', lastName: 'Smith' }, capsolver: { apiKey: MASK } } },
     });
     assert.equal(r.status, 200, `expected 200, got ${r.status}: ${JSON.stringify(r.json)}`);
-    // On-disk: no plaintext config.json must appear beside the enc file.
-    assert.ok(!fs.existsSync(realConfig) || (() => {
-      // If config.json exists, it must not be plaintext (must be absent or enc envelope).
-      // The critical invariant: no plaintext PII in config.json when enc is active.
-      try {
-        const parsed = JSON.parse(fs.readFileSync(realConfig, 'utf8'));
-        // If it parses as a plain config (has person.firstName), that is a leak.
-        return !(parsed && parsed.person && parsed.person.firstName === 'Updated');
-      } catch (_) { return true; }
-    })(), 'plaintext config.json must not appear when encryption is active');
-    // The enc file must still exist and decrypt to the merged result.
-    assert.ok(fs.existsSync(realConfigEnc), 'config.json.enc must exist after encrypted PUT');
-    const savedEnv = JSON.parse(fs.readFileSync(realConfigEnc, 'utf8'));
-    const decrypted = secrets.decryptConfig(savedEnv, PASSPHRASE);
+    // The critical invariant: no plaintext PII in config.json when enc is active.
+    assert.equal(fs.existsSync(paths.config), false, 'plaintext config.json must not appear when encryption is active');
+    assert.ok(fs.existsSync(paths.enc), 'config.json.enc must exist after encrypted PUT');
+    const decrypted = secrets.decryptConfig(readJson(paths.enc), PASSPHRASE);
     assert.equal(decrypted.person.firstName, 'Updated', 'person.firstName must be updated in enc file');
     assert.equal(decrypted.capsolver.apiKey, 'ORIGINAL-SECRET', 'masked sentinel must preserve original secret in enc file');
     assert.equal(decrypted.notify.webhook, 'https://hooks.example.com/original', 'untouched field must be preserved via merge base');
-  } finally {
-    await close();
-  }
+  });
 });
 
 test('PUT /api/config without encryption writes plaintext (unchanged behavior)', async () => {
   const plain = { person: { firstName: 'Bob' }, capsolver: { apiKey: 'ORIGINAL-BOB' } };
-  const { server, close, realConfig, realConfigEnc } = await buildServer({ cfgContent: plain });
-  try {
-    const r = await request(server, {
-      method: 'PUT',
-      pathname: '/api/config',
-      headers: {
-        Authorization: basicAuth('testuser', 'testpass'),
-        Origin: `http://127.0.0.1:${server.address().port}`,
-      },
+  await withServer({ cfgContent: plain }, async ({ request, paths }) => {
+    const r = await request({
+      method: 'PUT', pathname: '/api/config',
       body: { config: { person: { firstName: 'BobUpdated' }, capsolver: { apiKey: MASK } } },
     });
     assert.equal(r.status, 200, `expected 200, got ${r.status}: ${JSON.stringify(r.json)}`);
-    // config.json must be plaintext and contain the update.
-    const saved = JSON.parse(fs.readFileSync(realConfig, 'utf8'));
+    const saved = readJson(paths.config);
     assert.equal(saved.person.firstName, 'BobUpdated');
     assert.equal(saved.capsolver.apiKey, 'ORIGINAL-BOB', 'masked sentinel preserves secret in plaintext mode');
-    // No enc file should appear.
-    assert.ok(!fs.existsSync(realConfigEnc), 'config.json.enc must not appear for plaintext config');
-  } finally {
-    await close();
-  }
+    assert.ok(!fs.existsSync(paths.enc), 'config.json.enc must not appear for plaintext config');
+  });
 });
 
-// -- Fix 2: secret-clear escape hatch -----------------------------------------
+// -- secret-clear escape hatch -------------------------------------------------
 
 test('PUT /api/config with explicit empty string clears a secret field', async () => {
   const plain = { capsolver: { apiKey: 'SECRET-TO-CLEAR' }, person: { firstName: 'Clara' } };
-  const { server, close, realConfig } = await buildServer({ cfgContent: plain });
-  try {
-    // Send empty string for capsolver.apiKey (user intentionally cleared it).
-    const r = await request(server, {
-      method: 'PUT',
-      pathname: '/api/config',
-      headers: {
-        Authorization: basicAuth('testuser', 'testpass'),
-        Origin: `http://127.0.0.1:${server.address().port}`,
-      },
-      body: { config: { capsolver: { apiKey: '' } } },
-    });
+  await withServer({ cfgContent: plain }, async ({ request, paths }) => {
+    const r = await request({ method: 'PUT', pathname: '/api/config', body: { config: { capsolver: { apiKey: '' } } } });
     assert.equal(r.status, 200, `expected 200, got ${r.status}: ${JSON.stringify(r.json)}`);
-    const saved = JSON.parse(fs.readFileSync(realConfig, 'utf8'));
-    assert.equal(saved.capsolver.apiKey, '', 'explicit empty string must clear the secret field');
-  } finally {
-    await close();
-  }
+    assert.equal(readJson(paths.config).capsolver.apiKey, '', 'explicit empty string must clear the secret field');
+  });
 });
 
 test('PUT /api/config with MASK sentinel preserves existing secret (not cleared)', async () => {
-  const plain = { capsolver: { apiKey: 'PRESERVED-SECRET' } };
-  const { server, close, realConfig } = await buildServer({ cfgContent: plain });
-  try {
-    const r = await request(server, {
-      method: 'PUT',
-      pathname: '/api/config',
-      headers: {
-        Authorization: basicAuth('testuser', 'testpass'),
-        Origin: `http://127.0.0.1:${server.address().port}`,
-      },
-      body: { config: { capsolver: { apiKey: MASK } } },
-    });
+  await withServer({ cfgContent: { capsolver: { apiKey: 'PRESERVED-SECRET' } } }, async ({ request, paths }) => {
+    const r = await request({ method: 'PUT', pathname: '/api/config', body: { config: { capsolver: { apiKey: MASK } } } });
     assert.equal(r.status, 200);
-    const saved = JSON.parse(fs.readFileSync(realConfig, 'utf8'));
-    assert.equal(saved.capsolver.apiKey, 'PRESERVED-SECRET', 'MASK sentinel must preserve the existing secret');
-  } finally {
-    await close();
-  }
+    assert.equal(readJson(paths.config).capsolver.apiKey, 'PRESERVED-SECRET', 'MASK sentinel must preserve the existing secret');
+  });
 });
 
 // B19: mergeConfig must drop dangerous keys (__proto__ / constructor / prototype)
@@ -795,50 +379,35 @@ test('PUT /api/config with MASK sentinel preserves existing secret (not cleared)
 // keys must be dropped outright, not merely neutralised by assignment semantics,
 // so the merged object carries no manipulated prototype and no polluting own key.
 test('mergeConfig drops __proto__/constructor/prototype keys without polluting', () => {
-  const { mergeConfig } = require('./server');
   // JSON.parse produces __proto__/constructor as OWN enumerable properties.
   const incoming = JSON.parse('{"person":{"firstName":"Updated","__proto__":{"polluted":"yes"}},"constructor":{"polluted":"c"},"prototype":{"polluted":"p"},"__proto__":{"polluted":"top"}}');
   const out = mergeConfig({ person: { firstName: 'Peggy' } }, incoming);
-  // No global pollution.
   assert.equal({}.polluted, undefined, 'Object.prototype must not be polluted');
-  // Legitimate field survives.
   assert.equal(out.person.firstName, 'Updated', 'legitimate field must still be merged');
-  // Dangerous keys are dropped, not present as own properties.
   assert.equal(Object.prototype.hasOwnProperty.call(out, 'constructor'), false, 'constructor own-key must be dropped');
   assert.equal(Object.prototype.hasOwnProperty.call(out, 'prototype'), false, 'prototype own-key must be dropped');
   assert.equal(Object.prototype.hasOwnProperty.call(out.person, 'polluted'), false, 'nested pollution must not leak');
-  // Merged object must keep a clean prototype (no __proto__ manipulation).
   assert.equal(Object.getPrototypeOf(out), Object.prototype, 'merged object must have a clean prototype');
   assert.equal(Object.getPrototypeOf(out.person), Object.prototype, 'nested merged object must have a clean prototype');
 });
 
 test('PUT /api/config with a nested __proto__ does not pollute and is dropped', async () => {
-  const plain = { person: { firstName: 'Peggy' } };
-  const { server, close, realConfig } = await buildServer({ cfgContent: plain });
-  try {
-    const r = await request(server, {
-      method: 'PUT',
-      pathname: '/api/config',
-      headers: {
-        Authorization: basicAuth('testuser', 'testpass'),
-        Origin: `http://127.0.0.1:${server.address().port}`,
-      },
-      body: { config: { person: { firstName: 'Updated', __proto__: { polluted: 'yes' } }, __proto__: { polluted: 'yes' } } },
+  await withServer({ cfgContent: { person: { firstName: 'Peggy' } } }, async ({ request, paths }) => {
+    // JSON.parse so __proto__ is a real own key on the wire.
+    const r = await request({
+      method: 'PUT', pathname: '/api/config',
+      rawBody: '{"config":{"person":{"firstName":"Updated","__proto__":{"polluted":"yes"}},"__proto__":{"polluted":"yes"}}}',
     });
     assert.equal(r.status, 200, `expected 200, got ${r.status}: ${JSON.stringify(r.json)}`);
-    // Global prototype must remain unpolluted.
     assert.equal({}.polluted, undefined, 'Object.prototype must not be polluted');
-    // The dangerous key must not be persisted as an own property either.
-    const saved = JSON.parse(fs.readFileSync(realConfig, 'utf8'));
+    const saved = readJson(paths.config);
     assert.equal(saved.person.firstName, 'Updated', 'legitimate field must still be updated');
     assert.equal(Object.prototype.hasOwnProperty.call(saved.person, 'polluted'), false, 'polluted own-prop must not be persisted');
     assert.equal(saved.polluted, undefined, 'top-level polluted must not be persisted');
-  } finally {
-    await close();
-  }
+  });
 });
 
-// -- Issue #8 cross-model review: secret masking + plaintext-spill guard -------
+// -- Issue #8 cross-model review: secret masking + plaintext-spill guard --------
 //
 // Two independent reviews (OpenAI codex and a second Claude pass) both flagged
 // that SECRET_PATHS covered only 3 of the 5 secret leaves config.example.json
@@ -847,13 +416,11 @@ test('PUT /api/config with a nested __proto__ does not pollute and is dropped', 
 // walked away with reusable third-party API keys.
 
 test('maskConfig masks the SimpleLogin relay API key', () => {
-  const masked = maskConfig({ relay: { apiKey: 'SL-LIVE-SECRET' } });
-  assert.equal(masked.relay.apiKey, MASK, 'relay.apiKey is a live credential and must be masked');
+  assert.equal(maskConfig({ relay: { apiKey: 'SL-LIVE-SECRET' } }).relay.apiKey, MASK, 'relay.apiKey is a live credential and must be masked');
 });
 
 test('maskConfig masks the HIBP API key', () => {
-  const masked = maskConfig({ hibp: { apiKey: 'HIBP-LIVE-SECRET' } });
-  assert.equal(masked.hibp.apiKey, MASK, 'hibp.apiKey is a paid credential and must be masked');
+  assert.equal(maskConfig({ hibp: { apiKey: 'HIBP-LIVE-SECRET' } }).hibp.apiKey, MASK, 'hibp.apiKey is a paid credential and must be masked');
 });
 
 test('maskConfig covers every secret leaf that config.example.json declares', () => {
@@ -886,31 +453,22 @@ test('PUT /api/config refuses to write plaintext beside an active encrypted conf
   // disk in the clear, and loadConfig() still prefers the .enc file, so the edit
   // the operator just made silently did nothing.
   const plain = { person: { firstName: 'Alice', lastName: 'Smith' }, capsolver: { apiKey: 'ORIGINAL' } };
-  const envelope = secrets.encryptConfig(plain, 'the-real-passphrase');
-  const { server, close, realConfig } = await buildServer({ encContent: envelope }); // no passphrase
-  try {
-    const r = await request(server, {
-      method: 'PUT',
-      pathname: '/api/config',
-      headers: {
-        Authorization: basicAuth('testuser', 'testpass'),
-        Origin: `http://127.0.0.1:${server.address().port}`,
-      },
+  const encContent = secrets.encryptConfig(plain, 'the-real-passphrase');
+  await withServer({ encContent }, async ({ request, paths }) => { // no passphrase
+    const r = await request({
+      method: 'PUT', pathname: '/api/config',
       body: { config: { person: { firstName: 'Updated', lastName: 'Smith' } } },
     });
-
     assert.notEqual(r.status, 200, 'the write must be rejected, not silently downgraded to plaintext');
-    assert.match(
-      JSON.stringify(r.json || {}),
-      /passphrase/i,
-      'the error should tell the operator to supply AIDR_PASSPHRASE',
-    );
-    assert.equal(
-      fs.existsSync(realConfig),
-      false,
-      'no plaintext config.json may be created next to an active config.json.enc',
-    );
-  } finally {
-    await close();
-  }
+    assert.match(JSON.stringify(r.json || {}), /passphrase/i, 'the error should tell the operator to supply AIDR_PASSPHRASE');
+    assert.equal(fs.existsSync(paths.config), false, 'no plaintext config.json may be created next to an active config.json.enc');
+  });
+});
+
+// keep basicAuth exported from the harness exercised: a wrong password is a 401
+test('a wrong Basic password is rejected', async () => {
+  await withServer({}, async ({ rawRequest }) => {
+    const r = await rawRequest({ pathname: '/api/version', headers: { Authorization: basicAuth('testuser', 'wrong') } });
+    assert.equal(r.status, 401);
+  });
 });
