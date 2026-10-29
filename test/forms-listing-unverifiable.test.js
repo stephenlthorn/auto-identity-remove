@@ -29,7 +29,7 @@ process.env.TURBO = '1';
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { findListingUrl } = require('../lib/forms');
+const { findListingUrl, probeSearchPage, isEmailLikeControl } = require('../lib/forms');
 
 const BROKER = {
   name: 'ExampleBroker',
@@ -288,4 +288,88 @@ test('the pattern source and flags are handed to the page-side probe', async () 
   await findListingUrl(page, BROKER);
   assert.equal(page.seen.evaluateArgs.src, BROKER.listingPattern.source);
   assert.equal(page.seen.evaluateArgs.flags, BROKER.listingPattern.flags);
+});
+
+// ── the page-side functions are closure-free ─────────────────────────────────
+//
+// Playwright serializes a function with .toString() and rebuilds it in the page,
+// so a reference to anything at module scope is a ReferenceError there that no
+// stubbed test would ever see. Rebuilding the source the same way and running it
+// against a mock document catches that.
+
+function rebuild(fn) {
+  return new Function('return (' + fn.toString() + ')')();
+}
+
+function withDom({ title = 'Results', text = '', anchors = [], frames = [], present = [] }, run) {
+  const saved = { document: global.document, window: global.window };
+  const matches = (sel) => present.some(p => sel.includes(p));
+  global.window = { location: { href: 'https://www.example.com/search' }, getComputedStyle: () => ({ visibility: 'visible', display: 'block' }) };
+  global.document = {
+    title,
+    body: { innerText: text },
+    querySelector: (sel) => (matches(sel) ? {} : null),
+    querySelectorAll: (sel) => (sel === 'a[href]' ? anchors : sel === 'iframe[src]' ? frames : []),
+  };
+  try { return run(); } finally {
+    for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete global[k]; else global[k] = v; }
+  }
+}
+
+const anchor = (href, text) => ({ href, textContent: text });
+const frame = (src, w = 300, h = 80) => ({
+  getAttribute: () => src,
+  getBoundingClientRect: () => ({ width: w, height: h }),
+});
+
+test('probeSearchPage rebuilds from its source and reports links, text and markers', () => {
+  const probe = withDom({
+    title: 'Jane Doe',
+    text: 'Some results text',
+    anchors: [anchor('https://www.example.com/people/jane-1', ' Jane \n Doe '), anchor('https://www.example.com/about', 'About')],
+  }, () => rebuild(probeSearchPage)({ src: 'example\\.com/people/', flags: 'gi' }));
+
+  assert.equal(probe.title, 'Jane Doe');
+  assert.equal(probe.url, 'https://www.example.com/search');
+  assert.deepEqual(probe.links, [{ href: 'https://www.example.com/people/jane-1', text: 'Jane Doe' }]);
+  assert.equal(probe.textLength, 17);
+  assert.deepEqual(probe.markers, []);
+});
+
+test('probeSearchPage with a g-flag pattern still matches every link (no stateful test())', () => {
+  const probe = withDom({
+    anchors: [anchor('https://www.example.com/people/a', 'A'), anchor('https://www.example.com/people/b', 'B')],
+  }, () => rebuild(probeSearchPage)({ src: 'example\\.com/people/', flags: 'g' }));
+  assert.equal(probe.links.length, 2);
+});
+
+test('probeSearchPage reports interstitial elements and visible challenge frames, not the invisible badge', () => {
+  const probe = withDom({
+    present: ['#challenge-form', '#px-captcha'],
+    frames: [
+      frame('https://www.google.com/recaptcha/api2/anchor?k=x&size=normal'),
+      frame('https://www.google.com/recaptcha/api2/anchor?k=x&size=invisible'),
+      frame('https://newassets.hcaptcha.com/captcha/v1/abc/static/hcaptcha.html'),
+      frame('https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile'),
+    ],
+  }, () => rebuild(probeSearchPage)({ src: 'x', flags: '' }));
+  assert.deepEqual(probe.markers.sort(), ['cloudflare-challenge', 'hcaptcha', 'perimeterx', 'recaptcha', 'turnstile']);
+
+  const onlyBadge = withDom({
+    frames: [frame('https://www.google.com/recaptcha/api2/anchor?k=x&size=invisible')],
+  }, () => rebuild(probeSearchPage)({ src: 'x', flags: '' }));
+  assert.deepEqual(onlyBadge.markers, []);
+});
+
+test('isEmailLikeControl rebuilds from its source and spots email controls', () => {
+  const el = (props) => ({
+    type: 'text', name: '', id: '', placeholder: '', labels: [],
+    getAttribute: () => null, ...props,
+  });
+  const isEmail = rebuild(isEmailLikeControl);
+  assert.equal(isEmail(el({ type: 'email' })), true);
+  assert.equal(isEmail(el({ name: 'email_addr' })), true);
+  assert.equal(isEmail(el({ placeholder: 'Your e-mail' })), true);
+  assert.equal(isEmail(el({ labels: [{ textContent: 'Email address' }] })), true);
+  assert.equal(isEmail(el({ name: 'city', labels: [{ textContent: 'City' }] })), false);
 });

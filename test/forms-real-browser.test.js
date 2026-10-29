@@ -217,6 +217,20 @@ describe('forms real-browser checks', { skip: !ENABLED }, () => {
     }
   });
 
+  test('a non-email selector never fills an email control, by name or through its label', async () => {
+    const page = await formPage(`
+      <input name="email_addr" id="a">
+      <label for="b">Contact</label><input id="b" name="contact_email" type="email">`);
+    try {
+      await fillForm(page, { 'input[name*="addr" i]': 'Austin' });
+      await fillForm(page, { 'input[name*="contact" i]': 'Austin' });
+      assert.equal(await valueOf(page, '#a'), '');
+      assert.equal(await valueOf(page, '#b'), '');
+    } finally {
+      await page.close();
+    }
+  });
+
   const TRAPS = {
     'left:-9999px': 'position:absolute;left:-9999px;top:0',
     'top:-9999px': 'position:absolute;top:-9999px;left:0',
