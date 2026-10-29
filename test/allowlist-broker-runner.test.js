@@ -78,11 +78,14 @@ function clearAll() {
 const PERSON = { firstName: 'Test', lastName: 'User', email: 'test@example.com', country: 'US' };
 
 function makeContext() {
+  // Result text appears only after the submit click: the runner classifies text
+  // that is new since the click (BRK-4).
+  let clicked = false;
   return {
     newPage: async () => ({
       goto: async () => {},
-      locator: () => ({ first: () => ({ fill: async () => {}, count: async () => 1, isVisible: async () => true, click: async () => {} }) }),
-      evaluate: async () => 'page body text',
+      locator: () => ({ first: () => ({ fill: async () => {}, count: async () => 1, isVisible: async () => true, click: async () => { clicked = true; } }) }),
+      evaluate: async () => (clicked ? 'page body text' : 'page before submit'),
       close: async () => {},
     }),
   };

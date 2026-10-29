@@ -75,8 +75,11 @@ function clearAll() {
 
 const PERSON = { firstName: 'Test', lastName: 'User', email: 'test@example.com', country: 'US' };
 
-// Context whose page body is controllable
+// Context whose page body is controllable. The body only changes once the
+// submit button is clicked: the runner classifies text that is NEW since the
+// click (BRK-4), so a page that never changes can never be success.
 function makeContext() {
+  let clicked = false;
   return {
     newPage: async () => ({
       goto: async () => {},
@@ -85,15 +88,15 @@ function makeContext() {
           fill: async () => {},
           count: async () => 1,
           isVisible: async () => true,
-          click: async () => {},
+          click: async () => { clicked = true; },
         }),
       }),
       evaluate: async (fn) => {
         // page.evaluate is used in two ways:
-        //   1. () => document.body?.innerText || '' (post-submit body read)
+        //   1. () => document.body?.innerText || '' (body reads before/after the click)
         //   2. () => [...document.querySelectorAll(...)] (preview field dump)
-        // We return pageBody for the innerText call, empty array otherwise.
-        return pageBody;
+        // We return pageBody for the innerText call once clicked, the form otherwise.
+        return clicked ? pageBody : 'Opt out of this site';
       },
       close: async () => {},
     }),
@@ -232,11 +235,12 @@ test('failure post-submit: recordSuccess is NOT called', async () => {
 // B13: a dead HTTP status (404/410/5xx) on the opt-out URL must short-circuit
 // BEFORE the form is filled/submitted, logging 'error' (not success/unverified).
 function makeContextWithStatus(statusCode) {
+  let clicked = false;
   return {
     newPage: async () => ({
       goto: async () => ({ status: () => statusCode }),
-      locator: () => ({ first: () => ({ fill: async () => {}, count: async () => 1, isVisible: async () => true, click: async () => {} }) }),
-      evaluate: async () => pageBody,
+      locator: () => ({ first: () => ({ fill: async () => {}, count: async () => 1, isVisible: async () => true, click: async () => { clicked = true; } }) }),
+      evaluate: async () => (clicked ? pageBody : 'Opt out of this site'),
       close: async () => {},
     }),
   };
