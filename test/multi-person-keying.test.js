@@ -103,6 +103,9 @@ function clearRecorded() {
 }
 
 function makeContext() {
+  // Result text appears only after the submit click: the runner classifies text
+  // that is new since the click (BRK-4).
+  let clicked = false;
   return {
     newPage: async () => ({
       goto: async () => {},
@@ -111,10 +114,10 @@ function makeContext() {
           fill: async () => {},
           count: async () => 1,
           isVisible: async () => true,
-          click: async () => {},
+          click: async () => { clicked = true; },
         }),
       }),
-      evaluate: async () => 'You have been removed.',
+      evaluate: async () => (clicked ? 'You have been removed.' : 'Opt out of this site'),
       close: async () => {},
     }),
   };

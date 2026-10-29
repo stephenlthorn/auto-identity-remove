@@ -84,6 +84,9 @@ Module._load = originalLoad;
 // -- Page / context mocks --
 
 function makePage(body, htmlLang) {
+  // The result body only appears once the submit button is clicked: the runner
+  // classifies text that is new since the click (BRK-4).
+  let clicked = false;
   return {
     async goto() {},
     locator() {
@@ -92,7 +95,7 @@ function makePage(body, htmlLang) {
         async fill() {},
         async count() { return 1; },
         async isVisible() { return true; },
-        async click() {},
+        async click() { clicked = true; },
       };
     },
     async evaluate(fn) {
@@ -101,7 +104,7 @@ function makePage(body, htmlLang) {
       // running the supplied function against a tiny fake DOM.
       const fakeDoc = {
         documentElement: { getAttribute: (name) => (name === 'lang' ? htmlLang : null) },
-        body: { innerText: body },
+        body: { innerText: clicked ? body : 'Formulario de baja' },
         querySelectorAll: () => [],
       };
       const globalDocument = global.document;

@@ -167,6 +167,9 @@ const BROKER = {
 };
 
 function makeContext({ screenshotSpy } = {}) {
+  // Result text appears only after the submit click: the runner classifies text
+  // that is new since the click (BRK-4).
+  let clicked = false;
   return {
     newPage: async () => ({
       goto: async () => {},
@@ -175,11 +178,11 @@ function makeContext({ screenshotSpy } = {}) {
           fill: async () => {},
           count: async () => 1,
           isVisible: async () => true,
-          click: async () => {},
+          click: async () => { clicked = true; },
         }),
       }),
       screenshot: screenshotSpy || (async () => {}),
-      evaluate: async () => '',
+      evaluate: async () => (clicked ? 'Your request was received.' : ''),
       close: async () => {},
     }),
   };

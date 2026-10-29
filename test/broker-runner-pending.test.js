@@ -58,16 +58,19 @@ Module._load = originalLoad;
 
 // Minimal Playwright stub - supports newPage / page.goto / page.locator / page.close / page.evaluate.
 function makeContext() {
+  // The result text appears only after the submit click: the runner classifies
+  // text that is new since the click (BRK-4).
+  let clicked = false;
   return {
     newPage: async () => ({
       goto: async () => ({}),
-      evaluate: async () => 'Your request was received.',
+      evaluate: async () => (clicked ? 'Your request was received.' : 'Opt out of this site'),
       locator: () => ({
         first: () => ({
           fill: async () => {},
           count: async () => 1,
           isVisible: async () => true,
-          click: async () => {},
+          click: async () => { clicked = true; },
         }),
       }),
       close: async () => {},
