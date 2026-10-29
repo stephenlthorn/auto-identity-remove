@@ -38,34 +38,18 @@ const BOB = {
   email: 'bob@example.com', state: 'NY', zip: '10001',
 };
 
-/** Minimal context whose pages record what got typed into them. */
+const { makeFakePage, optOutForm } = require('./helpers/generic-fake-page');
+
+/**
+ * Minimal context whose page is one real opt-out form. What gets typed lands in
+ * `filled`; the form confirms with success wording, so the run is recorded.
+ */
 function makeContext(filled) {
-  const page = {
-    goto: async () => ({ status: () => 200 }),
-    waitForTimeout: async () => {},
-    content: async () => '<html><body>thanks</body></html>',
-    url: () => 'https://broker.example/opt-out',
-    close: async () => {},
-    locator: (sel) => {
-      const isSubmit = sel.includes('button[type="submit"]');
-      const isField = /input\[(type="email"|name)/.test(sel);
-      const present = isSubmit || isField;
-      const self = {
-        first: () => self,
-        all: async () => [],
-        count: async () => (present ? 1 : 0),
-        isVisible: async () => present,
-        evaluate: async (fn) => fn({ tagName: 'INPUT', type: 'text' }),
-        fill: async (v) => { filled.push(v); },
-        selectOption: async () => {},
-        check: async () => {},
-        click: async () => {},
-        locator: () => self,
-        allTextContents: async () => [],
-      };
-      return self;
-    },
-  };
+  const page = makeFakePage({
+    forms: [optOutForm({ afterSubmit: { body: 'Your request has been received.' } })],
+  });
+  const typed = page.filled;
+  typed.push = (entry) => { filled.push(entry.value); return Array.prototype.push.call(typed, entry); };
   return { newPage: async () => page };
 }
 
