@@ -100,3 +100,71 @@ test('every runtime file kept out of git is also kept out of the image', () => {
     'COPY . . will bake these into the image; add them to .dockerignore: ' + leaks.join(', ')
   );
 });
+
+// ── Temp, quarantine and secret files (CFG-15a) ──────────────────────────────
+//
+// The atomic writers leave config.json.tmp, config.json.enc.tmp and
+// state.json.bak.tmp behind when killed mid-write; a corrupt state.json is
+// quarantined as state.json.corrupt-<ts>; the dashboard keeps its generated
+// credentials in dashboard/.auth.json; and the documented unattended-run recipe
+// puts the encrypted config's passphrase in aidr-home/aidr.passphrase. Every one
+// of them is PII or a secret, and the Docker recipe's aidr-home/ directory holds
+// the whole lot.
+
+const EXTRA_RUNTIME_PATHS = [
+  'config.json.tmp',
+  'config.json.enc.tmp',
+  'state.json.bak.tmp',
+  'state.json.corrupt-2026-10-29T09-00-00-000Z',
+  'dashboard/.auth.json',
+  'aidr.passphrase',
+  'aidr-home/config.json',
+  'aidr-home/state.json',
+  'aidr-home/aidr.passphrase',
+  'aidr-home/logs/run-2026-10-29T09-00-00.json',
+].map(rel => path.join(ROOT, rel));
+
+test('every temp, quarantine and secret file is git-ignored', () => {
+  const leaks = EXTRA_RUNTIME_PATHS.filter(p => !isIgnored(p)).map(p => path.relative(ROOT, p));
+  assert.deepEqual(leaks, [], `these are committable: ${leaks.join(', ')}`);
+});
+
+/**
+ * Minimal .dockerignore matcher for the shapes this repo uses: literal paths,
+ * a directory name (matches everything under it), and `*` / `**` globs.
+ * Docker's own matcher is not reimplemented in full; this covers what the
+ * entries below need.
+ */
+function dockerignoreCovers(rel, patterns) {
+  return patterns.some(raw => {
+    const pat = raw.replace(/\/$/, '');
+    const re = new RegExp(
+      '^' + pat
+        .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+        .replace(/\*\*\//g, '\u0001')
+        .replace(/\*\*/g, '\u0002')
+        .replace(/\*/g, '\u0003')
+        .replace(/\u0001/g, '(?:.*/)?')
+        .replace(/\u0002/g, '.*')
+        .replace(/\u0003/g, '[^/]*') + '(?:/.*)?$',
+    );
+    return re.test(rel);
+  });
+}
+
+test('the dockerignore matcher is not failing open', () => {
+  assert.equal(dockerignoreCovers('config.json', ['config.json']), true);
+  assert.equal(dockerignoreCovers('aidr-home/x/y', ['aidr-home/']), true);
+  assert.equal(dockerignoreCovers('a/b/k.passphrase', ['**/*.passphrase']), true);
+  assert.equal(dockerignoreCovers('k.passphrase', ['**/*.passphrase']), true);
+  assert.equal(dockerignoreCovers('lib/config.js', ['config.json']), false);
+  assert.equal(dockerignoreCovers('state.json.bak.tmp', ['state.json.bak']), false);
+});
+
+test('every temp, quarantine and secret file is also kept out of the image', () => {
+  const patterns = dockerignorePatterns();
+  const leaks = EXTRA_RUNTIME_PATHS
+    .map(p => path.relative(ROOT, p))
+    .filter(rel => !dockerignoreCovers(rel, patterns));
+  assert.deepEqual(leaks, [], 'COPY . . will bake these into the image; add them to .dockerignore: ' + leaks.join(', '));
+});

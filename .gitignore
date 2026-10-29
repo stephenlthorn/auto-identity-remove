@@ -7,6 +7,11 @@ state.json.checkpoint
 state.json.checkpoint.tmp
 state.json.tmp
 state.json.lock
+config.json.tmp
+config.json.enc.tmp
+state.json.bak.tmp
+state.json.corrupt-*
+dashboard/.auth.json
 serp-history.json
 data/serp-history.json
 data/feeds-brokers.json
@@ -22,3 +27,9 @@ logs/reports/
 
 # TLS material (e.g. an exported Proton Mail Bridge cert/key for SMTP)
 *.pem
+
+# Secrets and the Docker recipe's single data directory (config, state, logs).
+# aidr-home/ holds everything above, plus the passphrase file for unattended
+# runs on an encrypted config.
+*.passphrase
+aidr-home/

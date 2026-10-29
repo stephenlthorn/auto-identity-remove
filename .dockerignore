@@ -18,6 +18,13 @@ state.json.checkpoint
 state.json.checkpoint.tmp
 state.json.tmp
 state.json.lock
+config.json.tmp
+config.json.enc.tmp
+state.json.bak.tmp
+state.json.corrupt-*
+dashboard/.auth.json
+aidr-home/
+**/*.passphrase
 inbox/
 logs
 logs/
