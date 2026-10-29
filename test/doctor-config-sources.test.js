@@ -23,6 +23,11 @@ const secrets = require('../lib/secrets');
 const cfgModule = require('../lib/config');
 const { checkConfig, checkState, checkWebhook, runDoctor } = require('../lib/doctor');
 
+// R4: runDoctor also reads the installed schedule. These tests are about other
+// checks, so the schedule is stubbed and nothing here asks the real crontab,
+// launchd or systemd anything.
+const NO_SCHEDULE = { installed: false, kind: null, kinds: [], schedule: null, target: null, active: null, env: {}, plaintextPassphrase: false, lastRun: null };
+
 const PERSON = { firstName: 'Radia', lastName: 'Perlman', email: 'radia@perlman-net.org', zip: '02139' };
 const FULL = {
   person: PERSON,
@@ -89,6 +94,7 @@ describe('doctor with an encrypted config', () => {
       tcpProbe: async (host, port) => { probed.push(`${host}:${port}`); return true; },
       headRequest: async () => 200,
       printOutput: false,
+      scheduleStatus: NO_SCHEDULE,
     }));
     const byName = Object.fromEntries(results.map(r => [r.name, r]));
     assert.equal(byName.config.ok, true, byName.config.hint);
@@ -151,6 +157,7 @@ describe('doctor state path', () => {
         tcpProbe: async () => true,
         headRequest: async () => 200,
         printOutput: false,
+        scheduleStatus: NO_SCHEDULE,
       });
       const state = results.find(r => r.name === 'state');
       assert.equal(state.ok, false, state.hint);
