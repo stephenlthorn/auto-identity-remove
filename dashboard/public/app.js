@@ -22,7 +22,7 @@ const safeUrl = u => /^https?:\/\//i.test(u || '') ? u : null;
 // A field still showing this value was never edited - do not send it back.
 const MASK = '••••••••';
 
-let brokers = [], state = {};
+let brokers = [];
 
 // ---------- summary ----------
 async function loadSummary() {
@@ -34,7 +34,9 @@ async function loadSummary() {
       pill(`${s.optedOut} opted out`, s.optedOut ? 'good' : 'muted'),
       pill(`${s.pending} pending`, s.pending ? 'warn' : 'muted'),
       pill(`${s.manual} manual`, 'muted'),
-      pill(s.configured ? 'config ✓' : 'no config', s.configured ? 'good' : 'bad'),
+      s.configLocked
+        ? pill('config locked', 'bad')
+        : pill(s.configured ? 'config ✓' : 'no config', s.configured ? 'good' : 'bad'),
       pill(s.capsolver ? 'CapSolver ✓' : 'CapSolver ✗', s.capsolver ? 'good' : 'warn'),
       pill(s.smtp ? 'SMTP ✓' : 'SMTP ✗', s.smtp ? 'good' : 'warn'),
       s.stateError ? pill('state.json unreadable', 'bad') : '',
@@ -48,37 +50,23 @@ function fmtDate(raw) {
   const d = new Date(raw);
   return isNaN(d.getTime()) ? String(raw) : d.toLocaleString();
 }
-// Align status->badge mapping EXACTLY to dashboard/validate.js classifyStatus.
-// Source of truth: validate.js. This switch must be kept identical to that
-// function's switch block. Do NOT add fuzzy regexes here.
-// Vocab (lib/logger.js): success / notFound / unverified / pending_confirm /
-//   error / captcha_failed / dead / manual
-// Returns one of: ok / notfound / pending / error / manual / other
-function _classifyStatus(raw) {
-  switch (raw) {
-    case 'success':         return 'ok';
-    case 'notfound':        return 'notfound';
-    case 'pending_confirm': return 'pending';
-    case 'unverified':      return 'pending';
-    case 'error':           return 'error';
-    case 'captcha_failed':  return 'error';
-    case 'dead':            return 'error';
-    case 'manual':          return 'manual';
-    default:                return 'other';
-  }
-}
-function statusFor(name) {
-  const o = (state.optOuts && state.optOuts[name]) || null;
-  if (!o) return { key: 'none', label: '-', date: '' };
-  const hist = Array.isArray(o.history) ? o.history : [];
-  const raw = String(hist[hist.length - 1] || o.status || '').toLowerCase();
-  const key = raw ? _classifyStatus(raw) : 'other';
-  return { key, label: raw || '-', date: fmtDate(o.lastSuccess || o.lastAttempt || '') };
+// GET /api/brokers ships each broker's status, already classified by
+// dashboard/validate.js (aggregateBrokerStatus) and already summed over the
+// "Broker|First Last" keys multi-person installs write. There is deliberately
+// no second copy of the status mapping in this file.
+const NO_STATUS = { key: 'none', label: '-', date: '', count: 0, people: [] };
+function statusOf(b) {
+  if (b.method === 'manual') return { key: 'manual', label: 'manual', date: '', count: 0, people: [] };
+  return b.status || NO_STATUS;
 }
 function renderBrokers() {
   const q = $('#brokerSearch').value.toLowerCase();
   const rows = brokers.filter(b => b.name.toLowerCase().includes(q)).map(b => {
-    const st = b.method === 'manual' ? { key: 'manual', label: 'manual', date: '' } : statusFor(b.name);
+    const st = statusOf(b);
+    // More than one person: show the worst status and list each person on hover.
+    const people = (st.people || []).filter(p => p.person);
+    const detail = people.map(p => `${p.person}: ${p.label}`).join('; ');
+    const label = st.count > 1 ? `${st.label} (${st.count} people)` : st.label;
     const url = safeUrl(b.optOutUrl);
     const nameCell = url
       ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(b.name)}</a>`
@@ -90,8 +78,8 @@ function renderBrokers() {
       <td class="method">${esc(b.method || '')}</td>
       <td>${esc(b.priority ?? '')}</td>
       <td>${b.usOnly ? 'US' : 'intl'}</td>
-      <td><span class="badge ${st.key}">${esc(st.label)}</span></td>
-      <td class="dim">${esc(st.date)}</td>
+      <td><span class="badge ${esc(st.key)}"${detail ? ` title="${esc(detail)}"` : ''}>${esc(label)}</span></td>
+      <td class="dim">${esc(fmtDate(st.date))}</td>
       <td>${action}</td>
     </tr>`;
   }).join('');
@@ -105,8 +93,9 @@ function renderBrokers() {
 // Fix 4: add .catch to loadBrokers so a failed load shows an error, not a blank table.
 async function loadBrokers() {
   try {
-    [brokers, state] = await Promise.all([api('/brokers'), api('/state')]);
-    if (state && state.error) state = {};
+    const list = await api('/brokers');
+    if (!Array.isArray(list)) throw new Error((list && list.error) || 'unexpected response');
+    brokers = list;
     renderBrokers();
   } catch (err) {
     $('#brokerTable tbody').innerHTML = `<tr><td colspan="7" class="dim">failed to load brokers: ${esc(err && err.message || String(err))}</td></tr>`;
@@ -320,14 +309,57 @@ $$('[data-preset]').forEach(b => b.addEventListener('click', () => postSchedule(
 // ---------- config ----------
 const getPath = (o, p) => p.split('.').reduce((a, k) => (a == null ? a : a[k]), o);
 function setPath(o, p, v) { const ks = p.split('.'); let c = o; ks.slice(0, -1).forEach(k => { c[k] = c[k] || {}; c = c[k]; }); c[ks.at(-1)] = v; }
+
+// A multi-person config keeps its people in persons[]; brokers and the runner
+// resolve the person from there. The Person fieldset therefore edits persons[0]
+// (the server applies a `person` edit to persons[0]); it must never be allowed to
+// grow a blank `person` key next to persons[], which is what it used to do.
+const usesPersons = c => !!c && Array.isArray(c.persons) && c.persons.length > 0;
+const personView = c => (usesPersons(c) ? c.persons[0] : (c && c.person)) || {};
+const formView = c => ({ ...(c || {}), person: personView(c) });
+
+// What the server reported the last time the config was loaded: used to decide
+// whether a blank optional section is new (omit it) or being cleared (send it).
+let loadedConfig = {};
+
+function isBlank(v) {
+  if (v == null) return true;
+  if (typeof v === 'string') return v.trim() === '';
+  if (Array.isArray(v)) return v.every(isBlank);
+  if (typeof v === 'object') return Object.values(v).every(isBlank);
+  return false; // numbers and booleans are content
+}
+
+// Banner shown instead of the first-run wizard when a config EXISTS but cannot
+// be read: encrypted with no/wrong passphrase ("locked"), or truncated/corrupt.
+// The wizard would only invite the user to overwrite a config that is fine.
+function showConfigBanner(status) {
+  const el = $('#configBanner');
+  const locked = !!(status && status.locked);
+  const unreadable = !!(status && status.unreadable);
+  if (!locked && !unreadable) { el.textContent = ''; el.classList.add('hidden'); return; }
+  el.textContent = locked
+    ? 'Your config is encrypted and this dashboard could not unlock it. Restart the dashboard with the correct AIDR_PASSPHRASE set. The setup wizard is hidden on purpose: saving now would overwrite your real config.'
+    : 'config.json exists but could not be read (it may be truncated). Fix the file, or save from the Config tab to replace it - the old file is kept as config.json.bak.';
+  el.classList.remove('hidden');
+}
+
 async function loadConfig() {
   const r = await api('/config');
-  $('#configState').textContent = r.parseError
-    ? '⚠️ config.json exists but could not be parsed - fix or re-save to overwrite.'
-    : (r.exists ? 'Editing live config.json (secrets masked).' : 'No config.json yet - fields prefilled from the example. Save to create it.');
   const c = r.config || {};
+  loadedConfig = c;
+  const people = usesPersons(c) ? c.persons.length : 0;
+  let note;
+  if (r.locked) note = 'Config is encrypted and could not be unlocked - restart the dashboard with the correct AIDR_PASSPHRASE to edit it.';
+  else if (r.parseError) note = '⚠️ config.json exists but could not be parsed. Saving will ask before replacing it (the old file is kept as config.json.bak).';
+  else if (r.exists) note = 'Editing live config.json (secrets masked).';
+  else note = 'No config.json yet - fields prefilled from the example. Save to create it.';
+  if (people > 1) note += ` Multi-person config: the Person section edits person 1 of ${people}; change the others in config.json.`;
+  $('#configState').textContent = note;
+  $('#saveConfig').disabled = !!r.locked;
+  const view = formView(c);
   $$('#configForm input').forEach(inp => {
-    let v = getPath(c, inp.name);
+    let v = getPath(view, inp.name);
     if ((inp.name === 'person.aliases' || inp.name === 'allowlist') && Array.isArray(v)) v = v.join(', ');
     inp.value = v == null ? '' : v;
   });
@@ -350,19 +382,44 @@ $$('.btn-clear-secret').forEach(btn => {
   });
 });
 
-$('#saveConfig').addEventListener('click', async () => {
+function collectConfigForm() {
   const cfg = {};
   $$('#configForm input').forEach(inp => {
     let v = inp.value;
-    // Fix 5: skip only the mask sentinel (untouched secret fields - preserve on server).
+    // Skip only the mask sentinel (untouched secret fields - preserve on server).
     // All other values including empty string are sent so users can clear non-secret fields.
     if (v === MASK) return;
     if (inp.name === 'person.aliases' || inp.name === 'allowlist') v = v.split(',').map(s => s.trim()).filter(Boolean);
     if (inp.name === 'email.smtp.port') v = parseInt(v, 10) || v;
     setPath(cfg, inp.name, v);
   });
-  const r = await api('/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ config: cfg }) });
+  // A blank SMTP section the stored config never had is not sent at all. (The
+  // server also refuses to store one, because the runtime reads a bare
+  // email.smtp as "send through SMTP" and a blank host then errors every email.)
+  // A section that DOES exist is still sent blank, so blanking the form clears it.
+  const hadSmtp = !!(loadedConfig.email && loadedConfig.email.smtp);
+  if (cfg.email && cfg.email.smtp && isBlank(cfg.email.smtp) && !hadSmtp) delete cfg.email.smtp;
+  if (cfg.email && isBlank(cfg.email) && !loadedConfig.email) delete cfg.email;
+  return cfg;
+}
+const putConfig = (cfg, overwrite) => api('/config', {
+  method: 'PUT', headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(overwrite ? { config: cfg, overwrite: true } : { config: cfg }),
+});
+
+$('#saveConfig').addEventListener('click', async () => {
+  const cfg = collectConfigForm();
+  let r = await putConfig(cfg, false);
+  if (r && r.code === 'config_unreadable' && !r.locked) {
+    // The stored file exists but is unreadable: the server refuses to replace it
+    // unless told to. Ask first - this is the only thing standing between a typo
+    // and a destroyed config.
+    const ok = window.confirm('The stored config.json could not be read, so it was not changed.\n\nReplace it with the values in this form? The old file is kept as config.json.bak.');
+    if (!ok) { $('#configState').textContent = 'Not saved - the stored config was left as it was.'; return; }
+    r = await putConfig(cfg, true);
+  }
   $('#configState').textContent = r.ok ? '✅ Saved.' : ('❌ ' + (r.error || 'save failed'));
+  if (r.ok) loadedConfig = r.config || loadedConfig;
   loadSummary();
 });
 
@@ -556,7 +613,8 @@ function wizGetValue(name) {
 // Prefill the wizard inputs from the example config the server returns when
 // config.json is absent (or from a partial live config if one exists).
 function wizPrefill(cfg) {
-  const c = cfg || EXAMPLE_CONFIG_FALLBACK;
+  // A persons[] config is shown through persons[0], like the Config tab.
+  const c = cfg ? formView(cfg) : EXAMPLE_CONFIG_FALLBACK;
   $$('#wizardForm input').forEach(inp => {
     let v = getPath(c, inp.name);
     if (inp.name === 'person.aliases' && Array.isArray(v)) v = v.join(', ');
@@ -702,7 +760,11 @@ function wizWire() {
 async function initWizard() {
   let status;
   try { status = await api('/config/status'); } catch (_) { status = null; }
-  if (!status || status.configured) return false; // already set up: skip the wizard
+  showConfigBanner(status);
+  if (!status || status.error || status.configured) return false; // already set up (or unknown): skip the wizard
+  // A config that exists but cannot be read is not a first run (DASH-10): the
+  // banner explains it, and the wizard would only offer to overwrite it.
+  if (status.locked || status.unreadable) return false;
   // Prefill from the server (example config when config.json is absent).
   let cfgResp;
   try { cfgResp = await api('/config'); } catch (_) { cfgResp = null; }
