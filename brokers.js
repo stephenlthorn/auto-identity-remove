@@ -339,16 +339,11 @@ function buildBrokers(person) {
     usOnly: true,
   },
 
-  {
-    name: 'PublicDataUSA',
-    method: 'direct-form',
-    optOutUrl: 'https://www.publicdatausa.com/remove.php',
-    formFields: { 'input[name*="name" i]': N, 'input[name*="email" i]': E, 'input[name*="state" i]': ST },
-    submitSelector: 'input[type="submit"],button[type="submit"]',
-    captchaLikely: false,
-    priority: 2,
-    usOnly: true,
-  },
+  // PublicDataUSA removed 2026-10-23: domain no longer resolves
+  // (getaddrinfo EAI_AGAIN), and its twin site usa-official.com is also down.
+  // Multiple independent sources confirm the site was shut down around
+  // September 2026. Per the convention above ("Remove from brokers.js if
+  // site is gone"), there's no live site left to opt out of.
 
   {
     name: 'SmartBackgroundChecks',
@@ -416,15 +411,13 @@ function buildBrokers(person) {
     priority: 2,
   },
 
-  {
-    name: 'ClustrMaps',
-    method: 'direct-form',
-    optOutUrl: 'https://clustrmaps.com/bl/opt-out',
-    formFields: { 'input[name*="name" i]': N, 'input[name*="email" i]': E },
-    submitSelector: 'button[type="submit"]',
-    captchaLikely: false,
-    priority: 2,
-  },
+  // ClustrMaps removed 2026-10-23: clustrmaps.com and www. resolve to
+  // 127.0.0.1 from ClustrMaps' own nameservers (srv53), confirmed via
+  // Cloudflare and Google DNS-over-HTTPS too, so no browser anywhere can
+  // reach it. The SOA serial dates the change to about 2026-09-21. The
+  // domain is still registered (to 2027-06), so it may come back - re-add
+  // this entry if it does, and drop clustrmaps.com from data/dead-urls.json
+  // (added so the generic runner's BADBOOL copy stops retrying it).
 
   {
     name: 'PrivateRecords',
@@ -460,23 +453,47 @@ function buildBrokers(person) {
   },
 
   {
+    // Manual since 2026-10-23: the removal page sits behind a HUMAN
+    // (PerimeterX) "Press & Hold" bot challenge - checked live, it returns
+    // 403 to an automated browser before any form renders. The old
+    // /update-my-info page is a 404.
     name: 'ZoomInfo',
-    method: 'direct-form',
-    optOutUrl: 'https://www.zoominfo.com/update-my-info',
-    formFields: { 'input[name*="first" i]': F, 'input[name*="last" i]': L, 'input[type="email"]': E },
-    submitSelector: 'button[type="submit"]',
-    captchaLikely: false,
+    method: 'manual',
+    optOutUrl: 'https://privacyrequest.zoominfo.com/remove/verify',
+    notes: 'Open https://privacyrequest.zoominfo.com/remove/verify, pass the "Press & Hold" check, then follow the email verification to request removal.',
     priority: 1,
   },
 
   {
+    // Manual since 2026-10-23. Clearbit is now HubSpot's "Breeze
+    // Intelligence"; requests go through a DataGrail Privacy Request Center
+    // (old clearbit.com/privacy/opt-out is a 404). Checked live, the deletion
+    // form at /form/deletion?locationCode=US-<ST> has first_name, last_name
+    // and email_address inputs, but direct-form cannot finish it: the
+    // required "relationship" field is a MUI select with a hidden input that
+    // fillForm cannot set, and "Review Request" leads to a second confirm
+    // step, so a single submit click would be reported for a request that
+    // was never sent.
     name: 'Clearbit',
-    method: 'direct-form',
-    optOutUrl: 'https://clearbit.com/privacy/opt-out',
-    formFields: { 'input[type="email"]': E },
-    submitSelector: 'button[type="submit"]',
-    captchaLikely: false,
+    method: 'manual',
+    optOutUrl: 'https://preferences.clearbit.com',
+    notes: 'Open https://preferences.clearbit.com, choose your country and state, then "Start Deletion Request". Pick "Myself", fill name and email, set relationship (usually "Other"), then Review Request and confirm.',
     priority: 1,
+  },
+
+  {
+    // Manual since 2026-10-24. Andrews Wharton ("A Stirista Solution") came in
+    // from the Markup dataset, and its homepage has a marketing sign-up form.
+    // The generic runner filled and submitted it, logged "Form submitted" as
+    // an opt-out, and the user got a "Confirm your subscription" email
+    // instead. Listing it here with the homepage as optOutUrl dedupes the
+    // generic entry by host so the runner never submits that form again; the
+    // real opt-out is Stirista's portal.
+    name: 'Andrews Wharton',
+    method: 'manual',
+    optOutUrl: 'https://www.andrewswharton.com/',
+    notes: 'Do not use the sign-up form on andrewswharton.com, and do not click any "Confirm your subscription" email from it. Andrews Wharton is part of Stirista: opt out at https://unsubscribe.stirista.com/ or email privacy@stirista.com with your name, email and current and prior addresses.',
+    priority: 3,
   },
 
   // ═══ Additional people-search / data broker sites ════════════════════════
@@ -540,9 +557,11 @@ function buildBrokers(person) {
   },
 
   {
+    // URL updated 2026-10-23: old /privacy/data-subject-rights-request
+    // returned 404. Confirmed-live replacement is legal.epsilon.com/dsr/.
     name: 'Epsilon',
     method: 'direct-form',
-    optOutUrl: 'https://www.epsilon.com/privacy/data-subject-rights-request',
+    optOutUrl: 'https://legal.epsilon.com/dsr/',
     formFields: { 'input[name*="first" i]': F, 'input[name*="last" i]': L, 'input[type="email"]': E },
     submitSelector: 'button[type="submit"]',
     captchaLikely: false,
@@ -560,9 +579,13 @@ function buildBrokers(person) {
   },
 
   {
+    // URL updated 2026-10-23: old /privacy/opt-out/ returned 404. Confirmed
+    // replacement is the "Your Privacy Choices" (sale/sharing opt-out) link
+    // on equifax.com - distinct from optoutprescreen.com, which is the
+    // separate prescreened-credit-offer opt-out already listed elsewhere.
     name: 'Equifax (marketing)',
     method: 'direct-form',
-    optOutUrl: 'https://www.equifax.com/privacy/opt-out/',
+    optOutUrl: 'https://myprivacy.equifax.com/opt-in-opt-out/personal-info/',
     formFields: { 'input[name*="first" i]': F, 'input[name*="last" i]': L, 'input[type="email"]': E, 'input[name*="zip" i]': Z },
     submitSelector: 'button[type="submit"],input[type="submit"]',
     captchaLikely: false,

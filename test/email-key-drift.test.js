@@ -143,3 +143,23 @@ test('Fix 4: persons array with one element uses bare broker name (personCount=1
   // persons.length = 1, so stateKey returns bare name
   assert.equal(successCalls[0].key, 'Pipl', `Expected bare name for single-element array, got: ${successCalls[0].key}`);
 });
+
+test('multi-person mode: the recently-sent check reads the same composite key it records', async () => {
+  // The check used to read the bare broker name while success was recorded
+  // under "Broker|First Last", so in multi-person mode it never matched and
+  // every run re-sent every email.
+  const successCalls = patchDeps();
+  const asked = [];
+  // Alice was emailed yesterday; Bob never was.
+  configMod.lastOptOutDaysAgo = (key) => { asked.push(key); return key === 'Pipl|Alice Adams' ? 1 : Infinity; };
+  const { freshEmail, restore } = loadFreshEmailWithSmtpMock();
+
+  const cfg = { persons: [PERSON_A, PERSON_B], email: { smtp: SMTP_CFG } };
+  await freshEmail.sendOptOutEmails([EMAIL_BROKER], cfg, undefined, {});
+
+  restore();
+  restoreDeps();
+
+  assert.deepEqual(asked, ['Pipl|Alice Adams', 'Pipl|Bob Brown']);
+  assert.deepEqual(successCalls.map(c => c.key), ['Pipl|Bob Brown'], 'only Bob should be emailed');
+});

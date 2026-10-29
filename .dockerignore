@@ -29,3 +29,6 @@ serp-history.json
 .env
 .env.*
 .DS_Store
+
+# TLS material (e.g. an exported Proton Mail Bridge cert/key for SMTP)
+*.pem

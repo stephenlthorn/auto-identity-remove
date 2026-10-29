@@ -179,8 +179,7 @@ test('_pickTemplate returns GDPR builder for EU country DE', () => {
 test('_pickTemplate returns CCPA builder for US', () => {
   const builder = emailMod._pickTemplate('US');
   assert.equal(typeof builder, 'function', '_pickTemplate should return a function');
-  const body = builder(PERSON);
-  assert.ok(body.includes('CCPA'), 'CCPA body should mention CCPA');
+  assert.equal(builder, emailMod._buildBodyCCPA, 'US should get the CCPA-template builder');
 });
 
 test('_pickTemplate returns GDPR builder for GB (UK GDPR)', () => {
@@ -201,7 +200,10 @@ test('_buildBodyGDPR includes Article 17 and person fields', () => {
 
 test('_buildBodyCCPA includes CCPA and person fields', () => {
   const body = emailMod._buildBodyCCPA(PERSON);
-  assert.ok(body.includes('CCPA'), 'CCPA body must mention CCPA');
+  // PERSON is in Texas, with no CCPA rights to invoke, so the body leans on
+  // the broker's own opt-out policy instead.
+  assert.ok(!body.includes('CCPA'), 'non-CA body must not claim CCPA rights');
+  assert.ok(body.includes('opt-out policy'), 'US body must cite the broker opt-out policy');
   assert.ok(body.includes('Jane Doe'), 'CCPA body must include fullName');
   assert.ok(body.includes('Austin'), 'CCPA body must include city');
   assert.ok(body.includes('TX'), 'CCPA body must include state');
@@ -209,10 +211,15 @@ test('_buildBodyCCPA includes CCPA and person fields', () => {
   assert.ok(body.includes('(512) 555-0000'), 'CCPA body must include phone');
 });
 
+test('_buildBodyCCPA cites CCPA only for California residents', () => {
+  const body = emailMod._buildBodyCCPA({ ...PERSON, city: 'Sacramento', state: 'ca' });
+  assert.ok(body.includes('California Consumer Privacy Act (CCPA)'), 'CA body must cite CCPA');
+  assert.ok(!body.includes('opt-out policy'), 'CA body should not fall back to the policy wording');
+});
+
 test('_pickTemplate with undefined country falls back to CCPA', () => {
   const builder = emailMod._pickTemplate(undefined);
-  const body = builder(PERSON);
-  assert.ok(body.includes('CCPA'), 'undefined country should use CCPA template');
+  assert.equal(builder, emailMod._buildBodyCCPA, 'undefined country should use CCPA template');
 });
 
 // ─── Test 6: macOS + smtp → uses SMTP not Mail.app ───────────────────────────

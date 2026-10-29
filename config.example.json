@@ -52,7 +52,9 @@
       "port": 587,
       "user": "you@gmail.com",
       "pass": "YOUR_GMAIL_APP_PASSWORD",
-      "from": "you@gmail.com"
+      "from": "you@gmail.com",
+      "_ca_comment": "Optional: path to a PEM certificate to trust for this server, for local bridges with a self-signed cert. Proton Mail Bridge: host=127.0.0.1, port=1025, export the cert from Bridge settings (Export TLS certificates) and set ca to its path, e.g. cert.pem.",
+      "ca": ""
     }
   },
 

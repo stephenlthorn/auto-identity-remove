@@ -6,6 +6,8 @@
  *   - cfg.persons (array) sends one email per person per broker
  *   - cfg.persons empty + cfg.person present falls back to person
  *   - neither cfg.person nor cfg.persons: no emails, no error
+ *   - opts.onlyPerson restricts the call to that one person
+ *   - opts.dryRun sends nothing even with SMTP configured
  */
 
 const { test } = require('node:test');
@@ -187,4 +189,40 @@ test('cfg.persons (no smtp) logs manual for each person per broker', async () =>
   // Each person should produce one manual log for Pipl
   const manualLogs = logCalls.filter(l => l.broker === 'Pipl' && l.status === 'manual');
   assert.equal(manualLogs.length, 2, 'expected two manual log entries (one per person)');
+});
+
+test('opts.onlyPerson sends only for that person, so a per-person caller does not multiply sends', async () => {
+  // watcher.js calls sendOptOutEmails once per person. Without onlyPerson each
+  // call re-sent to every person in cfg: 2 persons -> 4 emails instead of 2.
+  patchDeps(999);
+  const { freshEmail, nmCalls, restore } = loadFreshEmailWithSmtpMock();
+
+  const cfg = { persons: [PERSON_A, PERSON_B], email: { smtp: SMTP_CFG } };
+  for (const person of cfg.persons) {
+    await freshEmail.sendOptOutEmails([EMAIL_BROKER], cfg, 'linux', { onlyPerson: person });
+  }
+
+  restore();
+  restoreDeps();
+
+  assert.equal(nmCalls.length, 2, 'expected one email per person across the whole loop');
+  assert.equal(nmCalls.filter(c => c.subject.includes('Alice Adams')).length, 1);
+  assert.equal(nmCalls.filter(c => c.subject.includes('Bob Brown')).length, 1);
+});
+
+test('opts.dryRun sends nothing even with SMTP configured', async () => {
+  // watcher.js --dry-run promises "nothing sent". Before dryRun reached this
+  // function, a dry run with working SMTP sent real opt-out emails.
+  const logCalls = patchDeps(999);
+  const { freshEmail, nmCalls, restore } = loadFreshEmailWithSmtpMock();
+
+  const cfg = { persons: [PERSON_A, PERSON_B], email: { smtp: SMTP_CFG } };
+  await freshEmail.sendOptOutEmails([EMAIL_BROKER, EMAIL_BROKER_2], cfg, 'linux', { dryRun: true });
+
+  restore();
+  restoreDeps();
+
+  assert.equal(nmCalls.length, 0, 'dry run must not call sendMail');
+  assert.equal(logCalls.length, 4, 'expected one skipped line per broker per person');
+  assert.ok(logCalls.every(c => c.status === 'skipped'), 'every line should be skipped');
 });

@@ -19,3 +19,6 @@ logs/reports/
 *.log
 .DS_Store
 .claude/
+
+# TLS material (e.g. an exported Proton Mail Bridge cert/key for SMTP)
+*.pem

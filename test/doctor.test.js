@@ -111,6 +111,41 @@ describe('checkConfig', () => {
     assert.equal(result.ok, false);
     assert.match(result.hint, /person/i);
   });
+
+  it('returns ok for a multi-person persons array', async () => {
+    const dir = tmpDir();
+    const cfg = { persons: [
+      { firstName: 'Alice', lastName: 'Smith', email: 'a@b.com', zip: '12345' },
+      { firstName: 'Bob', lastName: 'Jones', email: 'b@b.com', zip: '54321' },
+    ] };
+    fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify(cfg));
+
+    const result = await checkConfig(dir);
+    assert.equal(result.ok, true);
+  });
+
+  it('names the index of the person missing a field in a persons array', async () => {
+    const dir = tmpDir();
+    const cfg = { persons: [
+      { firstName: 'Alice', lastName: 'Smith', email: 'a@b.com', zip: '12345' },
+      { firstName: 'Bob', lastName: 'Jones', email: 'b@b.com' },
+    ] };
+    fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify(cfg));
+
+    const result = await checkConfig(dir);
+    assert.equal(result.ok, false);
+    assert.match(result.hint, /persons\[1\]\.zip/);
+  });
+
+  it('returns not-ok for an empty persons array, matching getPersonsFromConfig', async () => {
+    const dir = tmpDir();
+    const cfg = { persons: [], person: { firstName: 'Alice', lastName: 'Smith', email: 'a@b.com', zip: '12345' } };
+    fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify(cfg));
+
+    const result = await checkConfig(dir);
+    assert.equal(result.ok, false);
+    assert.match(result.hint, /non-empty/);
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

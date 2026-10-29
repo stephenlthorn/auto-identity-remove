@@ -201,3 +201,23 @@ test('setPlatformForTesting: resets to process.platform when set to null', () =>
 test('desktopNotify: is exported from lib/notify.js', () => {
   assert.equal(typeof notify.desktopNotify, 'function', 'desktopNotify must be exported');
 });
+
+// ─── pickManualUrlsToOpen ────────────────────────────────────────────────────
+
+test('pickManualUrlsToOpen: dedupes, caps at the limit, and counts the rest', () => {
+  // A real run marks hundreds of generic brokers manual, once per person, and
+  // every one used to open as its own tab.
+  const urls = [];
+  for (let i = 0; i < 30; i++) urls.push(`https://broker${i}.com`, `https://broker${i}.com`);
+  const { open, more } = notify.pickManualUrlsToOpen(urls, 10);
+  assert.equal(open.length, 10);
+  assert.equal(new Set(open).size, 10, 'no URL should open twice');
+  assert.equal(open[0], 'https://broker0.com', 'keeps run order');
+  assert.equal(more, 20, '30 unique URLs minus the 10 opened');
+});
+
+test('pickManualUrlsToOpen: under the limit opens everything, more is 0', () => {
+  const { open, more } = notify.pickManualUrlsToOpen(['https://a.com', 'https://b.com']);
+  assert.deepEqual(open, ['https://a.com', 'https://b.com']);
+  assert.equal(more, 0);
+});

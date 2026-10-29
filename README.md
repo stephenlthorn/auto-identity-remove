@@ -266,7 +266,7 @@ This tool covers 500+ data brokers in two tiers:
 
 | Tier | Count | Confidence |
 |---|---|---|
-| **Explicit brokers** ([STATUS.md](STATUS.md)) | 52 | Hand-mapped with specific selectors. **None are currently marked `verified`** - the selectors compile and were correct when written, but none has been re-tested against the live site recently, so any of them may have drifted. |
+| **Explicit brokers** ([STATUS.md](STATUS.md)) | 51 | Hand-mapped with specific selectors. **None are currently marked `verified`** - the selectors compile and were correct when written, but none has been re-tested against the live site recently, so any of them may have drifted. |
 | **Generic runner** | ~490 | Best-effort heuristic - tries 4 strategies (Do Not Sell click, OneTrust/TrustArc, generic form, DSAR link). Many succeed; some fail silently. |
 
 Be skeptical of the counts this tool prints. Broker sites change their DOM
@@ -303,19 +303,18 @@ If you want to know exactly which brokers are hand-verified vs heuristic, see [S
 | CheckPeople | Direct opt-out form |
 | ThatsThem | Direct opt-out form |
 | USPhonebook | Direct opt-out form |
-| PublicDataUSA | Direct opt-out form |
 | SmartBackgroundChecks | Direct opt-out form |
 | SearchPeopleFree | Direct opt-out form |
 | PeopleSearchNow | Direct opt-out form |
 | InfoTracer | Direct opt-out form |
 | SocialCatfish | Direct opt-out form |
 | NationalPublicData | Direct opt-out form |
-| ClustrMaps | Direct opt-out form |
 | PrivateRecords | Direct opt-out form |
 | **Acxiom** | Direct form (feeds dozens of downstream brokers) |
 | **LexisNexis** | Direct form (legal/financial data) |
 | **ZoomInfo** | Direct form (B2B professional data) |
 | **Clearbit** | Direct form (B2B enrichment data) |
+| Andrews Wharton | Manual (Stirista opt-out portal) |
 | Pipl | Email opt-out via Mail.app |
 
 ### Phone numbers (caller ID and reverse phone lookup)
@@ -530,7 +529,6 @@ The following brokers are flagged `usOnly: true` and are silently skipped when y
 | TruePeopleSearch | US people-search |
 | BeenVerified | US background-check (requires US state) |
 | USPhonebook | US phone directory |
-| PublicDataUSA | US public records |
 | Sync.ME, NumLookup | Country picker defaults to +1 and is not driven yet |
 | National Do Not Call Registry, Spy Dialer | US-only services |
 
