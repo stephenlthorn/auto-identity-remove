@@ -65,15 +65,44 @@ const config = new Proxy({}, {
  */
 function _primaryPerson() {
   const cfg = _getConfig();
-  if (cfg.person) return cfg.person;
-  if (Array.isArray(cfg.persons) && cfg.persons.length > 0) return cfg.persons[0];
+  // persons[] wins when both keys exist, exactly like getPersonsFromConfig() in
+  // lib/config.js. The dashboard's Config tab writes a blank `person` onto a
+  // persons[] config when it saves, and the old person-first order then built
+  // every search URL from an empty name ("search?q=&type=pp"), which a
+  // --verify run reads as "verified clear" for every broker.
+  if (Array.isArray(cfg.persons) && cfg.persons.length > 0 && _isPersonObject(cfg.persons[0])) {
+    return cfg.persons[0];
+  }
+  if (_isPersonObject(cfg.person) && !_isBlankPerson(cfg.person)) return cfg.person;
   return {};
+}
+
+function _isPersonObject(p) {
+  return p !== null && typeof p === 'object' && !Array.isArray(p);
+}
+
+// A person whose every value is empty carries no identity. Treat it as absent.
+function _isBlankPerson(p) {
+  return Object.values(p).every(v => v == null || String(v).trim() === '');
 }
 
 // Never interpolate the literal string "undefined" into a URL or a form value.
 // A missing field becomes empty, which fails a lookup honestly (notFound)
 // instead of searching brokers for a person named "undefined".
 const enc = s => encodeURIComponent(s == null ? '' : s);
+
+// A bare input[name*="name" i] also matches firstname, lastname, company_name,
+// username and nickname, and fillForm takes the first match, so the person's
+// full name could land in a company or username box (BRK-8). These are the
+// words that make a "*name*" field somebody else's name or not a person's name.
+// :not() is evaluated per attribute, so the placeholder variant excludes
+// "Last name" / "Company name" placeholders the same way.
+const NOT_A_FULL_NAME = [
+  'first', 'last', 'fname', 'lname', 'surname', 'family', 'given', 'middle',
+  'user', 'nick', 'company', 'business', 'organi', 'file', 'maiden',
+];
+const fullNameInput = (attr) =>
+  `input[${attr}*="name" i]${NOT_A_FULL_NAME.map(w => `:not([${attr}*="${w}" i])`).join('')}`;
 
 /**
  * Split a phone number into the two shapes phone-lookup sites ask for.
@@ -152,6 +181,7 @@ function buildBrokers(person) {
     method: 'search-form',
     searchUrl: `https://www.spokeo.com/search?q=${enc(N)}&type=pp&state=${ST}`,
     listingPattern: /spokeo\.com\/[^/]+\/[^/]+\/[^/]+-p\d+/i,
+    lastName: L,
     optOutUrl: 'https://www.spokeo.com/optout',
     formFields: { 'input[name="email"]': E },
     submitSelector: 'button[type="submit"],input[type="submit"]',
@@ -166,6 +196,7 @@ function buildBrokers(person) {
     method: 'search-form',
     searchUrl: `https://www.whitepages.com/name/${enc(F)}-${enc(L)}/${ST}`,
     listingPattern: /whitepages\.com\/people\//i,
+    lastName: L,
     optOutUrl: 'https://www.whitepages.com/suppression-requests',
     formFields: { 'input[name="name"]': N, 'input[name="email"]': E },
     submitSelector: 'button[type="submit"]',
@@ -180,8 +211,9 @@ function buildBrokers(person) {
     method: 'search-form',
     searchUrl: `https://www.fastpeoplesearch.com/name/${enc(F)}-${enc(L)}_${ST}`,
     listingPattern: /fastpeoplesearch\.com\/name\//i,
+    lastName: L,
     optOutUrl: 'https://www.fastpeoplesearch.com/optout',
-    formFields: { 'input[id="optout_name"],input[name*="name"]': N, 'input[type="email"]': E },
+    formFields: { [`input[id="optout_name"],${fullNameInput('name')}`]: N, 'input[type="email"]': E },
     submitSelector: 'button[type="submit"]',
     captchaLikely: false,
     priority: 1,
@@ -192,7 +224,7 @@ function buildBrokers(person) {
     name: 'TruePeopleSearch',
     method: 'direct-form',
     optOutUrl: 'https://www.truepeoplesearch.com/removal',
-    formFields: { 'input[name*="name"],input[placeholder*="name" i]': N, 'input[type="email"]': E },
+    formFields: { [`${fullNameInput('name')},${fullNameInput('placeholder')}`]: N, 'input[type="email"]': E },
     submitSelector: 'button[type="submit"]',
     captchaLikely: false,
     priority: 1,
@@ -201,10 +233,16 @@ function buildBrokers(person) {
   },
 
   {
+    // direct-form since BRK-9. This entry used to be search-form with
+    // listingPattern /beenverified\.com/, which matches the site's own logo and
+    // nav links, so the "listing" it found was always the homepage and --verify
+    // could never report anything but "still listed". Its searchUrl was also the
+    // opt-out search FORM, a page with no person-specific links, so a tighter
+    // pattern alone would have turned that into "never listed" (opt-out skipped,
+    // --verify "verified clear"). The page is the form: fill it, nothing to look
+    // up first, and --verify reports it unverifiable instead of guessing.
     name: 'BeenVerified',
-    method: 'search-form',
-    searchUrl: 'https://www.beenverified.com/app/optout/search',
-    listingPattern: /beenverified\.com/i,
+    method: 'direct-form',
     optOutUrl: 'https://www.beenverified.com/app/optout/search',
     formFields: { 'input[name="firstName"]': F, 'input[name="lastName"]': L, 'select[name="state"]': ST },
     submitSelector: 'button[type="submit"]',
@@ -219,6 +257,7 @@ function buildBrokers(person) {
     method: 'search-form',
     searchUrl: `https://radaris.com/p/${enc(F)}/${enc(L)}/`,
     listingPattern: /radaris\.com\/p\//i,
+    lastName: L,
     optOutUrl: 'https://radaris.com/control/privacy',
     formFields: { 'input[name*="first"],input[placeholder*="first" i]': F, 'input[name*="last"],input[placeholder*="last" i]': L, 'input[type="email"]': E },
     submitSelector: 'button[type="submit"]',
@@ -265,6 +304,7 @@ function buildBrokers(person) {
     method: 'search-form',
     searchUrl: `https://www.mylife.com/find-people/results.pubview?searchtype=PEOPLE&firstname=${enc(F)}&lastname=${enc(L)}&state=${ST}`,
     listingPattern: /mylife\.com\/[^/]+\/[^/]+-\d+\.html/i,
+    lastName: L,
     optOutUrl: 'https://www.mylife.com/privacy-policy/',
     formFields: { 'input[type="email"]': E },
     submitSelector: 'button[type="submit"]',
@@ -278,6 +318,7 @@ function buildBrokers(person) {
     method: 'search-form',
     searchUrl: `https://nuwber.com/person/search?name=${enc(N)}&state=${ST}`,
     listingPattern: /nuwber\.com\/person\//i,
+    lastName: L,
     optOutUrl: 'https://nuwber.com/removal/link',
     formFields: { 'input[type="email"]': E },
     submitSelector: 'button[type="submit"]',
@@ -313,7 +354,7 @@ function buildBrokers(person) {
     name: 'ThatsThem',
     method: 'direct-form',
     optOutUrl: 'https://thatsthem.com/optout',
-    formFields: { 'input[name*="name" i]': N, 'input[name*="email" i]': E },
+    formFields: { [fullNameInput('name')]: N, 'input[name*="email" i]': E },
     submitSelector: 'button[type="submit"]',
     captchaLikely: false,
     priority: 2,
@@ -359,7 +400,7 @@ function buildBrokers(person) {
     name: 'SearchPeopleFree',
     method: 'direct-form',
     optOutUrl: 'https://www.searchpeoplefree.com/opt-out',
-    formFields: { 'input[name*="name" i]': N, 'input[name*="email" i]': E },
+    formFields: { [fullNameInput('name')]: N, 'input[name*="email" i]': E },
     submitSelector: 'button[type="submit"]',
     captchaLikely: false,
     priority: 2,
@@ -371,7 +412,7 @@ function buildBrokers(person) {
     name: 'PeopleSearchNow',
     method: 'direct-form',
     optOutUrl: 'https://www.peoplesearchnow.com/opt-out',
-    formFields: { 'input[name*="name" i]': N, 'input[name*="email" i]': E },
+    formFields: { [fullNameInput('name')]: N, 'input[name*="email" i]': E },
     submitSelector: 'button[type="submit"]',
     captchaLikely: false,
     priority: 2,
@@ -395,7 +436,7 @@ function buildBrokers(person) {
     name: 'SocialCatfish',
     method: 'direct-form',
     optOutUrl: 'https://socialcatfish.com/opt-out/',
-    formFields: { 'input[name*="name" i]': N, 'input[name*="email" i]': E },
+    formFields: { [fullNameInput('name')]: N, 'input[name*="email" i]': E },
     submitSelector: 'button[type="submit"]',
     captchaLikely: false,
     priority: 2,
@@ -596,7 +637,7 @@ function buildBrokers(person) {
     name: 'Experian (marketing)',
     method: 'direct-form',
     optOutUrl: 'https://www.experian.com/privacy/opting_out.html',
-    formFields: { 'input[name*="first" i]': F, 'input[name*="last" i]': L, 'input[name*="addr" i]': C, 'input[name*="zip" i]': Z },
+    formFields: { 'input[name*="first" i]': F, 'input[name*="last" i]': L, 'input[name*="city" i]': C, 'input[name*="zip" i]': Z },
     submitSelector: 'button[type="submit"],input[type="submit"]',
     captchaLikely: false,
     priority: 2,

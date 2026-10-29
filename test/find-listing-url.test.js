@@ -21,12 +21,21 @@ function makePage(links = [], gotoOptions = {}) {
     goto: async (url, opts) => {
       captured.url = url;
       captured.opts = opts;
+      return { status: () => 200 };
     },
     evaluate: async (fn, args) => {
-      // findListingUrl now passes { src, flags } so that regex flags (e.g. 'i') are
-      // preserved inside page.evaluate. The stub mirrors that interface.
+      // findListingUrl passes { src, flags } so that regex flags (e.g. 'i') are
+      // preserved inside page.evaluate, and gets back the facts the page-side
+      // probe collects (see lib/forms.js probeSearchPage). The stub mirrors that.
       const re = new RegExp(args.src, args.flags);
-      return links.filter(h => re.test(h));
+      return {
+        url: BROKER.searchUrl,
+        title: 'People search',
+        text: 'Search results. '.repeat(20),
+        textLength: 320,
+        markers: [],
+        links: links.filter(h => re.test(h)).map(href => ({ href, text: '' })),
+      };
     },
     _captured: captured,
   };

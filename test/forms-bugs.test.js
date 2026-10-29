@@ -10,6 +10,19 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { findListingUrl } = require('../lib/forms');
 
+// findListingUrl reads the facts the page-side probe collects (lib/forms.js
+// probeSearchPage), not a bare list of hrefs. These stubs answer in that shape.
+function probeOf(searchUrl, hrefs) {
+  return {
+    url: searchUrl,
+    title: 'People search',
+    text: 'Search results. '.repeat(20),
+    textLength: 320,
+    markers: [],
+    links: hrefs.map(href => ({ href, text: '' })),
+  };
+}
+
 // ─── Bug H4: findListingUrl preserves the 'i' (case-insensitive) flag ─────────
 
 test('findListingUrl matches case-insensitively when listingPattern has /i flag', async () => {
@@ -33,7 +46,7 @@ test('findListingUrl matches case-insensitively when listingPattern has /i flag'
       capturedArgs = args;
       // Simulate what the browser does - apply the regex to the links
       const re = new RegExp(args.src, args.flags);
-      return links.filter(h => re.test(h));
+      return probeOf(broker.searchUrl, links.filter(h => re.test(h)));
     },
   };
 
@@ -60,7 +73,7 @@ test('findListingUrl still matches case-sensitively when listingPattern has no f
     goto: async () => {},
     evaluate: async (fn, args) => {
       const re = new RegExp(args.src, args.flags);
-      return links.filter(h => re.test(h));
+      return probeOf(broker.searchUrl, links.filter(h => re.test(h)));
     },
   };
 
@@ -79,7 +92,7 @@ test('findListingUrl passes both src and flags as an object to page.evaluate', a
     goto: async () => {},
     evaluate: async (fn, arg) => {
       evaluateSecondArg = arg;
-      return [];
+      return probeOf(broker.searchUrl, []);
     },
   };
 
