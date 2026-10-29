@@ -66,5 +66,18 @@
     "apiKey": "YOUR_SIMPLELOGIN_API_KEY"
   },
 
+  "browser": {
+    "_comment": "OPTIONAL browser settings; every field can stay blank. Each person in config gets their own browser profile folder under profileDir (named person-<n>-<hash>, never the person's name), so cookies and logins never carry from one person to the next. An existing single-person install keeps its current profile for the first person. Headless runs send a regular Chrome user agent instead of HeadlessChrome (same Chrome version); set userAgent below only to override that.",
+    "proxy": {
+      "_comment": "OPTIONAL. Send every browser request through a proxy so brokers see its address, not yours. Leave server blank for none. server must start with http://, https:// or socks5:// and must not contain a username or password: put those in username and password (a secret, like email.smtp.pass). Chromium cannot log in to a socks5 proxy, so use http:// or https:// when your proxy needs credentials. bypass is an optional comma-separated list of hosts that skip the proxy, e.g. *.internal.example,localhost. A mistyped proxy stops the run; it never quietly falls back to your own connection.",
+      "server": "",
+      "username": "",
+      "password": "",
+      "bypass": ""
+    },
+    "_userAgent_comment": "OPTIONAL. A full user agent string used as given, headless or not. Blank (default) means: the browser's own in headed runs, a regular Chrome string in headless runs.",
+    "userAgent": ""
+  },
+
   "profileDir": "~/.config/auto-identity-remove"
 }

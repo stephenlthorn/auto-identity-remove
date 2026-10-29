@@ -18,6 +18,8 @@
 
 const { test, describe, mock } = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 
 const {
   buildLaunchOptions,
@@ -251,5 +253,22 @@ describe('the browser section as a whole', () => {
   test('a browser section that is not an object is a problem, an absent one is not', () => {
     assert.match(browserConfigProblems('chrome').join('\n'), /browser must be an object/);
     assert.deepEqual(browserConfigProblems(null), []);
+  });
+});
+
+describe('config.example.json', () => {
+  const example = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'config.example.json'), 'utf8'));
+
+  test('ships a browser section that validates and means "no proxy, default user agent"', () => {
+    assert.ok(example.browser && example.browser.proxy, 'the browser.proxy block is documented in the example');
+    assert.deepEqual(browserConfigProblems(example.browser), []);
+    assert.ok(!('proxy' in buildLaunchOptions({ headless: false, browser: example.browser })));
+    assert.ok(!('userAgent' in buildLaunchOptions({ headless: false, browser: example.browser })));
+  });
+
+  test('every key under browser.proxy and browser is a known key or a comment', () => {
+    for (const key of Object.keys(example.browser)) assert.ok(key.startsWith('_') || ['proxy', 'userAgent'].includes(key), key);
+    for (const key of Object.keys(example.browser.proxy)) assert.ok(key.startsWith('_') || ['server', 'username', 'password', 'bypass'].includes(key), key);
+    assert.ok(example.browser.proxy._comment, 'browser.proxy carries a _comment');
   });
 });
