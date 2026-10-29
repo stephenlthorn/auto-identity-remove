@@ -16,14 +16,14 @@ const fs      = require('fs');
 const path    = require('path');
 const os      = require('os');
 const readline = require('readline');
+const { Writable } = require('stream');
 const { execSync } = require('child_process');
 
 const { installSchedule } = require('./lib/scheduler');
-const { encryptConfigToDisk } = require('./lib/config');
-
-const CONFIG_PATH = path.join(__dirname, 'config.json');
-const CONFIG_ENC_PATH = path.join(__dirname, 'config.json.enc');
-const STATE_PATH  = path.join(__dirname, 'state.json');
+const {
+  encryptConfigToDisk, writeJsonAtomic, getPassphrase,
+  CONFIG_PATH, CONFIG_ENC_PATH, STATE_PATH,
+} = require('./lib/config');
 
 /**
  * Read the existing config so setup can offer current values as defaults.
@@ -36,16 +36,17 @@ const STATE_PATH  = path.join(__dirname, 'state.json');
  * loadConfig() prefers the .enc.
  *
  * @param {{ configPath?: string, encPath?: string, passphrase?: string }} [opts]
- * @returns {{ exists: boolean, encrypted: boolean, locked: boolean, config: object }}
+ * @returns {{ exists: boolean, encrypted: boolean, locked: boolean, corrupt?: boolean, config: object }}
  *   `locked` means an encrypted config exists but could not be decrypted (no or
- *   wrong passphrase). The caller must refuse to overwrite it rather than
+ *   wrong passphrase). `corrupt` means config.json exists but is not valid JSON.
+ *   In both cases the caller must refuse to overwrite the file rather than
  *   silently starting from scratch.
  */
 function readExistingConfig(opts) {
   const o = opts || {};
   const configPath = o.configPath || CONFIG_PATH;
   const encPath = o.encPath || CONFIG_ENC_PATH;
-  const passphrase = o.passphrase !== undefined ? o.passphrase : (process.env.AIDR_PASSPHRASE || '');
+  const passphrase = o.passphrase !== undefined ? o.passphrase : getPassphrase();
   const secrets = require('./lib/secrets');
 
   const decrypt = (envelope) => {
@@ -73,7 +74,7 @@ function readExistingConfig(opts) {
   try {
     parsed = JSON.parse(fs.readFileSync(configPath, 'utf8'));
   } catch (_) {
-    return { exists: true, encrypted: false, locked: false, config: {} };
+    return { exists: true, encrypted: false, locked: false, corrupt: true, config: {} };
   }
 
   // In-place encryption leaves the envelope in config.json itself.
@@ -82,30 +83,120 @@ function readExistingConfig(opts) {
   return { exists: true, encrypted: false, locked: false, config: parsed };
 }
 
-// ─── Prompt helper ────────────────────────────────────────────────────────────
-// rl is created lazily inside main() so that requiring this module for its
-// exported helpers (regionPrompts, formatPhone) does not open stdin.
+// ─── Prompt helpers ──────────────────────────────────────────────────────────
+//
+// One readline interface owns the terminal for the whole wizard. Its output goes
+// through a stream that can be muted, which is how a secret is read without
+// echo: the same interface keeps line-editing it (backspace, paste), nothing
+// else is listening to stdin, and no typed character can leak into the next
+// prompt. (The old askSecret attached a raw 'data' listener beside a live
+// readline: it got the first keystroke only and echoed the rest - CFG-2.)
 
-let rl;
-const ask = (q, def = '') => new Promise(resolve =>
-  rl.question(def ? `${q} [${def}]: ` : `${q}: `, ans => resolve(ans.trim() || def))
-);
-const askSecret = (q) => new Promise(resolve => {
-  process.stdout.write(`${q}: `);
-  process.stdin.setRawMode?.(true);
-  let val = '';
-  process.stdin.resume();
-  process.stdin.once('data', d => {
-    val = d.toString().trim();
-    process.stdout.write('\n');
-    process.stdin.setRawMode?.(false);
-    resolve(val);
+function createMutableOutput(output) {
+  let muted = false;
+  const stream = new Writable({
+    write(chunk, encoding, cb) {
+      if (!muted) output.write(chunk, encoding);
+      cb();
+    },
   });
-});
-const confirm = async (q) => {
-  const ans = (await ask(`${q} (y/n)`, 'y')).toLowerCase();
-  return ans === 'y' || ans === 'yes';
-};
+  // readline sizes its cursor math from the output it is given.
+  Object.defineProperty(stream, 'columns', { get: () => output.columns });
+  Object.defineProperty(stream, 'isTTY', { get: () => !!output.isTTY });
+  return { stream, setMuted: (v) => { muted = v; } };
+}
+
+// Resolve with the next line typed on `rl` with echo suppressed; reject if input
+// ends first, so a half-typed secret is never mistaken for a whole one. On a
+// terminal, readline flushes the partial line when the stream ends; that is not
+// Enter, so it is treated as "input closed". (Piped input keeps readline's
+// behaviour: a last line without a newline is a complete answer.)
+function readSecretFrom(rl, { input, terminal, output, setMuted, prompt }) {
+  return new Promise((resolve, reject) => {
+    let inputEnded = false;
+    const onEnd = () => { inputEnded = true; };
+    const closed = () => new Error('input closed before the passphrase was entered');
+    const onClose = () => { setMuted(false); reject(closed()); };
+    if (terminal) input.prependOnceListener('end', onEnd);
+    rl.once('close', onClose);
+    output.write(prompt || '');
+    setMuted(true);
+    rl.once('line', (line) => {
+      input.removeListener('end', onEnd);
+      rl.removeListener('close', onClose);
+      setMuted(false);
+      if (inputEnded) return reject(closed());
+      output.write('\n');
+      resolve(line);
+    });
+  });
+}
+
+/**
+ * Read one line from `input` without echoing it.
+ *
+ * @param {{ input?: NodeJS.ReadableStream, output?: NodeJS.WritableStream, prompt?: string, terminal?: boolean }} [opts]
+ * @returns {Promise<string>}
+ */
+function readSecret(opts) {
+  const o = opts || {};
+  const input = o.input || process.stdin;
+  const output = o.output || process.stdout;
+  const terminal = o.terminal !== undefined ? o.terminal : !!input.isTTY;
+  const { stream, setMuted } = createMutableOutput(output);
+  const rl = readline.createInterface({ input, output: stream, terminal });
+  return readSecretFrom(rl, { input, terminal, output, setMuted, prompt: o.prompt }).finally(() => rl.close());
+}
+
+/**
+ * The wizard's prompts, all on one readline interface.
+ *
+ * @param {{ input?: NodeJS.ReadableStream, output?: NodeJS.WritableStream, terminal?: boolean }} [opts]
+ */
+function createPrompter(opts) {
+  const o = opts || {};
+  const input = o.input || process.stdin;
+  const output = o.output || process.stdout;
+  const terminal = o.terminal !== undefined ? o.terminal : !!input.isTTY;
+  const { stream, setMuted } = createMutableOutput(output);
+  const rl = readline.createInterface({ input, output: stream, terminal });
+
+  const ask = (q, def = '') => new Promise((resolve, reject) => {
+    const onClose = () => reject(new Error('input closed before the wizard finished'));
+    rl.once('close', onClose);
+    rl.question(def ? `${q} [${def}]: ` : `${q}: `, (ans) => {
+      rl.removeListener('close', onClose);
+      resolve(ans.trim() || def);
+    });
+  });
+  const askSecret = (q) => readSecretFrom(rl, { input, terminal, output, setMuted, prompt: `${q}: ` });
+  const confirm = async (q) => {
+    const ans = (await ask(`${q} (y/n)`, 'y')).toLowerCase();
+    return ans === 'y' || ans === 'yes';
+  };
+  return { ask, askSecret, confirm, close: () => rl.close() };
+}
+
+/**
+ * Ask for a new passphrase twice and return it only when both entries match.
+ * Returns '' for "no passphrase" (empty first entry, or too many mismatches), so
+ * the caller leaves the config unencrypted instead of encrypting it under a
+ * passphrase the user may have mistyped - the file would be unrecoverable.
+ *
+ * @param {{ read: (question: string) => Promise<string>, say?: (msg: string) => void, attempts?: number }} deps
+ * @returns {Promise<string>}
+ */
+async function askNewPassphrase({ read, say = console.log, attempts = 3 }) {
+  for (let i = 0; i < attempts; i++) {
+    const first = await read('Choose a passphrase (keep it safe - there is no recovery)');
+    if (!first) return '';
+    const second = await read('Type it again to confirm');
+    if (first === second) return first;
+    say('  The two entries did not match - try again (or press Enter at the first prompt to skip encryption).');
+  }
+  say('  The passphrases still did not match.');
+  return '';
+}
 
 // ─── International helpers (pure, exported for unit tests) ───────────────────
 
@@ -157,15 +248,146 @@ function maybeEncryptConfig(opts) {
     ...(o.configPath ? { configPath: o.configPath } : {}),
     ...(o.encPath ? { encPath: o.encPath } : {}),
   });
-  return { encrypted: true, encPath: res.encPath };
+  return {
+    encrypted: true,
+    encPath: res.encPath,
+    shredded: res.shredded,
+    ...(res.notice ? { notice: res.notice } : {}),
+  };
 }
 
-module.exports = { regionPrompts, formatPhone, maybeEncryptConfig, readExistingConfig };
+// ─── Config building (pure, exported for unit tests) ─────────────────────────
+
+const REQUIRED_ANSWERS = [
+  ['firstName', 'First name'],
+  ['lastName', 'Last name'],
+  ['email', 'Email address'],
+  ['zip', 'ZIP / postal code'],
+];
+
+/** The person record setup edits: persons[0] for a persons config, else person. */
+function primaryPerson(existing) {
+  const e = existing || {};
+  if (Array.isArray(e.persons) && e.persons.length > 0) return e.persons[0] || {};
+  return e.person || {};
+}
+
+/**
+ * The value each prompt offers as its default, taken from the existing config.
+ * Pressing Enter at every prompt therefore reproduces that config.
+ */
+function answerDefaults(existing) {
+  const e = existing || {};
+  const p = primaryPerson(e);
+  return {
+    firstName: p.firstName || '',
+    lastName: p.lastName || '',
+    aliases: Array.isArray(p.aliases) ? [...p.aliases] : [],
+    city: p.city || '',
+    country: (p.country || 'US').toUpperCase(),
+    state: p.state || '',
+    zip: p.zip || '',
+    email: p.email || '',
+    phone: p.phone || '',
+    capsolverKey: (e.capsolver || {}).apiKey || '',
+    textTo: (e.notify || {}).textTo || '',
+    webhook: (e.notify || {}).webhook || '',
+    profileDir: e.profileDir || '',
+    accounts: { ...(e.accounts || {}) },
+  };
+}
+
+/**
+ * Build the config setup will write: `existing` with the answered values applied
+ * and every key setup does not ask about left exactly as it was (persons[1..],
+ * email.smtp, relay, hibp, allowlist, notify.emailReportTo, anything added by
+ * hand or by a later version). For a persons config the wizard edits persons[0]
+ * in place and never adds a `person` key beside it. Throws on a blank first
+ * name, last name, email or postal code: a config with those blank runs as
+ * nobody and records "successes" that suppress the real run.
+ *
+ * Pure: neither argument is mutated.
+ *
+ * @param {object} existing  Current config ({} for a fresh install).
+ * @param {object} answers   See answerDefaults for the shape.
+ * @returns {object}
+ */
+function buildConfig(existing, answers) {
+  const base = existing || {};
+  const a = answers || {};
+  const blank = (v) => v === undefined || v === null || String(v).trim() === '';
+  const missing = REQUIRED_ANSWERS.filter(([key]) => blank(a[key])).map(([, label]) => label);
+  if (missing.length > 0) {
+    const err = new Error(`Required answers are blank: ${missing.join(', ')}`);
+    err.code = 'INVALID_ANSWERS';
+    throw err;
+  }
+
+  const country = (a.country || 'US').toUpperCase();
+  const phone = a.phone || '';
+  const personFields = {
+    firstName: a.firstName.trim(),
+    lastName: a.lastName.trim(),
+    fullName: `${a.firstName.trim()} ${a.lastName.trim()}`,
+    aliases: Array.isArray(a.aliases) ? [...a.aliases] : [],
+    city: a.city || '',
+    country,
+    state: a.state || '',
+    zip: String(a.zip).trim(),
+    email: a.email.trim(),
+    phone,
+    phoneFormatted: formatPhone(phone, country),
+  };
+
+  const config = { ...base };
+  if (Array.isArray(base.persons) && base.persons.length > 0) {
+    config.persons = [{ ...base.persons[0], ...personFields }, ...base.persons.slice(1)];
+  } else {
+    config.person = { ...(base.person || {}), ...personFields };
+  }
+
+  config.capsolver = { ...(base.capsolver || {}), apiKey: a.capsolverKey || 'CAP-YOUR_KEY_HERE' };
+  config.notify = { ...(base.notify || {}), textTo: a.textTo || '', ...(a.webhook ? { webhook: a.webhook } : {}) };
+  if (a.profileDir) config.profileDir = a.profileDir;
+  const accounts = { ...(base.accounts || {}), ...(a.accounts || {}) };
+  if (base.accounts || Object.keys(accounts).length > 0) config.accounts = accounts;
+  return config;
+}
+
+/**
+ * Write the config atomically (temp file + fsync + rename), always mode 0600 -
+ * including over an existing 0644 file, which a plain writeFileSync `mode`
+ * option leaves alone.
+ *
+ * @param {object} config
+ * @param {{ configPath?: string }} [opts]
+ * @returns {string} the path written
+ */
+function saveConfig(config, opts) {
+  const configPath = (opts && opts.configPath) || CONFIG_PATH;
+  writeJsonAtomic(configPath, config);
+  return configPath;
+}
+
+module.exports = {
+  regionPrompts, formatPhone, maybeEncryptConfig, readExistingConfig,
+  buildConfig, answerDefaults, saveConfig,
+  readSecret, createPrompter, askNewPassphrase,
+};
 
 // ─── Main setup ───────────────────────────────────────────────────────────────
 
 async function main() {
-  rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const { ask, askSecret, confirm, close } = createPrompter();
+  // A required answer is asked again until it is not blank: a blank name, email
+  // or postal code would make the config run as nobody (CFG-1).
+  const askRequired = async (q, def = '') => {
+    for (;;) {
+      const v = await ask(q, def);
+      if (v) return v;
+      console.log('  This one is required.');
+    }
+  };
   console.log('\n🔒 auto-identity-remove - Setup\n');
   console.log('This will create config.json with your personal info (gitignored).');
   console.log('Run this once. Re-run anytime to update.\n');
@@ -183,28 +405,40 @@ async function main() {
     console.error('   full PII back on disk in the clear and would be ignored at runtime anyway.');
     process.exit(1);
   }
+  if (prior.corrupt) {
+    // Starting from {} would replace a hand-edited config that merely has a typo.
+    console.error(`\n❌ ${CONFIG_PATH} exists but is not valid JSON.`);
+    console.error('   Fix it (or move it aside) and re-run; refusing to overwrite it.');
+    process.exit(1);
+  }
   const existing = prior.config;
   if (prior.exists) {
     console.log(prior.encrypted
       ? 'ℹ  Existing encrypted config found - press Enter to keep current values.\n'
       : 'ℹ  Existing config.json found - press Enter to keep current values.\n');
   }
-  const p = existing.person || {};
+  const editsPersonsArray = Array.isArray(existing.persons) && existing.persons.length > 0;
+  if (editsPersonsArray) {
+    const who = existing.persons[0].fullName || `${existing.persons[0].firstName} ${existing.persons[0].lastName}`;
+    console.log(`ℹ  This config has ${existing.persons.length} person(s). Setup edits persons[0] (${who}) in place;`);
+    console.log('   the other people and every other setting (SMTP, relay, allowlist...) are left as they are.');
+    console.log('   To change someone else, edit config.json by hand.\n');
+  }
+  const d = answerDefaults(existing);
 
   // ── Personal info ────────────────────────────────────────────────────────
   console.log('── Personal Info ──────────────────────────────────────────');
-  const firstName      = await ask('First name',              p.firstName || '');
-  const lastName       = await ask('Last name',               p.lastName  || '');
-  const aliasInput     = await ask('Aliases (comma-separated, e.g. "Steve Doe, S Doe")', (p.aliases||[]).join(', '));
+  const firstName      = await askRequired('First name',              d.firstName);
+  const lastName       = await askRequired('Last name',               d.lastName);
+  const aliasInput     = await ask('Aliases (comma-separated, e.g. "Steve Doe, S Doe")', d.aliases.join(', '));
   const aliases        = aliasInput ? aliasInput.split(',').map(s => s.trim()).filter(Boolean) : [];
-  const city           = await ask('City',                    p.city || '');
-  const country        = (await ask('Country (2-letter ISO, e.g. US, CA, GB, AU)', p.country || 'US')).toUpperCase();
+  const city           = await ask('City',                    d.city);
+  const country        = (await ask('Country (2-letter ISO, e.g. US, CA, GB, AU)', d.country)).toUpperCase();
   const { regionLabel, postalLabel } = regionPrompts(country);
-  const state          = await ask(regionLabel,               p.state || '');
-  const zip            = await ask(postalLabel,               p.zip   || '');
-  const email          = await ask('Email address',           p.email || '');
-  const phone          = await ask('Phone (digits only for US; any format for non-US)', p.phone || '');
-  const phoneFormatted = formatPhone(phone, country);
+  const state          = await ask(regionLabel,               d.state);
+  const zip            = await askRequired(postalLabel,       d.zip);
+  const email          = await askRequired('Email address',   d.email);
+  const phone          = await ask('Phone (digits only for US; any format for non-US)', d.phone);
 
   // ── CapSolver ────────────────────────────────────────────────────────────
   console.log('\n── CAPTCHA Solving ────────────────────────────────────────');
@@ -212,17 +446,17 @@ async function main() {
   console.log('solves them automatically for ~$0.001 each - pennies per month.');
   console.log('Sign up free at https://capsolver.com and paste your API key below.');
   console.log('Leave blank to skip (those sites go to your manual list instead).\n');
-  const capsolverKey = await ask('CapSolver API key', (existing.capsolver||{}).apiKey || '');
+  const capsolverKey = await ask('CapSolver API key', d.capsolverKey);
 
   // ── Notification ─────────────────────────────────────────────────────────
   console.log('\n── Notifications ──────────────────────────────────────────');
-  const textTo = await ask('iMessage number to text results to (e.g. +15125550000)', (existing.notify||{}).textTo || '');
+  const textTo = await ask('iMessage number to text results to (e.g. +15125550000)', d.textTo);
   // WP2: webhook works on any OS (ntfy.sh, Slack, Discord-style). Optional.
-  const webhook = await ask('Notification webhook URL - works on any OS, optional (e.g. https://ntfy.sh/my-topic)', (existing.notify||{}).webhook || '');
+  const webhook = await ask('Notification webhook URL - works on any OS, optional (e.g. https://ntfy.sh/my-topic)', d.webhook);
 
   // ── Profile dir ──────────────────────────────────────────────────────────
   const defaultProfileDir = path.join(os.homedir(), '.config', 'auto-identity-remove');
-  const profileDir = await ask('Browser profile directory', existing.profileDir || defaultProfileDir);
+  const profileDir = await ask('Browser profile directory', d.profileDir || defaultProfileDir);
 
   // ── Accounts for sites that need login ───────────────────────────────────
   console.log('\n── One-Time Account Setup ─────────────────────────────────');
@@ -236,7 +470,7 @@ async function main() {
     { key: 'mylife',       url: 'https://www.mylife.com/signup',       label: 'MyLife'       },
   ];
 
-  const accounts = existing.accounts || {};
+  const accounts = { ...d.accounts };
   for (const site of acctSites) {
     const hasExisting = accounts[site.key]?.password;
     if (hasExisting) {
@@ -260,31 +494,18 @@ async function main() {
   }
 
   // ── Build config ─────────────────────────────────────────────────────────
-  const config = {
-    person: {
-      firstName,
-      lastName,
-      fullName: `${firstName} ${lastName}`,
-      aliases,
-      city,
-      country,
-      state,
-      zip,
-      email,
-      phone,
-      phoneFormatted,
-    },
-    capsolver: { apiKey: capsolverKey || 'CAP-YOUR_KEY_HERE' },
-    accounts,
-    notify: { textTo, ...(webhook ? { webhook } : {}) },
-    profileDir,
-  };
+  // buildConfig keeps every key this wizard does not ask about (persons[1..],
+  // email.smtp, relay, hibp, allowlist, notify.emailReportTo ...).
+  const config = buildConfig(existing, {
+    firstName, lastName, aliases, city, country, state, zip, email, phone,
+    capsolverKey, textTo, webhook, profileDir, accounts,
+  });
 
-  // 0600: config.json holds the legal name, home address, phone, DOB, the SMTP
-  // password and every API key. The umask default (0644) makes all of that
-  // readable by any other local account.
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), { mode: 0o600 });
-  console.log('\n✅ config.json saved.\n');
+  // Atomic and always 0600: config.json holds the legal name, home address,
+  // phone, DOB, the SMTP password and every API key. A plain writeFileSync `mode`
+  // only applies when the file is created, so an existing 0644 file stayed 0644.
+  saveConfig(config);
+  console.log(`\n✅ ${CONFIG_PATH} saved.\n`);
 
   // -- At-rest encryption ------------------------------------------------------
   //
@@ -293,9 +514,11 @@ async function main() {
   // user who had deliberately turned encryption on, and loadConfig() would keep
   // reading the stale .enc so the edit above would not take effect either.
   if (prior.encrypted && !prior.locked) {
-    const encResult = maybeEncryptConfig({ passphrase: process.env.AIDR_PASSPHRASE || '' });
+    const encResult = maybeEncryptConfig({ passphrase: getPassphrase() });
     if (encResult.encrypted) {
-      console.log(`🔒 Re-encrypted to ${encResult.encPath}; plaintext shredded.\n`);
+      console.log(encResult.shredded
+        ? `🔒 Re-encrypted to ${encResult.encPath}; plaintext shredded.\n`
+        : `🔒 Re-encrypted to ${encResult.encPath}.\n⚠  ${encResult.notice}\n`);
     } else {
       console.error('⚠  Could not re-encrypt the config. config.json is currently PLAINTEXT.');
       console.error('   Fix it now with: AIDR_PASSPHRASE=... node watcher.js --encrypt-config\n');
@@ -307,11 +530,15 @@ async function main() {
     console.log('set AIDR_PASSPHRASE in the environment when running the watcher.\n');
     const doEncrypt = await confirm('Encrypt config.json now?');
     if (doEncrypt) {
-      const passphrase = await askSecret('Choose a passphrase (keep it safe - there is no recovery)');
+      // Typed twice and compared before anything is encrypted: a mistyped
+      // passphrase would make the config unrecoverable.
+      const passphrase = await askNewPassphrase({ read: askSecret });
       if (passphrase) {
         const encResult = maybeEncryptConfig({ passphrase });
         if (encResult.encrypted) {
-          console.log(`\nconfig encrypted to ${encResult.encPath}; plaintext shredded.`);
+          console.log(encResult.shredded
+            ? `\nconfig encrypted to ${encResult.encPath}; plaintext shredded.`
+            : `\nconfig encrypted to ${encResult.encPath}.\n⚠  ${encResult.notice}`);
           console.log('   Run the watcher with: AIDR_PASSPHRASE=... node watcher.js\n');
         }
       } else {
@@ -336,7 +563,7 @@ async function main() {
     console.log(`✅ [${result.method}] ${result.detail}\n`);
   }
 
-  rl.close();
+  close();
 
   console.log('─'.repeat(54));
   console.log('✅ Setup complete!\n');
