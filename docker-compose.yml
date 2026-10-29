@@ -5,14 +5,16 @@
 #
 # First-time setup, once, from this directory:
 #
-#   mkdir -p aidr-home/logs
+#   mkdir -p aidr-home
 #   cp config.json aidr-home/config.json       # made on a laptop with `node setup.js`
 #   chmod 700 aidr-home && chmod 600 aidr-home/config.json
 #   sudo chown -R 1001:1001 aidr-home          # the image user is uid 1001
 #
-# ./aidr-home is the ONE place this container keeps anything: config, state, the
-# state .bak, .lock and resume .checkpoint, run logs and audit reports. Back it
-# up and treat it like config.json - it is full of PII.
+# ./aidr-home is the ONE place this container keeps anything, via AIDR_HOME: config,
+# state and its .bak, the .lock and resume .checkpoint, run logs, audit reports,
+# snapshots, complaints, the confirmation inbox, and the SERP / exposure / breach /
+# registry caches under aidr-home/data. The app creates its subdirectories itself.
+# Back it up and treat it like config.json - it is full of PII.
 #
 # For a scheduled monthly run, use cron/systemd on the host (or DSM Task
 # Scheduler on a Synology) to invoke `docker compose run --rm watcher`.
@@ -30,18 +32,18 @@ services:
     # (on a Synology: AIDR_UID=1026 AIDR_GID=100 or whatever `id` prints for you).
     user: "${AIDR_UID:-1001}:${AIDR_GID:-1001}"
     volumes:
-      # Directories only. rename() onto a single-file mount fails with EBUSY, and
-      # then the lock, .bak and checkpoint would live in the container layer.
-      # Never mount over /app/data: it holds the shipped broker datasets.
-      # Not :ro - state, the checkpoint and --encrypt-config all write here.
+      # A directory, never single files: rename() onto a single-file mount fails
+      # with EBUSY, and then the lock, .bak and checkpoint would live in the
+      # container layer. Never mount over /app/data: it holds the shipped broker
+      # datasets (the app keeps its own writable data under AIDR_HOME/data).
+      # Not :ro - state, the checkpoint, logs and --encrypt-config all write here.
       - ./aidr-home:/home/aidr
-      # The run logs, audit reports and snapshots are written under /app/logs.
-      - ./aidr-home/logs:/app/logs
     environment:
       - NODE_ENV=production
-      - AIDR_CONFIG_PATH=/home/aidr/config.json
-      - AIDR_CONFIG_ENC_PATH=/home/aidr/config.json.enc
-      - AIDR_STATE_PATH=/home/aidr/state.json
+      # Everything above lives under this one directory. (AIDR_CONFIG_PATH,
+      # AIDR_CONFIG_ENC_PATH, AIDR_STATE_PATH, AIDR_LOG_DIR and AIDR_DATA_DIR still
+      # work and win over it, if you ever need one file somewhere else.)
+      - AIDR_HOME=/home/aidr
       # Encrypted config on a schedule: put the passphrase on the first line of a
       # 0600 file inside ./aidr-home and uncomment this. See the README. For a
       # one-off, `docker compose run --rm -e AIDR_PASSPHRASE watcher ...` works.

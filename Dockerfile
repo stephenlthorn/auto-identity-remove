@@ -13,24 +13,24 @@
 # Build:  docker build -t auto-identity-remove .
 #
 # Everything the container must keep lives in ONE host directory, mounted at
-# /home/aidr: config.json (or config.json.enc), state.json and its .bak, .lock
-# and .checkpoint, and an optional passphrase file. Mount a directory, never
-# single files (rename() onto a file mount fails with EBUSY, and the lock, .bak
-# and checkpoint would stay in the throwaway container layer), and never mount
-# over /app/data (it holds the shipped broker datasets).
+# /home/aidr, and the image already sets AIDR_HOME=/home/aidr: config.json (or
+# config.json.enc), state.json and its .bak, .lock and .checkpoint, run logs,
+# audit reports, snapshots, complaints, the confirmation inbox, the SERP /
+# exposure / breach / registry caches (in data/) and an optional passphrase file.
+# Mount a directory, never single files (rename() onto a file mount fails with
+# EBUSY, and the lock, .bak and checkpoint would stay in the throwaway container
+# layer), and never mount over /app/data (it holds the shipped broker datasets).
 #
-#   mkdir -p aidr-home/logs && sudo chown -R 1001:1001 aidr-home
+#   mkdir -p aidr-home && sudo chown -R 1001:1001 aidr-home
 #   docker run --rm --init \
 #       -v "$(pwd)/aidr-home:/home/aidr" \
-#       -v "$(pwd)/aidr-home/logs:/app/logs" \
-#       -e AIDR_CONFIG_PATH=/home/aidr/config.json \
-#       -e AIDR_CONFIG_ENC_PATH=/home/aidr/config.json.enc \
-#       -e AIDR_STATE_PATH=/home/aidr/state.json \
 #       -e HOME=/tmp \
 #       auto-identity-remove
 #
 # The container user is pwuser (uid 1001). Either chown the directory to 1001 as
 # above, or add --user "$(id -u):$(id -g)" so it runs as the directory's owner.
+# AIDR_CONFIG_PATH, AIDR_CONFIG_ENC_PATH, AIDR_STATE_PATH, AIDR_LOG_DIR and
+# AIDR_DATA_DIR still override AIDR_HOME for any one file.
 #
 # Tip: pass --dry-run to preview without submitting anything:
 #   docker run --rm --init ... auto-identity-remove node watcher.js --dry-run
@@ -52,6 +52,10 @@ RUN npm ci --omit=dev
 # Playwright browsers are bundled in the base image at /ms-playwright
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
+# One directory holds everything the container keeps (see the header). Mount it
+# at this path and nothing else needs configuring.
+ENV AIDR_HOME=/home/aidr
+
 # Copy application source
 COPY . .
 
@@ -59,8 +63,9 @@ COPY . .
 # home directory and the right access to /ms-playwright, so reuse it - creating
 # another account at uid 1001 collides with it and aborts the build.
 #
-# /home/aidr is where the recommended host directory is mounted (see the header).
-# Creating it here means an unmounted `docker run` still has somewhere writable.
+# /home/aidr is AIDR_HOME, where the recommended host directory is mounted (see
+# the header). Creating it here means an unmounted `docker run` still has
+# somewhere writable; the app makes logs/, data/ and the rest as it needs them.
 RUN mkdir -p /home/aidr/logs && chown -R pwuser:pwuser /app /home/aidr
 
 USER pwuser

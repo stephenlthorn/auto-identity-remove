@@ -80,13 +80,16 @@ browser for the account-creation steps, so it is not a good fit for a headless
 NAS.
 
 ```bash
-ssh admin@nas.local 'mkdir -p /volume1/docker/auto-identity-remove/aidr-home/logs'
+ssh admin@nas.local 'mkdir -p /volume1/docker/auto-identity-remove/aidr-home'
 scp config.json admin@nas.local:/volume1/docker/auto-identity-remove/aidr-home/
 ```
 
-`aidr-home` is the one place the container keeps anything: your config,
-`state.json` and its `.bak`, `.lock` and resume `.checkpoint`, and (through a
-second mount) the run logs. Back it up and treat it like `config.json`.
+`aidr-home` is the one place the container keeps anything (the image sets
+`AIDR_HOME=/home/aidr` and you mount `aidr-home` there): your config,
+`state.json` and its `.bak`, `.lock` and resume `.checkpoint`, the run logs,
+audit reports, snapshots and complaints (`logs/`), the confirmation inbox
+(`inbox/`), and the SERP, exposure and broker-registry history (`data/`). The app
+creates those subdirectories itself. Back it up and treat it like `config.json`.
 
 ### 3. Lock down the files and give the container access
 
@@ -125,7 +128,8 @@ The file sits next to the config it unlocks, so it protects a stolen copy of
 This is the one thing to get right. Mounting `state.json` as a file breaks
 atomic writes (`EBUSY`, see above) and leaves the lock, `.bak` and checkpoint in
 the container layer. Mounting anything over `/app/data` hides the shipped broker
-datasets. Mount `aidr-home` and point the app inside it:
+datasets. Mount `aidr-home` once, at `/home/aidr`, and let `AIDR_HOME` point the
+app inside it:
 
 ```bash
 docker build -t auto-identity-remove .
@@ -134,16 +138,13 @@ docker run --rm --init \
   -e TZ=America/New_York \
   -e AIDR_LOW_MEMORY=1 \
   -v /volume1/docker/auto-identity-remove/aidr-home:/home/aidr \
-  -v /volume1/docker/auto-identity-remove/aidr-home/logs:/app/logs \
-  -e AIDR_CONFIG_PATH=/home/aidr/config.json \
-  -e AIDR_CONFIG_ENC_PATH=/home/aidr/config.json.enc \
-  -e AIDR_STATE_PATH=/home/aidr/state.json \
   -e HOME=/tmp \
   --memory=1g \
   auto-identity-remove node watcher.js --dry-run
 ```
 
-Or with compose, from the project directory, which already carries all of that:
+Or with compose, from the project directory, which already carries the mount and
+`AIDR_HOME=/home/aidr`:
 
 ```bash
 TZ=America/New_York AIDR_LOW_MEMORY=1 docker compose run --rm watcher node watcher.js --dry-run
@@ -152,10 +153,19 @@ TZ=America/New_York AIDR_LOW_MEMORY=1 docker compose run --rm watcher node watch
 Always do a `--dry-run` first. It navigates and confirms the brokers are
 reachable without submitting anything.
 
-Not everything is kept: `serp-history.json`, `exposure-history.json` and
-`feeds-brokers.json` are written under `/app/data` inside the container and do
-not survive `--rm` (see the README's table of what persists). Opt-outs, state,
-resume and logs are unaffected.
+Everything that should outlive a `--rm` container is in `aidr-home`: opt-outs,
+state, resume, logs, and the `serp-history.json`, `exposure-history.json`,
+`breach-result.json` and `feeds-brokers.json` files under `aidr-home/data` (see
+the README's table of what persists). The datasets that ship with the image stay
+in `/app/data` and are read-only.
+
+**Upgrading from the older recipe.** It used a second mount for the logs and set
+`AIDR_CONFIG_PATH=/home/aidr/config.json`,
+`AIDR_CONFIG_ENC_PATH=/home/aidr/config.json.enc` and
+`AIDR_STATE_PATH=/home/aidr/state.json` one by one. Those variables still work
+and `AIDR_HOME=/home/aidr` is the same thing for all of them. The old `/app/logs`
+mount is no longer needed: logs default to `/home/aidr/logs`, which is the same
+host directory (`aidr-home/logs`), so nothing has to move.
 
 ### 5. Schedule it
 
