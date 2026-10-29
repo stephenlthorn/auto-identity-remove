@@ -27,10 +27,21 @@ const path = require('node:path');
  * touched.  Cleaned up in afterEach.
  */
 let tmpDir;
+const stdinWrites = [];
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sched-test-'));
+  // The crontab installer writes through `crontab -` on stdin, which mocking
+  // execSync does not intercept: without this stub these tests installed a real
+  // `0 9 1 * * /bin/bash /tmp/sched-test-XXXX/run.sh` line into the developer's
+  // crontab on every run.
+  stdinWrites.length = 0;
+  require('../lib/scheduler')._setStdinRunner((cmd, args, input) => {
+    stdinWrites.push({ cmd, args, input });
+    return { status: 0, stderr: '' };
+  });
 });
 afterEach(() => {
+  require('../lib/scheduler')._setStdinRunner(null);
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
@@ -250,7 +261,8 @@ test('Linux crontab branch skips duplicate lines', () => {
   const realExecSync = childProcess.execSync;
 
   const scriptPath = '/usr/local/bin/run.sh';
-  const existingCron = `0 9 1 * * /bin/bash ${scriptPath}\n`;
+  const { logDir: dedupeLogDir } = makePaths();
+  const existingCron = `${require('../lib/scheduler').buildCronLine(scriptPath, dedupeLogDir)}\n`;
   const executed = [];
 
   childProcess.execSync = (cmd, opts) => {
@@ -277,17 +289,18 @@ test('Linux crontab branch skips duplicate lines', () => {
     !executed.some(c => c.includes('| crontab -') || c.includes('echo')),
     'does not write crontab when line exists'
   );
+  assert.equal(stdinWrites.length, 0, 'does not feed `crontab -` when the line already exists');
 });
 
 // ─── Windows branch ──────────────────────────────────────────────────────────
 
 test('Windows branch calls schtasks and returns method=schtasks on success', () => {
   const childProcess = require('child_process');
-  const realExecSync = childProcess.execSync;
+  const realExecSync = childProcess.execFileSync;
 
   const executed = [];
-  childProcess.execSync = (cmd, opts) => {
-    executed.push(cmd);
+  childProcess.execFileSync = (file, args) => {
+    executed.push([file, ...args].join(' '));
     return '';
   };
 
@@ -298,7 +311,7 @@ test('Windows branch calls schtasks and returns method=schtasks on success', () 
   try {
     result = installer(scriptPath, logDir);
   } finally {
-    childProcess.execSync = realExecSync;
+    childProcess.execFileSync = realExecSync;
   }
 
   assert.equal(result.method, 'schtasks');
@@ -311,10 +324,10 @@ test('Windows branch calls schtasks and returns method=schtasks on success', () 
 
 test('Windows branch returns method=manual when schtasks throws', () => {
   const childProcess = require('child_process');
-  const realExecSync = childProcess.execSync;
+  const realExecSync = childProcess.execFileSync;
 
-  childProcess.execSync = (cmd, opts) => {
-    if (cmd.includes('schtasks')) throw new Error('Access denied');
+  childProcess.execFileSync = (file, args) => {
+    if (file === 'schtasks') throw new Error('Access denied');
     return '';
   };
 
@@ -329,7 +342,7 @@ test('Windows branch returns method=manual when schtasks throws', () => {
   try {
     result = installer(scriptPath, logDir);
   } finally {
-    childProcess.execSync = realExecSync;
+    childProcess.execFileSync = realExecSync;
     console.log = origLog;
   }
 
@@ -366,13 +379,16 @@ test('buildWindowsSchtasksCmd includes /TN "auto-identity-remove"', () => {
   assert.match(cmd, /\/TN "auto-identity-remove"/, 'task name quoted');
 });
 
-test('buildWindowsSchtasksCmd wraps paths with spaces in double quotes', () => {
+test('buildWindowsSchtasksCmd wraps paths with spaces in escaped double quotes inside ONE /TR value', () => {
   const cmd = buildWindowsSchtasksCmd(
     'C:\\Program Files\\nodejs\\node.exe',
     'C:\\My Documents\\watcher.js'
   );
-  assert.match(cmd, /"C:\\Program Files\\nodejs\\node\.exe"/, 'node path quoted');
-  assert.match(cmd, /"C:\\My Documents\\watcher\.js"/, 'watcher path quoted');
+  // /TR must be a single argument: the inner quotes are escaped as \" (CORE-13).
+  assert.ok(
+    cmd.includes('/TR "\\"C:\\Program Files\\nodejs\\node.exe\\" \\"C:\\My Documents\\watcher.js\\""'),
+    cmd
+  );
 });
 
 test('buildWindowsSchtasksCmd includes /F flag to overwrite existing task', () => {
@@ -438,10 +454,10 @@ test('installScheduleForPlatform routes linux to systemd or crontab', () => {
 test('installScheduleForPlatform routes windows to schtasks', () => {
   const { installScheduleForPlatform } = require('../lib/scheduler');
   const childProcess = require('child_process');
-  const realExecSync = childProcess.execSync;
+  const realExecSync = childProcess.execFileSync;
 
   const executed = [];
-  childProcess.execSync = (cmd) => { executed.push(cmd); return ''; };
+  childProcess.execFileSync = (file) => { executed.push(file); return ''; };
 
   let result;
   try {
@@ -451,7 +467,7 @@ test('installScheduleForPlatform routes windows to schtasks', () => {
       logDir: path.join(tmpDir, 'logs'),
     });
   } finally {
-    childProcess.execSync = realExecSync;
+    childProcess.execFileSync = realExecSync;
   }
 
   assert.equal(result.method, 'schtasks', 'windows routes to schtasks');
