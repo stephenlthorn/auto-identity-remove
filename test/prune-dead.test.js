@@ -4,6 +4,11 @@
  * Tests for the pruneDeadUrls() aggregation function exported from
  * scripts/prune-dead.js.  Uses temp directories so no real log or data files
  * are touched.
+ *
+ * A host is only added after >= 3 separate runs spanning >= 14 days of hard
+ * failures (BRK-11), so `writeLog(name, entries)` here writes the same entries
+ * to three runs 10 days apart. The real bucketed log shape and the threshold
+ * edge cases are covered in prune-dead-real-log.test.js.
  */
 
 'use strict';
@@ -33,8 +38,23 @@ afterEach(() => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
-function writeLog(filename, entries) {
-  fs.writeFileSync(path.join(logsDir, filename), JSON.stringify(entries), 'utf8');
+const DAY = 24 * 3600 * 1000;
+const T0 = Date.parse('2026-09-01T03:00:00Z');
+
+// One log file with its mtime set to `dayOffset` days after T0 (flat arrays carry
+// no runAt, so the run time falls back to the file's mtime).
+function writeLog(filename, entries, dayOffset = 0) {
+  const file = path.join(logsDir, filename);
+  fs.writeFileSync(file, JSON.stringify(entries), 'utf8');
+  const at = new Date(T0 + dayOffset * DAY);
+  fs.utimesSync(file, at, at);
+}
+
+// The same entries in three runs 10 days apart: enough history to prune on.
+function writeThreeRuns(entries) {
+  writeLog('run-1.json', entries, 0);
+  writeLog('run-2.json', entries, 10);
+  writeLog('run-3.json', entries, 20);
 }
 
 function readDead() {
@@ -44,11 +64,7 @@ function readDead() {
 // ── Core pruning logic ────────────────────────────────────────────────────────
 
 test('adds hosts that are dead in every run they appear in', () => {
-  writeLog('run-1.json', [
-    { broker: 'gone.com',  status: 'dead',    detail: 'HTTP 404' },
-    { broker: 'alive.com', status: 'success', detail: '' },
-  ]);
-  writeLog('run-2.json', [
+  writeThreeRuns([
     { broker: 'gone.com',  status: 'dead',    detail: 'HTTP 404' },
     { broker: 'alive.com', status: 'success', detail: '' },
   ]);
@@ -82,7 +98,7 @@ test('does NOT add a host that appears in only one run as success', () => {
 });
 
 test('is idempotent - running twice produces no change', () => {
-  writeLog('run-1.json', [
+  writeThreeRuns([
     { broker: 'gone.com', status: 'dead', detail: 'ENOTFOUND' },
   ]);
 
@@ -99,7 +115,7 @@ test('merges with existing entries, deduped and sorted', () => {
   // Pre-populate with one host
   fs.writeFileSync(deadUrlsPath, JSON.stringify({ hosts: ['zombie.com'] }, null, 2) + '\n', 'utf8');
 
-  writeLog('run-1.json', [
+  writeThreeRuns([
     { broker: 'another-dead.com', status: 'dead', detail: 'HTTP 410' },
     { broker: 'zombie.com',       status: 'dead', detail: 'HTTP 404' },  // already in set
   ]);
@@ -119,7 +135,7 @@ test('handles missing logs directory gracefully (no crash)', () => {
 
 test('skips malformed log files without crashing', () => {
   fs.writeFileSync(path.join(logsDir, 'run-bad.json'), 'NOT VALID JSON', 'utf8');
-  writeLog('run-good.json', [
+  writeThreeRuns([
     { broker: 'consistently-dead.com', status: 'dead', detail: 'ERR_NAME_NOT_RESOLVED' },
   ]);
 
@@ -128,7 +144,7 @@ test('skips malformed log files without crashing', () => {
 });
 
 test('produces a sorted hosts array in the output file', () => {
-  writeLog('run-1.json', [
+  writeThreeRuns([
     { broker: 'zebra.com',  status: 'dead', detail: 'HTTP 404' },
     { broker: 'alpha.com',  status: 'dead', detail: 'HTTP 404' },
     { broker: 'middle.com', status: 'dead', detail: 'HTTP 404' },
@@ -139,7 +155,7 @@ test('produces a sorted hosts array in the output file', () => {
 });
 
 test('handles log files where entries lack a broker field', () => {
-  writeLog('run-1.json', [
+  writeThreeRuns([
     { status: 'dead', detail: 'HTTP 404' },        // no broker
     { broker: '', status: 'dead', detail: '' },    // empty broker
     { broker: 'real.com', status: 'dead', detail: 'HTTP 404' },
