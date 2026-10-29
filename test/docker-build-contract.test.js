@@ -160,3 +160,88 @@ test('docker-compose.yml no longer declares the obsolete top-level version key',
     'the top-level `version:` key is obsolete in Compose v2 and emits a warning on every command',
   );
 });
+
+// ── Persistence and ownership contract (CFG-3, CFG-4, CORE-14) ───────────────
+//
+// The documented recipes mounted the project over /app/data (hiding the shipped
+// broker datasets), mounted state.json as a single FILE (so the lock, .bak and
+// resume checkpoint lived in the container's throwaway layer), never told the
+// app where config.json was, and ran as uid 1001 against 0600 files owned by
+// the host user. Each of those is a working-looking recipe that silently does
+// the wrong thing, so the contract pins the shape of a correct one.
+
+/**
+ * Container-side paths of every bind mount in `text` (compose `- src:dst[:opt]`
+ * entries and `-v src:dst[:opt]` flags).
+ * @param {string} text
+ * @returns {string[]}
+ */
+function mountTargets(text) {
+  const targets = [];
+  for (const line of text.split('\n')) {
+    const m = line.match(/(?:^\s*-\s+|-v\s+)["']?([^\s"']+?):(\/[^\s"':]+)(?::[a-z,]+)?["']?\s*\\?\s*$/);
+    if (m) targets.push(m[2]);
+  }
+  return targets;
+}
+
+const looksLikeFile = p => /\.[a-z]{2,10}$/i.test(p.split('/').pop());
+
+test('mountTargets understands both compose entries and docker run flags (the detector must not fail open)', () => {
+  const sample = [
+    '      - ./aidr-home:/home/aidr',
+    '      - "./aidr-home/logs:/app/logs"',
+    '  -v "$(pwd)/state.json:/app/state.json" \\',
+    '  -v /volume1/docker/x:/app/data \\',
+    '  -v "$(pwd)/aidr-home:/home/aidr:rw" \\',
+  ].join('\n');
+  assert.deepEqual(mountTargets(sample), [
+    '/home/aidr', '/app/logs', '/app/state.json', '/app/data', '/home/aidr',
+  ]);
+});
+
+test('docker-compose.yml mounts directories only, never a single file', () => {
+  const files = mountTargets(compose).filter(looksLikeFile);
+  assert.deepEqual(
+    files,
+    [],
+    `single-file bind mounts break atomic writes (EBUSY) and leave the lock, .bak and checkpoint in the container layer: ${files.join(', ')}`,
+  );
+});
+
+test('docker-compose.yml never mounts over /app/data, which holds the shipped broker datasets', () => {
+  const over = mountTargets(compose).filter(p => p === '/app/data' || p.startsWith('/app/data/'));
+  assert.deepEqual(over, [], 'a mount at /app/data hides markup-parsed.json, badbool-extra.json and dead-urls.json');
+});
+
+test('docker-compose.yml mounts one home directory and points config and state inside it', () => {
+  const targets = mountTargets(compose);
+  assert.ok(targets.includes('/home/aidr'), 'mount a dedicated host directory at /home/aidr');
+  for (const name of ['AIDR_CONFIG_PATH', 'AIDR_CONFIG_ENC_PATH', 'AIDR_STATE_PATH']) {
+    assert.match(
+      compose,
+      new RegExp(`${name}=/home/aidr/`),
+      `${name} must point inside the mounted directory, or the file lands in the container layer`,
+    );
+  }
+});
+
+test('docker-compose.yml runs as a chosen uid so the host-owned 0600 files are readable', () => {
+  // The image user is pwuser (1001). Files created by the host user (1000, or
+  // 1026 on a Synology) at mode 0600 are unreadable to uid 1001: EACCES on
+  // config.json and on every state write.
+  assert.match(compose, /^\s*user:\s*["']?\$\{AIDR_UID:-1001\}:\$\{AIDR_GID:-1001\}["']?\s*$/m);
+  assert.match(compose, /HOME=\/tmp/, 'a uid with no passwd entry has no writable home; Chromium needs one for its profile');
+});
+
+test('the Dockerfile creates /home/aidr owned by the runtime user so an unmounted run still works', () => {
+  assert.match(dockerfile, /mkdir -p [^\n]*\/home\/aidr/);
+  assert.match(dockerfile, /chown -R pwuser:pwuser [^\n]*\/home\/aidr/);
+});
+
+test('the Dockerfile header recipe does not teach single-file mounts', () => {
+  const header = dockerfile.split(/^FROM\s/m)[0];
+  const files = mountTargets(header.replace(/^#\s?/gm, '')).filter(looksLikeFile);
+  assert.deepEqual(files, [], `Dockerfile header documents a single-file mount: ${files.join(', ')}`);
+  assert.doesNotMatch(header, /:\/app\/data\b/);
+});
