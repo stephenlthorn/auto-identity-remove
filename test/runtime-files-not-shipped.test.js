@@ -43,6 +43,11 @@ const RUNTIME_PATHS = [
   STATE_PATH + '.lock',
   STATE_PATH + '.checkpoint',
   STATE_PATH + '.checkpoint.tmp',
+  // The --confirm-emails ledger of already-clicked messages lives beside state.json.
+  path.join(path.dirname(STATE_PATH), 'confirm-processed.json'),
+  // The dashboard backs the config up next to itself on every save.
+  CONFIG_PATH + '.bak',
+  CONFIG_ENC_PATH + '.bak',
 ];
 
 /** @returns {boolean} true when git would ignore the path. */
@@ -116,6 +121,12 @@ const EXTRA_RUNTIME_PATHS = [
   'config.json.enc.tmp',
   'state.json.bak.tmp',
   'state.json.corrupt-2026-10-29T09-00-00-000Z',
+  'state.json.bak.corrupt-2026-10-29T09-00-00-000Z',
+  'confirm-processed.json.12345.tmp',
+  'config.json.unreadable-2026-10-29T09-00-00-000Z.bak',
+  'config.json.enc.unreadable-2026-10-29T09-00-00-000Z.bak',
+  'data/breach-result.json',
+  'data/breach-result.json.tmp',
   'dashboard/.auth.json',
   'aidr.passphrase',
   'aidr-home/config.json',
