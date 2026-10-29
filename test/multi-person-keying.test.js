@@ -63,7 +63,12 @@ const configMockFactory = () => ({
   RECHECK_DAYS: 90,
   CONFIRM_RECHECK_DAYS: 14,
   lastOptOutDaysAgo: () => Infinity,
-  shouldSkip: (key) => { recorded.skipCheckedKeys.push(key); return null; },
+  // shouldSkip(brokerName, { person, personCount, personIndex }): record the state
+  // key the lookup resolves to.
+  shouldSkip: (name, o) => {
+    recorded.skipCheckedKeys.push(o && o.person ? require('../lib/config').stateKey(name, o.person, o.personCount) : name);
+    return null;
+  },
   isPendingConfirmation: () => false,
   recordSuccess: (key) => recorded.successKeys.push(key),
   recordPendingConfirmation: () => {},
