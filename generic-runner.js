@@ -36,9 +36,13 @@ const os   = require('os');
 const net  = require('net');
 const dns  = require('dns');
 
+// The three datasets below ship with the app and always load from it. The feeds
+// cache is written by --update-brokers, so it lives in the writable data
+// directory (AIDR_HOME/data when set), the same place lib/feeds.js writes it.
+const { resolvePaths } = require('./lib/paths');
 const MARKUP_PATH     = path.join(__dirname, 'data', 'markup-parsed.json');
 const BADBOOL_PATH    = path.join(__dirname, 'data', 'badbool-extra.json');
-const FEEDS_PATH      = path.join(__dirname, 'data', 'feeds-brokers.json');
+const FEEDS_PATH      = path.join(resolvePaths().data, 'feeds-brokers.json');
 const DEAD_URLS_PATH  = path.join(__dirname, 'data', 'dead-urls.json');
 
 const { looksLikeConfirmationRequired, PATTERN: CONFIRM_PATTERN } = require('./lib/confirm');
