@@ -213,6 +213,15 @@ describe('secrets never reach text', () => {
     assert.equal(maskProxy(undefined), null);
   });
 
+  test('maskProxy scrubs credentials even when the server has no scheme at all', () => {
+    for (const server of [`alice:${PASSWORD}@proxy.example:8080`, `:${PASSWORD}@proxy.example:8080`]) {
+      const masked = maskProxy({ server });
+      assert.ok(!JSON.stringify(masked).includes(PASSWORD), server);
+      assert.equal(masked.server, 'proxy.example:8080');
+    }
+    assert.equal(maskProxy({ server: 'proxy.example:8080' }).server, 'proxy.example:8080');
+  });
+
   test('describeProxy is one safe line for the start-of-run banner', () => {
     assert.equal(describeProxy(GOOD), 'proxy http://proxy.example:8080 (authenticated)');
     assert.equal(describeProxy({ server: 'socks5://proxy.example:1080' }), 'proxy socks5://proxy.example:1080');
