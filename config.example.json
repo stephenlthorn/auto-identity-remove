@@ -26,6 +26,14 @@
     "apiKey": "CAP-YOUR_KEY_HERE"
   },
 
+  "captcha": {
+    "_comment": "Solving CAPTCHAs yourself. Without a CapSolver key (or when CapSolver fails) a CAPTCHA broker used to fail on the spot; now the browser window comes to the front, your terminal beeps, you get a desktop notification, and the tool waits while you solve it, then submits the form for you. A broker nobody solved is logged as captcha_failed; run `aidr captchas` to retry only those, headed.",
+    "manual": "auto",
+    "_manual_comment": "\"auto\" (default): wait for you only when the browser is visible AND you are at an interactive terminal (a scheduled run or Docker never waits). true: wait whenever the browser is visible, even without a terminal. false: never wait. A headless browser never waits whatever this says; run `aidr captchas` on a desktop machine instead.",
+    "manualTimeoutSec": 180,
+    "_manualTimeoutSec_comment": "How long to wait for you on each CAPTCHA before moving on, in seconds (default 180, maximum 3600)."
+  },
+
   "hibp": {
     "_comment": "Optional. Have I Been Pwned breach check (node watcher.js --breach-check). Get a key at https://haveibeenpwned.com/API/Key. Leave apiKey blank to disable.",
     "apiKey": ""
