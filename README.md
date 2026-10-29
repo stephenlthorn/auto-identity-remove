@@ -198,7 +198,11 @@ Or with compose, which already carries all of those mounts and variables:
 **`--init` matters.** Without it node is PID 1, `docker stop` cannot reap the
 Chromium children, and the state lock is left behind, wedging the next run. If a
 run is killed anyway, `aidr-home/state.json.lock` can be left behind; delete it
-once you are sure no run is active.
+once you are sure no run is active. A lock older than 6 hours is treated as stale
+and taken over even if its process id looks alive (a pid recycled after a
+reboot would otherwise hold it forever); if a full multi-person run really takes
+longer, set `AIDR_LOCK_MAX_AGE_HOURS` (for example `12`) so a second run cannot
+take the lock from a live one.
 
 **`TZ` matters.** Containers are UTC. Without it a "1st of the month, 9am"
 schedule and every report timestamp land in the wrong hour.
@@ -466,6 +470,28 @@ Or to run in the background and log output:
 ```bash
 ./run.sh >> logs/manual-run.log 2>&1 &
 ```
+
+### Flags are checked, and filters reach every broker
+
+`node watcher.js --help` lists every flag. The command line is checked before
+anything runs: an unknown flag, a flag missing its value, a stray word, or two
+modes together (`--list --score`) is an error. Nothing is submitted, the closest
+flag is suggested, and the exit status is 2. (A misspelt `--dryrun` used to be
+ignored, which turned a preview into a real run.)
+
+`--only A,B`, `--skip A,B` and `--retry-failed` apply to the whole run: the
+form brokers, the **email** brokers and the 500+ **generic** brokers. Names are
+case-insensitive. `--retry-failed` re-runs what the last run log recorded as an
+error, a CAPTCHA failure, awaiting an email confirmation, or *unconfirmed* (the
+form was sent but the result page could not be read). A filtered or resumed run
+marks its log as partial, so the next full run is not compared against it.
+
+Exit status: `0` finished; `1` could not start (no config, an unedited
+`config.example.json`, another run holds the lock) or finished incomplete (a
+person skipped because the masked-email relay was down); `2` a bad command line,
+or a check that could not reach a verdict (`--breach-check`, `--serp-scan`,
+`--serp-watch` with every search engine unavailable); `130`/`143` interrupted by
+Ctrl-C or `docker stop`, after the browser is closed and state is saved.
 
 ### Verifying removals (`--verify`)
 

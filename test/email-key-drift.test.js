@@ -150,8 +150,14 @@ test('multi-person mode: the recently-sent check reads the same composite key it
   // every run re-sent every email.
   const successCalls = patchDeps();
   const asked = [];
-  // Alice was emailed yesterday; Bob never was.
-  configMod.lastOptOutDaysAgo = (key) => { asked.push(key); return key === 'Pipl|Alice Adams' ? 1 : Infinity; };
+  // Alice was emailed yesterday; Bob never was. The check passes the bare broker
+  // name plus the person (so persons[0] keeps pre-upgrade history); the key it
+  // resolves to is the one success is recorded under.
+  configMod.lastOptOutDaysAgo = (name, o) => {
+    const key = configMod.stateKey(name, o.person, o.personCount);
+    asked.push(key);
+    return key === 'Pipl|Alice Adams' ? 1 : Infinity;
+  };
   const { freshEmail, restore } = loadFreshEmailWithSmtpMock();
 
   const cfg = { persons: [PERSON_A, PERSON_B], email: { smtp: SMTP_CFG } };

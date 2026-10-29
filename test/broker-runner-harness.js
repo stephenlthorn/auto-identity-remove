@@ -124,9 +124,13 @@ function makeContext(page) {
  * ./confirm, ./locale-patterns, ./filter and ./snapshot modules are used so the
  * classification path is the production one.
  */
+function stateKeyOf(brokerName, person, total) {
+  return !person || (total || 1) <= 1 ? brokerName : `${brokerName}|${person.firstName} ${person.lastName}`;
+}
+
 function loadRunner(stubs = {}) {
   const logged = [];
-  const recorded = { success: [], pending: [], failure: [], checkpoints: [], skipChecks: [] };
+  const recorded = { success: [], pending: [], failure: [], checkpoints: [], skipChecks: [], skipOpts: [] };
   const calls = { fillForm: [], findListingUrl: [], captcha: [] };
 
   const map = {
@@ -134,10 +138,15 @@ function loadRunner(stubs = {}) {
       recordSuccess: (name, detail) => recorded.success.push({ name, detail }),
       recordPendingConfirmation: (name, snippet) => recorded.pending.push({ name, snippet }),
       recordFailure: (name, kind) => recorded.failure.push({ name, kind }),
-      shouldSkip: (key) => { recorded.skipChecks.push(key); return null; },
+      // shouldSkip(brokerName, { person, personCount, personIndex }): skipChecks keeps
+      // the state key the lookup resolves to, skipOpts the raw call.
+      shouldSkip: (name, o) => {
+        recorded.skipOpts.push([name, o]);
+        recorded.skipChecks.push(o && o.person ? stateKeyOf(name, o.person, o.personCount) : name);
+        return null;
+      },
       saveCheckpoint: (key) => recorded.checkpoints.push(key),
-      stateKey: (brokerName, person, total) =>
-        (!person || (total || 1) <= 1 ? brokerName : `${brokerName}|${person.firstName} ${person.lastName}`),
+      stateKey: stateKeyOf,
     },
     './logger': {
       logResult: (name, status, detail) => logged.push({ name, status, detail }),

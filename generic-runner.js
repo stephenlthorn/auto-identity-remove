@@ -36,8 +36,6 @@ const os   = require('os');
 const net  = require('net');
 const dns  = require('dns');
 
-const CONFIG_PATH     = path.join(__dirname, 'config.json');
-const STATE_PATH      = path.join(__dirname, 'state.json');
 const MARKUP_PATH     = path.join(__dirname, 'data', 'markup-parsed.json');
 const BADBOOL_PATH    = path.join(__dirname, 'data', 'badbool-extra.json');
 const FEEDS_PATH      = path.join(__dirname, 'data', 'feeds-brokers.json');
@@ -46,9 +44,10 @@ const DEAD_URLS_PATH  = path.join(__dirname, 'data', 'dead-urls.json');
 const { looksLikeConfirmationRequired, PATTERN: CONFIRM_PATTERN } = require('./lib/confirm');
 const { classifyPostSubmit } = require('./lib/success');
 const { patternsFor, langOf } = require('./lib/locale-patterns');
-const { CONFIRM_RECHECK_DAYS, loadConfig } = require('./lib/config');
+const { CONFIRM_RECHECK_DAYS, loadConfig, readEntry, CONFIG_PATH, CONFIG_ENC_PATH } = require('./lib/config');
 const { withRetry } = require('./lib/retry');
 const { isAllowlisted } = require('./lib/filter');
+const { acceptOptOutDialogs } = require('./lib/browser');
 
 // Config is loaded lazily so that modules importing only the pure helpers
 // (classifyNavError, isDeadStatus, loadDeadSet) don't require config.json.
@@ -59,8 +58,10 @@ function getConfig() {
   if (!_config) {
     // loadConfig() calls process.exit(1) when config is absent; avoid that by
     // checking existence first so callers that wrap in try/catch can handle it.
-    const encPath = CONFIG_PATH + '.enc';
-    if (!fs.existsSync(encPath) && !fs.existsSync(CONFIG_PATH)) {
+    // The paths come from lib/config so AIDR_CONFIG_PATH / AIDR_CONFIG_ENC_PATH
+    // (the Docker recipe) are honoured; a hardcoded <repo>/config.json reported
+    // "no config" for an install that had one.
+    if (!fs.existsSync(CONFIG_ENC_PATH) && !fs.existsSync(CONFIG_PATH)) {
       throw new Error('No config found; run node setup.js to create one');
     }
     _config = loadConfig();
@@ -919,7 +920,12 @@ async function processGenericUrl(page, broker, state, dryRun = false, injectedDe
 
   // WP4: if the entry is in pending-confirmation state, use the shorter 14-day
   // re-check window so the user has a chance to click the confirmation link.
-  const entry = state.optOuts[key];
+  // Read through the person-aware reader when the caller says how many persons
+  // there are: persons[0]'s history from before a second person was added sits
+  // under the bare broker name and must still count.
+  const entry = opts.personCount !== undefined
+    ? readEntry(state, broker.name, person, opts.personCount, { personIndex: opts.personIndex, persons: opts.persons })
+    : state.optOuts[key];
   if (entry) {
     const stamp = entry.lastAttempt || entry.lastSuccess;
     if (stamp) {
@@ -1286,6 +1292,16 @@ function classifyOutcome(status, detail) {
   }
 }
 
+// Hostname a generic row points at (no leading www.), or undefined for a row
+// with no usable URL.
+function hostOfBroker(broker) {
+  try {
+    return new URL(broker.url).hostname.replace(/^www\./, '') || undefined;
+  } catch (_) {
+    return undefined;
+  }
+}
+
 async function runGenericBrokers(context, explicitBrokerHosts, state, logResult, recordSuccess, opts = {}) {
   const dryRun = !!opts.dryRun;
   // Which person this pass is for. fillGenericForm() submits a real name and
@@ -1324,6 +1340,9 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
   const newWorkingPage = async () => {
     const fresh = await context.newPage();
     if (typeof fresh.setDefaultTimeout === 'function') fresh.setDefaultTimeout(ACTION_TIMEOUT_MS);
+    // An "Are you sure?" confirm() is auto-dismissed by Playwright, which aborts
+    // the opt-out while the runner goes on to read the page.
+    acceptOptOutDialogs(fresh);
     return fresh;
   };
 
@@ -1361,7 +1380,7 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
 
       let result;
       try {
-        result = await processFn(page, broker, state, dryRun, opts.injectedDeadSet, { person, stateKey: keyFor(broker.name), submissionEmail: opts.submissionEmail || undefined, dnsLookup: opts.dnsLookup });
+        result = await processFn(page, broker, state, dryRun, opts.injectedDeadSet, { person, personCount, personIndex: opts.personIndex, stateKey: keyFor(broker.name), submissionEmail: opts.submissionEmail || undefined, dnsLookup: opts.dnsLookup });
       } catch (err) {
         // One broker must never abort the whole run or skip the cleanup below.
         result = { status: 'error', detail: (err && err.message ? err.message.slice(0, 80) : 'error') };
@@ -1371,7 +1390,9 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
         }
       }
 
-      logResult(broker.name, result.status, result.detail || '');
+      // Rows are named by company, so record which host this one was about:
+      // scripts/prune-dead.js can only judge a host it can see in the run log.
+      logResult(broker.name, result.status, result.detail || '', { host: hostOfBroker(broker) });
 
       stats.attempted++;
       const bucket = classifyOutcome(result.status, result.detail || '');
