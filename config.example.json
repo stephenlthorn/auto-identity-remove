@@ -54,7 +54,9 @@
       "pass": "YOUR_GMAIL_APP_PASSWORD",
       "from": "you@gmail.com",
       "_ca_comment": "Optional: path to a PEM certificate to trust for this server, for local bridges with a self-signed cert. Proton Mail Bridge: host=127.0.0.1, port=1025, export the cert from Bridge settings (Export TLS certificates) and set ca to its path, e.g. cert.pem.",
-      "ca": ""
+      "ca": "",
+      "_allowInsecure_comment": "Optional escape hatch, leave false. On every port except 465 the connection MUST upgrade with STARTTLS or the send fails; otherwise someone on the network can strip STARTTLS and read your SMTP password and the opt-out emails. Set true ONLY for a local relay on 127.0.0.1 that genuinely speaks plaintext.",
+      "allowInsecure": false
     }
   },
 
