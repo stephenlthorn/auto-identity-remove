@@ -206,15 +206,26 @@ for (const { name, parser } of PARSERS) {
 
 // ─── Drift guards: args.js must know every flag the code base really uses ─────
 
-test('args.js knows every flag watcher.js reads from process.argv', () => {
+test('watcher.js reads its flags only through the strict parser, and every ARGS key it reads exists', () => {
   const source = fs.readFileSync(path.join(ROOT, 'watcher.js'), 'utf8');
-  const used = new Set(
-    [...source.matchAll(/process\.argv\.(?:includes|indexOf)\('(--[a-z][a-z-]*)'\)/g)].map(m => m[1]),
-  );
 
+  // A raw process.argv read would bypass the strictness: `--dryrun` would be ignored again.
+  assert.doesNotMatch(source, /process\.argv/, 'watcher.js must take its flags from parseWatcherArgsOrExit()');
+  assert.match(source, /parseWatcherArgsOrExit\(\)/);
+
+  const known = new Set([...FLAG_SPECS.map(spec => spec.key), 'confirmEmailsDir', 'freezeMode']);
+  const used = new Set([...source.matchAll(/\bARGS\.([A-Za-z]+)/g)].map(m => m[1]));
   assert.ok(used.size >= 25, `expected to find the watcher flags, found ${used.size}`);
-  const missing = [...used].filter(flag => !KNOWN_FLAGS.has(flag));
-  assert.deepEqual(missing, [], 'watcher.js reads flags that lib/args.js would reject');
+  const missing = [...used].filter(key => !known.has(key));
+  assert.deepEqual(missing, [], 'watcher.js reads ARGS keys that lib/args.js never produces');
+});
+
+test('every flag lib/args.js accepts is read by watcher.js, so none is parsed and then ignored', () => {
+  const source = fs.readFileSync(path.join(ROOT, 'watcher.js'), 'utf8');
+  const used = new Set([...source.matchAll(/\bARGS\.([A-Za-z]+)/g)].map(m => m[1]));
+  // --help exits inside parseWatcherArgsOrExit, and --freeze is read as part of freezeMode
+  const unread = FLAG_SPECS.map(spec => spec.key).filter(key => !['help', 'freeze'].includes(key) && !used.has(key));
+  assert.deepEqual(unread, [], 'these flags are accepted but watcher.js never acts on them');
 });
 
 test('args.js knows every flag the dashboard passes to watcher.js', () => {
