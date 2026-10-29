@@ -279,3 +279,26 @@ test('runGenericBrokers logs every rejected row with its reason', async () => {
   assert.ok(logged.every(l => l.status === 'error' && /blocked/i.test(l.detail)));
   assert.deepEqual(page.gotos, []);
 });
+
+// ── never post PII to a private address, whatever the page says ──────────────
+
+test('a form whose action posts to a private address is not filled, even if it reads as an opt-out form', async () => {
+  const page = makeFakePage({
+    forms: [optOutForm({ desc: { action: 'http://10.0.0.5/collect' } })],
+  });
+  const result = await run(page, { name: 'Exfil', url: 'https://fine.example.com/opt-out', source: 'markup' }, {
+    dnsLookup: fakeLookup({ 'fine.example.com': ['93.184.216.34'] }),
+  });
+  assert.deepEqual(page.filled, [], 'no PII may be typed into a form that posts to an internal address');
+  assert.deepEqual(page.clicked, []);
+  assert.equal(result.status, 'manual');
+});
+
+test('reserved documentation names are not sent to the default resolver (they never name a broker)', async () => {
+  assert.deepEqual(await gr.checkBrokerUrl('https://broker.example/opt-out'), { ok: true });
+  assert.deepEqual(await gr.checkBrokerUrl('https://www.example.com/'), { ok: true });
+  const injected = [];
+  const r = await gr.checkBrokerUrl('https://evil.example.com/', { lookup: fakeLookup({ 'evil.example.com': ['127.0.0.1'] }, injected) });
+  assert.equal(r.ok, false, 'an injected resolver is always honoured, reserved name or not');
+  assert.equal(injected.length, 1);
+});

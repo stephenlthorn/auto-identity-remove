@@ -33,7 +33,9 @@ const BADBOOL_PATH    = path.join(__dirname, 'data', 'badbool-extra.json');
 const FEEDS_PATH      = path.join(__dirname, 'data', 'feeds-brokers.json');
 const DEAD_URLS_PATH  = path.join(__dirname, 'data', 'dead-urls.json');
 
-const { detectConfirmationRequired } = require('./lib/confirm');
+const { looksLikeConfirmationRequired, PATTERN: CONFIRM_PATTERN } = require('./lib/confirm');
+const { classifyPostSubmit } = require('./lib/success');
+const { patternsFor, langOf } = require('./lib/locale-patterns');
 const { CONFIRM_RECHECK_DAYS, loadConfig } = require('./lib/config');
 const { withRetry } = require('./lib/retry');
 const { isAllowlisted } = require('./lib/filter');
@@ -128,6 +130,10 @@ function isDeadStatus(code) {
 // Reserved / internal-only names. None of these is ever a public data broker.
 const INTERNAL_HOST_SUFFIXES = ['localhost', 'local', 'internal', 'localdomain', 'home.arpa', 'lan', 'intranet', 'corp'];
 const DNS_LOOKUP_TIMEOUT_MS = 5000;
+// RFC 2606 / 6761 names never resolve to a real broker. With the default resolver
+// they are not worth a DNS query (the navigation fails on its own), which also
+// keeps tests and docs that use them off the network.
+const RESERVED_NAME_SUFFIXES = ['example', 'invalid', 'test', 'example.com', 'example.net', 'example.org'];
 
 function parseIPv4(str) {
   const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(str);
@@ -255,6 +261,8 @@ async function checkBrokerUrl(rawUrl, opts = {}) {
     if (host === suffix || host.endsWith(`.${suffix}`)) return { ok: false, reason: `internal host name ${host}` };
   }
 
+  if (!opts.lookup && RESERVED_NAME_SUFFIXES.some(r => host === r || host.endsWith(`.${r}`))) return { ok: true };
+
   let addresses;
   try {
     addresses = await resolveAll(host, lookup, timeoutMs);
@@ -331,11 +339,15 @@ const DNS_SELECTORS = [
   '.optanon-toggle-display',
 ];
 
-async function clickDoNotSell(page) {
+// beforeClick runs right before the click so the caller can snapshot the forms
+// that were already on the page: a form that only appears afterwards was opened
+// by the control we just clicked.
+async function clickDoNotSell(page, { beforeClick } = {}) {
   for (const sel of DNS_SELECTORS) {
     try {
       const el = page.locator(sel).first();
       if ((await el.count()) > 0 && (await el.isVisible({ timeout: 500 }))) {
+        if (beforeClick) await beforeClick();
         await el.click({ timeout: 2000 });
         await page.waitForTimeout(1500);
         return true;
@@ -411,6 +423,272 @@ async function handlePrivacyManager(page) {
   return false;
 }
 
+// ─── Page text evidence (BRK-1) ───────────────────────────────────────────────
+//
+// A click is not an opt-out. What happened after it is judged from the text that
+// APPEARED because of the click, never from copy that was already on the page
+// ("once your request has been received we will..." is static marketing text).
+
+// Named, self-contained functions: Playwright serialises them into the page.
+function readBodyInPage() {
+  return (document.body && document.body.innerText) || '';
+}
+function readLangInPage() {
+  return (document.documentElement && document.documentElement.getAttribute('lang')) || '';
+}
+
+async function readBodyText(page) {
+  try {
+    const text = await page.evaluate(readBodyInPage);
+    return typeof text === 'string' ? text : '';
+  } catch (_) {
+    return '';
+  }
+}
+
+async function readPageLang(page) {
+  try {
+    const raw = await page.evaluate(readLangInPage);
+    return langOf(typeof raw === 'string' ? raw : '');
+  } catch (_) {
+    return '';
+  }
+}
+
+const normalizeLines = (text) =>
+  String(text || '').split('\n').map(line => line.replace(/\s+/g, ' ').trim()).filter(Boolean);
+
+/**
+ * The lines in `after` that were not in `before` (a multiset diff, so a line that
+ * appears one more time than before counts as new). A page that was replaced
+ * outright is entirely new text.
+ * @param {string} before
+ * @param {string} after
+ * @returns {string}
+ */
+function newTextSince(before, after) {
+  const remaining = new Map();
+  for (const line of normalizeLines(before)) remaining.set(line, (remaining.get(line) || 0) + 1);
+  const fresh = [];
+  for (const line of normalizeLines(after)) {
+    const left = remaining.get(line) || 0;
+    if (left > 0) remaining.set(line, left - 1);
+    else fresh.push(line);
+  }
+  return fresh.join('\n');
+}
+
+function snippetOf(text, patterns) {
+  for (const re of patterns) {
+    const m = re && text.match(re);
+    if (m) return text.slice(Math.max(0, m.index - 30), m.index + 120).replace(/\s+/g, ' ').trim();
+  }
+  return '';
+}
+
+/**
+ * Judge what a click did from the text it added to the page.
+ *   confirmation-email wording -> pending_confirm (existing path)
+ *   success wording            -> success
+ *   failure / validation text  -> error
+ *   anything else              -> unverified (never a cooldown)
+ * @returns {Promise<{ status: string, detail: string }>}
+ */
+async function judgeNewText(page, beforeText, label) {
+  const fresh = newTextSince(beforeText, await readBodyText(page));
+  const lang = await readPageLang(page);
+  if (looksLikeConfirmationRequired(fresh, lang)) {
+    const locale = patternsFor(lang);
+    return { status: 'pending_confirm', detail: snippetOf(fresh, [CONFIRM_PATTERN, locale && locale.confirm]) || 'check your email to confirm' };
+  }
+  const { outcome, snippet } = classifyPostSubmit(fresh, lang);
+  if (outcome === 'success') return { status: 'success', detail: snippet || label };
+  if (outcome === 'failure') return { status: 'error', detail: snippet || 'form submission may have failed' };
+  return { status: 'unverified', detail: `${label}: no explicit confirmation - re-check next run` };
+}
+
+// ─── Which form is an opt-out form? (codex #3) ────────────────────────────────
+//
+// The generic runner used to type the person's details into the first form on the
+// page and click the first submit button, so a footer newsletter or contact form
+// got a name, email and zip instead of a removal request. A form is now submitted
+// only if it looks like an opt-out / deletion / privacy-request form AND does not
+// look like a newsletter / login / search / contact / checkout form.
+
+const MAX_FORMS = 10;
+
+// Runs INSIDE the page (via locator.evaluate): it must stay self-contained.
+function describeFormElement(form) {
+  const squash = (v) => String(v || '').replace(/\s+/g, ' ').trim();
+  const textOf = (n) => squash(n && (n.innerText || n.textContent));
+  const attr = (n, a) => (n && n.getAttribute && n.getAttribute(a)) || '';
+  const lower = (v) => String(v || '').toLowerCase();
+
+  const controls = Array.from(form.querySelectorAll('input, select, textarea, button'));
+  const typeOf = (c) => lower(c.getAttribute('type'));
+  const isAction = (c) => c.tagName === 'BUTTON' || ['submit', 'button', 'image', 'reset'].includes(typeOf(c));
+  const isData = (c) => !isAction(c) && typeOf(c) !== 'hidden';
+  const fields = controls.filter(isData);
+
+  const fieldHints = fields.map((c) => {
+    const labels = c.labels ? Array.from(c.labels).map(textOf).join(' ') : '';
+    return [attr(c, 'name'), c.id, attr(c, 'placeholder'), attr(c, 'aria-label'), attr(c, 'autocomplete'), labels].join(' ');
+  }).join(' ');
+
+  const submitTexts = controls.filter(isAction).map((c) => (
+    c.tagName === 'INPUT' ? squash(c.value) : squash(c.innerText || c.value || attr(c, 'aria-label'))
+  )).filter(Boolean);
+
+  const legends = Array.from(form.querySelectorAll('legend, h1, h2, h3, h4, h5, h6, [role="heading"]'))
+    .map(textOf).filter(Boolean).join(' | ');
+
+  // The heading that introduces this form when it sits outside it (a modal title,
+  // a section heading): climb while this is the only form in the container.
+  let heading = '';
+  let node = form;
+  for (let i = 0; i < 4 && node.parentElement; i++) {
+    const parent = node.parentElement;
+    if (/^(BODY|HTML)$/.test(parent.tagName) || parent.querySelectorAll('form').length > 1) break;
+    const found = Array.from(parent.querySelectorAll('h1, h2, h3, h4, [role="heading"]')).find(n => !form.contains(n));
+    if (found) { heading = textOf(found); break; }
+    node = parent;
+  }
+
+  const dialog = form.closest('dialog, [role="dialog"], [aria-modal="true"]');
+  let dialogLabel = attr(dialog, 'aria-label');
+  if (!dialogLabel && dialog) {
+    const labelledBy = attr(dialog, 'aria-labelledby');
+    dialogLabel = labelledBy ? textOf(document.getElementById(labelledBy)) : '';
+  }
+
+  let action = '';
+  try { action = new URL(attr(form, 'action') || '', document.baseURI).href; } catch (_) { action = attr(form, 'action'); }
+
+  const fieldNames = fields.map(c => lower(attr(c, 'name') || c.id));
+  const shown = !!(form.offsetWidth || form.offsetHeight || form.getClientRects().length)
+    && window.getComputedStyle(form).visibility !== 'hidden';
+
+  return {
+    visible: shown,
+    text: textOf(form).slice(0, 1500),
+    legends: legends.slice(0, 300),
+    heading: heading.slice(0, 200),
+    dialogLabel: squash(dialogLabel).slice(0, 200),
+    action,
+    id: form.id || '',
+    className: typeof form.className === 'string' ? form.className : '',
+    name: attr(form, 'name'),
+    ariaLabel: attr(form, 'aria-label'),
+    submitTexts: submitTexts.slice(0, 6),
+    fieldHints: squash(fieldHints).slice(0, 400),
+    hasPassword: !!form.querySelector('input[type="password"]'),
+    hasSearch: !!form.querySelector('input[type="search"]') || lower(attr(form, 'role')) === 'search'
+      || !!form.closest('[role="search"]') || fieldNames.some(n => /^(q|s|query|search|keyword|keywords)$/.test(n)),
+    hasPayment: !!form.querySelector('input[autocomplete^="cc-"], input[name*="card" i], input[name*="cvv" i], input[name*="cvc" i]'),
+    chrome: !!form.closest('footer, header, nav, aside, [role="contentinfo"], [role="banner"], [role="navigation"], [role="complementary"]'),
+    fillable: fields.length,
+  };
+}
+
+// Text is lower-cased and camelCase / punctuation split, so ids and classes like
+// "doNotSell", "opt-out_form" and "ccpa-request" read the same as prose.
+function vocabText(value) {
+  return String(value || '')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .toLowerCase()
+    .replace(/['\u2019]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+const OPT_OUT_VOCAB = /\b(opt ?out|optout|remov(e|es|ed|al|ing)|delet(e|es|ed|ion|ing)|eras(e|ure)|do not (sell|share)|donotsell|dont sell|privacy (requests?|rights?|choices?|portal)|(data|subject|consumer|access|deletion|information) requests?|dsar|ccpa|cpra|gdpr|suppress(ion)?|right to (know|delete|be forgotten)|unlist|unpublish)\b/;
+
+const NOT_OPT_OUT_VOCAB = /\b(subscribe|subscribers?|subscription|newsletters?|mailing list|sign ?up|signup|join (us|our|the)|stay (in touch|connected|updated|informed)|get (updates|offers|deals|the latest)|log ?in|login|sign ?in|signin|password|passcode|search|look ?up|lookup|find (a |your |someone|people|person)|contact us|contact form|get in touch|feedback|check ?out|cart|basket|payment|credit card|billing|coupon|promo code|register|create (an )?account|careers|apply now|support ticket)\b/;
+
+function pathOf(url) {
+  try {
+    const u = new URL(url);
+    return `${u.pathname} ${u.search}`;
+  } catch (_) {
+    return String(url || '');
+  }
+}
+
+function formSignature(d) {
+  return [d.id, d.className, d.name, pathOf(d.action), String(d.text || '').slice(0, 80)].join('|');
+}
+
+/**
+ * Decide whether a described form may receive the person's details.
+ *
+ * "Strong" signals are the form's own id/class/name/aria-label, its action path,
+ * its legend / heading / dialog title and its button labels. "Weak" signals are
+ * its body text and field hints. A newsletter-style word in a strong signal always
+ * rejects; in a weak one it rejects unless a strong signal says opt-out. Opt-out
+ * wording in the page URL/title only vouches for the sole non-footer form.
+ *
+ * @param {object} d   result of describeFormElement()
+ * @param {{ pageUrl?: string, pageTitle?: string, visibleFormCount?: number,
+ *           afterOptOutClick?: boolean, isNewSinceClick?: boolean }} [ctx]
+ * @returns {{ eligible: boolean, reason: string }}
+ */
+function classifyOptOutForm(d, ctx = {}) {
+  const reject = (reason) => ({ eligible: false, reason });
+  const accept = (reason) => ({ eligible: true, reason });
+  if (!d || d.visible === false) return reject('form is not visible');
+  if (d.hasPassword) return reject('looks like a login form');
+  if (d.hasPayment) return reject('looks like a payment form');
+
+  const strong = vocabText([d.id, d.className, d.name, d.ariaLabel, pathOf(d.action), d.legends, d.heading, d.dialogLabel, ...(d.submitTexts || [])].join(' '));
+  const weak = vocabText([d.text, d.fieldHints].join(' '));
+  const strongOptOut = OPT_OUT_VOCAB.test(strong);
+  const strongNot = NOT_OPT_OUT_VOCAB.exec(strong);
+  const weakNot = NOT_OPT_OUT_VOCAB.exec(weak);
+
+  if (strongNot) return reject(`looks like a ${strongNot[0]} form`);
+  if (d.hasSearch && !strongOptOut) return reject('looks like a search form');
+  if (weakNot && !strongOptOut) return reject(`looks like a ${weakNot[0]} form`);
+  if (strongOptOut) return accept('opt-out wording in its heading, action or button');
+  if (!d.chrome && OPT_OUT_VOCAB.test(weak)) return accept('opt-out wording in its text');
+
+  const page = vocabText(`${pathOf(ctx.pageUrl)} ${ctx.pageTitle || ''}`);
+  if (!d.chrome && ctx.visibleFormCount === 1 && OPT_OUT_VOCAB.test(page)) return accept('the only form on an opt-out page');
+  if (!d.chrome && ctx.afterOptOutClick && ctx.isNewSinceClick) return accept('form opened by the Do Not Sell control');
+  return reject(d.chrome ? 'footer/header form with no opt-out wording of its own' : 'no opt-out wording');
+}
+
+async function describeForms(page) {
+  const found = [];
+  let forms;
+  let count = 0;
+  try {
+    forms = page.locator('form');
+    count = await forms.count();
+  } catch (_) {
+    return found;
+  }
+  for (let i = 0; i < Math.min(count, MAX_FORMS); i++) {
+    try {
+      const locator = forms.nth(i);
+      const desc = await locator.evaluate(describeFormElement);
+      if (desc && typeof desc === 'object') found.push({ locator, desc });
+    } catch (_) {}
+  }
+  return found;
+}
+
+// A registry row for a bare homepage is not a request form. Strategy 3 never
+// runs on one; Do Not Sell, consent managers and DSAR links still do.
+function isHomepageUrl(url) {
+  try {
+    const u = new URL(url);
+    return ['', '/', '/index.html', '/index.htm', '/index.php', '/home'].includes(u.pathname.toLowerCase()) && !u.search && !u.hash;
+  } catch (_) {
+    return false;
+  }
+}
+
 // ─── Generic form filler ──────────────────────────────────────────────────────
 
 /**
@@ -473,14 +751,24 @@ function getFieldMap(person, opts = {}) {
   ];
 }
 
+/**
+ * Fill one form. Every lookup is scoped to `opts.scope` (a <form> locator) so
+ * nothing outside it is touched; without a scope it searches the whole page (kept
+ * for older callers).
+ * @param {object} page
+ * @param {object} [person]
+ * @param {{ submissionEmail?: string, scope?: object }} [opts]
+ * @returns {Promise<boolean>} true if at least one field was filled
+ */
 async function fillGenericForm(page, person, opts = {}) {
+  const root = opts.scope || page;
   let filledAny = false;
   for (const field of getFieldMap(person, opts)) {
     if (field.special === 'selectDeleteOrOptOut') {
       // Try to pick "Delete", "Opt-Out", or "Do Not Sell" from a dropdown
       for (const sel of field.selectors) {
         try {
-          const el = page.locator(sel).first();
+          const el = root.locator(sel).first();
           if ((await el.count()) > 0) {
             await el.selectOption({ label: /delete|opt.out|do not sell|remove/i }).catch(async () => {
               // If label match fails try by index (usually first substantive option)
@@ -496,9 +784,10 @@ async function fillGenericForm(page, person, opts = {}) {
     // Supplementary fields sit after the primary ones in getFieldMap(), so this
     // only types the phone into a form that already took a name or email.
     if (field.supplementary && (!field.value || !filledAny)) continue;
+    if (!field.value) continue;
     for (const sel of field.selectors) {
       try {
-        const el = page.locator(sel).first();
+        const el = root.locator(sel).first();
         if ((await el.count()) > 0 && (await el.isVisible({ timeout: 300 }))) {
           const tag = await el.evaluate(n => n.tagName.toLowerCase());
           if (tag === 'select') {
@@ -515,26 +804,84 @@ async function fillGenericForm(page, person, opts = {}) {
   return filledAny;
 }
 
-async function submitForm(page) {
-  const submitSel = [
-    'button[type="submit"]',
-    'input[type="submit"]',
-    'button:has-text("Submit")',
-    'button:has-text("Send")',
-    'button:has-text("Opt Out")',
-    'button:has-text("Delete My Data")',
-    'button:has-text("Remove My Data")',
-    'button:has-text("Send Request")',
-  ].join(', ');
+const SUBMIT_SELECTORS = [
+  'button[type="submit"]',
+  'input[type="submit"]',
+  'button:has-text("Submit")',
+  'button:has-text("Send")',
+  'button:has-text("Opt Out")',
+  'button:has-text("Delete My Data")',
+  'button:has-text("Remove My Data")',
+  'button:has-text("Send Request")',
+].join(', ');
+
+/**
+ * Click the submit control that lives INSIDE `form`.
+ * @returns {Promise<{ found: boolean, clicked?: boolean, error?: string }>}
+ */
+async function clickFormSubmit(form) {
+  const btn = form.locator(SUBMIT_SELECTORS).first();
   try {
-    const btn = page.locator(submitSel).first();
-    if ((await btn.count()) > 0 && (await btn.isVisible({ timeout: 1000 }))) {
-      await btn.click();
-      await page.waitForTimeout(2000);
-      return true;
+    if (!((await btn.count()) > 0 && (await btn.isVisible()))) return { found: false };
+  } catch (_) {
+    return { found: false };
+  }
+  try {
+    await btn.click({ timeout: 5000 });
+    return { found: true, clicked: true };
+  } catch (err) {
+    const message = (err && err.message) || '';
+    return { found: true, clicked: false, error: message.includes('Timeout') ? 'Timeout' : message.slice(0, 60) };
+  }
+}
+
+/**
+ * Find the opt-out form on the page, fill it, click ITS submit control, and judge
+ * the outcome from the text that appeared. Returns null when no eligible form
+ * with a fillable field exists, so the caller can fall through to the next
+ * strategy; otherwise a { status, detail } result.
+ */
+async function submitOptOutForm(page, { person, submissionEmail, checkUrl, formCtx = {}, label }) {
+  const found = await describeForms(page);
+  if (found.length === 0) return null;
+
+  const pageUrl = typeof page.url === 'function' ? page.url() : '';
+  let pageTitle = '';
+  try { pageTitle = typeof page.title === 'function' ? await page.title() : ''; } catch (_) {}
+  const visibleFormCount = found.filter(f => f.desc.visible && !f.desc.chrome).length;
+  const skipped = [];
+
+  for (const { locator, desc } of found) {
+    const verdict = classifyOptOutForm(desc, {
+      pageUrl,
+      pageTitle,
+      visibleFormCount,
+      afterOptOutClick: !!formCtx.afterOptOutClick,
+      isNewSinceClick: formCtx.beforeSigs ? !formCtx.beforeSigs.has(formSignature(desc)) : false,
+    });
+    if (!verdict.eligible) { skipped.push(verdict.reason); continue; }
+
+    // Never post the person's details to an internal address, whatever the page said.
+    if (checkUrl && desc.action) {
+      const target = await checkUrl(desc.action);
+      if (!target.ok) { skipped.push(`form posts to a blocked address (${target.reason})`); continue; }
     }
-  } catch(_) {}
-  return false;
+
+    const filled = await fillGenericForm(page, person, { submissionEmail, scope: locator });
+    if (!filled) { skipped.push('no fillable field'); continue; }
+
+    const before = await readBodyText(page);
+    const click = await clickFormSubmit(locator);
+    // A click that never happened is an error, not a result to be inferred: the
+    // person's details were typed into a form and nothing was sent.
+    if (!click.found) return { status: 'error', detail: 'Form filled but no submit control found - finish this one by hand' };
+    if (!click.clicked) return { status: 'error', detail: `Form filled but the submit click failed (${click.error || 'error'})` };
+    await page.waitForTimeout(2000);
+    return judgeNewText(page, before, label);
+  }
+
+  if (skipped.length > 0) process.stdout.write(`(skipped ${skipped.length} form(s): ${skipped[0]}) `);
+  return null;
 }
 
 // ─── Process one generic URL ──────────────────────────────────────────────────
@@ -618,46 +965,54 @@ async function processGenericUrl(page, broker, state, dryRun = false, injectedDe
       return { status: 'skipped', detail: 'dry-run - generic opt-out not submitted' };
     }
 
-    // Helper: convert a "success" result into "pending_confirm" if the
-    // resulting page asks the user to confirm via email (WP4).
-    const finalize = async (detail) => {
-      const c = await detectConfirmationRequired(page);
-      if (c.pending) return { status: 'pending_confirm', detail: c.snippet || detail };
-      return { status: 'success', detail };
-    };
-
     // Strategy 1: click "Do Not Sell" link
-    const clicked = await clickDoNotSell(page);
+    const dnsBaseline = await readBodyText(page);
+    let formsBeforeClick = null;
+    const clicked = await clickDoNotSell(page, {
+      beforeClick: async () => {
+        const before = await describeForms(page);
+        formsBeforeClick = new Set(before.filter(f => f.desc.visible).map(f => formSignature(f.desc)));
+      },
+    });
     if (clicked) {
       // Clicking that link is not an opt-out. It usually opens a modal or a
       // follow-up page. This branch used to ignore both return values below and
       // report success unconditionally, which earned a recordSuccess() and a
       // 90-day cooldown for a broker that received nothing.
-      await fillGenericForm(page, person, { submissionEmail });
-      const submitted = await submitForm(page);
-      if (submitted) return finalize('Do Not Sell clicked, form submitted');
+      const movedBad = await guardLanding();
+      if (movedBad) return movedBad;
+      const submitted = await submitOptOutForm(page, {
+        person, submissionEmail, checkUrl,
+        formCtx: { afterOptOutClick: true, beforeSigs: formsBeforeClick },
+        label: 'Do Not Sell clicked, form submitted',
+      });
+      if (submitted) return submitted;
       // The click may still have flipped a preference with no form at all, so a
-      // confirmation page counts. Otherwise a human has to finish it.
-      const confirmed = await detectConfirmationRequired(page);
-      if (confirmed.pending) return { status: 'pending_confirm', detail: confirmed.snippet || 'Do Not Sell clicked, confirmation required' };
+      // confirmation or success message that APPEARED counts. Otherwise a human
+      // has to finish it.
+      const shown = await judgeNewText(page, dnsBaseline, 'Do Not Sell clicked');
+      if (shown.status === 'pending_confirm' || shown.status === 'success') return shown;
       return { status: 'manual', detail: 'Do Not Sell clicked but nothing was submitted - finish this one by hand' };
     }
 
-    // Strategy 2: OneTrust / TrustArc privacy manager
+    // Strategy 2: OneTrust / TrustArc privacy manager (only a real, visible one)
+    const managerBaseline = await readBodyText(page);
     const managed = await handlePrivacyManager(page);
-    if (managed) return finalize('Privacy manager opted out');
+    if (managed) {
+      await page.waitForTimeout(1000);
+      return judgeNewText(page, managerBaseline, 'Privacy manager saved');
+    }
 
-    // Strategy 3: fill form
-    const filled = await fillGenericForm(page, person, { submissionEmail });
-    if (filled) {
-      const submitted = await submitForm(page);
-      if (submitted) return finalize('Form submitted');
-      // Filled but no submit control found. This is NOT a success: nothing was
-      // sent to the broker. Reporting it as one would call recordSuccess(),
-      // stamp lastSuccess, and suppress the broker for RECHECK_DAYS - telling
-      // the user their data was removed when no request ever left the machine.
-      // 'manual' keeps the entry due and surfaces it in the manual list.
-      return { status: 'manual', detail: 'Form filled but no submit control found - finish this one by hand' };
+    // Strategy 3: fill the opt-out form. Not for rows the feed classified manual
+    // or that point at a bare homepage (codex #3), and only for a form that looks
+    // like an opt-out request.
+    if (broker.method !== 'manual' && !isHomepageUrl(broker.url)) {
+      const submitted = await submitOptOutForm(page, {
+        person, submissionEmail, checkUrl,
+        formCtx: { afterOptOutClick: false },
+        label: 'Form submitted',
+      });
+      if (submitted) return submitted;
     }
 
     // Strategy 4: look for a DSAR / privacy request link on privacy policy pages
@@ -730,7 +1085,7 @@ function loadGenericBrokers(explicitBrokerHosts) {
             const host = new URL(url).hostname.replace(/^www\./, '');
             if (seen.has(host)) continue;
             seen.add(host);
-            brokers.push({ name: row.name || host, url, source: row.source || 'feed' });
+            brokers.push({ name: row.name || host, url, source: row.source || 'feed', method: row.method });
           } catch(_) {}
         }
       }
@@ -747,6 +1102,7 @@ function loadGenericBrokers(explicitBrokerHosts) {
  *
  * Outcome buckets (WP5):
  *   submitted        - form found and submitted (success / pending_confirm)
+ *   unverified       - submitted but not confirmed; never a success, no cooldown
  *   no_form_found    - page loaded but nothing automatable (manual / dead)
  *   error            - exception during processing
  *   dry-run-skipped  - submit deferred because dryRun=true
@@ -762,6 +1118,8 @@ function classifyOutcome(status, detail) {
       return 'no_form_found';
     case 'error':
       return 'error';
+    case 'unverified':
+      return 'unverified';
     case 'allowlisted':
       return 'allowlisted';
     case 'skipped':
@@ -818,6 +1176,7 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
     attempted: 0,
     submitted: 0,
     no_form_found: 0,
+    unverified: 0,
     error: 0,
     'dry-run-skipped': 0,
     'skipped-recent': 0,
@@ -903,6 +1262,7 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
       attempted: stats.attempted,
       submitted: stats.submitted,
       no_form_found: stats.no_form_found,
+      unverified: stats.unverified,
       error: stats.error,
       'dry-run-skipped': stats['dry-run-skipped'],
       'skipped-recent': stats['skipped-recent'],
@@ -912,4 +1272,4 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
   };
 }
 
-module.exports = { runGenericBrokers, loadGenericBrokers, processGenericUrl, classifyNavError, classifyOutcome, isDeadStatus, loadDeadSet, DEAD_URLS_PATH, _setConfig, getFieldMap, fillGenericForm, checkBrokerUrl, isDisallowedAddress };
+module.exports = { runGenericBrokers, loadGenericBrokers, processGenericUrl, classifyNavError, classifyOutcome, isDeadStatus, loadDeadSet, DEAD_URLS_PATH, _setConfig, getFieldMap, fillGenericForm, checkBrokerUrl, isDisallowedAddress, newTextSince, classifyOptOutForm, describeFormElement, isHomepageUrl };
