@@ -117,6 +117,14 @@ test('the file is created 0600 and a missing parent directory 0700', { skip: SKI
   assert.equal(modeOf(parent), 0o700);
 });
 
+test('an existing parent directory is left exactly as it was', { skip: SKIP_ON_WINDOWS }, () => {
+  const parent = tmpDir();
+  fs.chmodSync(parent, 0o755);
+
+  openJournal(path.join(parent, 'run-a.jsonl')).close();
+  assert.equal(modeOf(parent), 0o755, 'the journal only creates a missing directory, it does not chmod one it did not make');
+});
+
 test('a journal that already exists with a loose mode is tightened to 0600', { skip: SKIP_ON_WINDOWS }, () => {
   const file = path.join(tmpDir(), 'run-a.jsonl');
   fs.writeFileSync(file, '', { mode: 0o644 });
