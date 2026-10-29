@@ -18,6 +18,8 @@
  * Returns: { succeeded, skipped, manual, errors }
  */
 
+'use strict';
+
 const path = require('path');
 const fs   = require('fs');
 const os   = require('os');
@@ -58,6 +60,9 @@ function _setConfig(cfg) {
 }
 
 const RECHECK_DAYS = 90;
+
+// Default Playwright action timeout for the working page (BRK-12).
+const ACTION_TIMEOUT_MS = 5000;
 
 // ─── Dead-URL cache ───────────────────────────────────────────────────────────
 // Loaded once at module init; missing / malformed file treated as empty set.
@@ -217,9 +222,17 @@ function activePerson(person) {
   throw new Error('No person/persons in config.json');
 }
 
-function getFieldMap(person) {
+/**
+ * @param {object} [person]
+ * @param {{ submissionEmail?: string }} [opts] submissionEmail is the relay alias.
+ *   When set it goes into every email field and person.email is never typed:
+ *   the generic pass reaches ~490 sites, which is the largest exposure of the
+ *   real address if the relay is skipped here.
+ */
+function getFieldMap(person, opts = {}) {
   const p = activePerson(person);
-  const { firstName: F, lastName: L, fullName: N, email: E, state: ST, zip: Z } = p;
+  const { firstName: F, lastName: L, fullName: N, state: ST, zip: Z } = p;
+  const E = opts.submissionEmail || p.email;
   return [
     // email (try first - many sites only need this)
     { selectors: ['input[type="email"]', 'input[name*="email" i]', 'input[placeholder*="email" i]'], value: E },
@@ -250,9 +263,9 @@ function getFieldMap(person) {
   ];
 }
 
-async function fillGenericForm(page, person) {
+async function fillGenericForm(page, person, opts = {}) {
   let filledAny = false;
-  for (const field of getFieldMap(person)) {
+  for (const field of getFieldMap(person, opts)) {
     if (field.special === 'selectDeleteOrOptOut') {
       // Try to pick "Delete", "Opt-Out", or "Do Not Sell" from a dropdown
       for (const sel of field.selectors) {
@@ -320,6 +333,7 @@ async function processGenericUrl(page, broker, state, dryRun = false, injectedDe
   // The person whose PII gets typed in, and the state key their history lives
   // under. Defaults keep single-person and older call sites identical.
   const person = opts.person;
+  const submissionEmail = opts.submissionEmail || undefined;
   const key = opts.stateKey || broker.name;
   // Allowlist: the user explicitly wants to stay listed on this host, so never
   // navigate or submit. Returned before any network request.
@@ -389,7 +403,7 @@ async function processGenericUrl(page, broker, state, dryRun = false, injectedDe
       // follow-up page. This branch used to ignore both return values below and
       // report success unconditionally, which earned a recordSuccess() and a
       // 90-day cooldown for a broker that received nothing.
-      await fillGenericForm(page, person);
+      await fillGenericForm(page, person, { submissionEmail });
       const submitted = await submitForm(page);
       if (submitted) return finalize('Do Not Sell clicked, form submitted');
       // The click may still have flipped a preference with no form at all, so a
@@ -404,7 +418,7 @@ async function processGenericUrl(page, broker, state, dryRun = false, injectedDe
     if (managed) return finalize('Privacy manager opted out');
 
     // Strategy 3: fill form
-    const filled = await fillGenericForm(page, person);
+    const filled = await fillGenericForm(page, person, { submissionEmail });
     if (filled) {
       const submitted = await submitForm(page);
       if (submitted) return finalize('Form submitted');
@@ -552,10 +566,23 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
     ? opts.injectedBrokers
     : loadGenericBrokers(explicitBrokerHosts);
   const processFn = opts.injectedProcessFn || processGenericUrl;
+  // CORE-4: --only / --skip / --retry-failed arrive as one predicate. Excluded
+  // brokers are dropped here, before any log line, navigation or state write.
+  const include = typeof opts.include === 'function' ? opts.include : () => true;
+  const queue = brokers.filter(b => include(b.name));
 
-  console.log(`\n── Generic brokers (${brokers.length} from Markup CSV + BADBOOL)${dryRun ? ' [DRY RUN]' : ''} ──`);
+  console.log(`\n── Generic brokers (${queue.length} from Markup CSV + BADBOOL)${dryRun ? ' [DRY RUN]' : ''} ──`);
 
-  let page = await context.newPage();
+  // BRK-12: Playwright's default wait is 30 s per action, so one hidden toggle or
+  // missing control stalled a broker for half a minute. Navigations keep their
+  // own explicit (longer) timeout in processGenericUrl.
+  const newWorkingPage = async () => {
+    const fresh = await context.newPage();
+    if (typeof fresh.setDefaultTimeout === 'function') fresh.setDefaultTimeout(ACTION_TIMEOUT_MS);
+    return fresh;
+  };
+
+  let page = await newWorkingPage();
 
   const stats = {
     attempted: 0,
@@ -583,18 +610,18 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
   let processed = 0;
 
   try {
-    for (const broker of brokers) {
+    for (const broker of queue) {
       process.stdout.write(`\n  [${broker.name.slice(0,40)}]… `);
 
       let result;
       try {
-        result = await processFn(page, broker, state, dryRun, opts.injectedDeadSet, { person, stateKey: keyFor(broker.name) });
+        result = await processFn(page, broker, state, dryRun, opts.injectedDeadSet, { person, stateKey: keyFor(broker.name), submissionEmail: opts.submissionEmail || undefined });
       } catch (err) {
         // One broker must never abort the whole run or skip the cleanup below.
         result = { status: 'error', detail: (err && err.message ? err.message.slice(0, 80) : 'error') };
         // If the working page itself crashed, replace it so the run can continue.
         if (typeof page.isClosed === 'function' && page.isClosed()) {
-          try { page = await context.newPage(); } catch (_) {}
+          try { page = await newWorkingPage(); } catch (_) {}
         }
       }
 
@@ -630,7 +657,7 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
       // renderer / site-isolation processes that survive same-page navigation.
       if (++processed % RECYCLE_EVERY === 0) {
         try { await page.close(); } catch (_) {}
-        page = await context.newPage();
+        page = await newWorkingPage();
       }
 
       try { await page.waitForTimeout(400); } catch (_) {} // polite delay
@@ -641,7 +668,7 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
   }
 
   return {
-    count: brokers.length,
+    count: queue.length,
     genericStats: {
       attempted: stats.attempted,
       submitted: stats.submitted,
@@ -655,4 +682,4 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
   };
 }
 
-module.exports = { runGenericBrokers, loadGenericBrokers, processGenericUrl, classifyNavError, classifyOutcome, isDeadStatus, loadDeadSet, DEAD_URLS_PATH, _setConfig };
+module.exports = { runGenericBrokers, loadGenericBrokers, processGenericUrl, classifyNavError, classifyOutcome, isDeadStatus, loadDeadSet, DEAD_URLS_PATH, _setConfig, getFieldMap, fillGenericForm };
