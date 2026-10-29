@@ -177,3 +177,45 @@ test('defaultDirs names logs, snapshots and reports as absolute paths', () => {
   }
   assert.notEqual(path.basename(dirs.logs), 'complaints');
 });
+
+// ── which age `aidr purge` uses ──────────────────────────────────────────────
+
+const { resolvePurgeAge, DEFAULT_PURGE_DAYS } = require('../lib/retention');
+
+test('--older-than wins over everything and is parsed like retention.days', () => {
+  const loadConfig = () => { throw new Error('must not be read when a flag was given'); };
+  assert.deepEqual(resolvePurgeAge({ olderThan: '6m', loadConfig }), { days: 180, source: 'flag' });
+  assert.deepEqual(resolvePurgeAge({ olderThan: '30' }), { days: 30, source: 'flag' });
+});
+
+test('--older-than under a week throws unless force, so the CLI can exit 2 with the reason', () => {
+  assert.throws(() => resolvePurgeAge({ olderThan: '3d' }), /at least 7 days/);
+  assert.deepEqual(resolvePurgeAge({ olderThan: '3d', force: true }), { days: 3, source: 'flag' });
+  assert.throws(() => resolvePurgeAge({ olderThan: 'soon' }), /cannot read age/);
+});
+
+test('without a flag it uses retention.days from the config', () => {
+  const loadConfig = () => ({ retention: { days: '90d' } });
+  assert.deepEqual(resolvePurgeAge({ loadConfig }), { days: 90, source: 'config' });
+});
+
+test('without a flag or a configured age it falls back to 180 days', () => {
+  assert.equal(DEFAULT_PURGE_DAYS, 180);
+  assert.deepEqual(resolvePurgeAge({ loadConfig: () => ({}) }), { days: 180, source: 'default' });
+  assert.deepEqual(resolvePurgeAge({}), { days: 180, source: 'default' });
+});
+
+test('an unreadable config does not stop a purge: default age plus a note saying why', () => {
+  const locked = resolvePurgeAge({ loadConfig: () => { throw Object.assign(new Error('passphrase needed'), { code: 'ENCRYPTED' }); } });
+  assert.equal(locked.days, 180);
+  assert.equal(locked.source, 'default');
+  assert.match(locked.note, /config not read/i);
+  assert.match(locked.note, /180 days/);
+});
+
+test('an invalid retention.days falls back to the default and says so, never to a guess', () => {
+  const out = resolvePurgeAge({ loadConfig: () => ({ retention: { days: 3 } }) });
+  assert.equal(out.days, 180);
+  assert.equal(out.source, 'default');
+  assert.match(out.note, /retention\.days/);
+});
