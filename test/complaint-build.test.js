@@ -26,8 +26,14 @@ const PERSON = {
 
 const BROKER = { name: 'Spokeo', optOutUrl: 'https://www.spokeo.com/optout' };
 
-const OVERDUE_CCPA = { requestedAt: '2026-04-01T00:00:00.000Z', daysOverdue: 24, regime: 'ccpa' };
-const OVERDUE_GDPR = { requestedAt: '2026-04-20T00:00:00.000Z', daysOverdue: 20, regime: 'gdpr' };
+// stillListedAt is the verification date findOverdue attaches (NET-6): the
+// complaint states it, and buildComplaint refuses to build without it.
+const OVERDUE_CCPA = {
+  requestedAt: '2026-04-01T00:00:00.000Z', stillListedAt: '2026-06-01T00:00:00.000Z', daysOverdue: 24, regime: 'ccpa',
+};
+const OVERDUE_GDPR = {
+  requestedAt: '2026-04-20T00:00:00.000Z', stillListedAt: '2026-06-01T00:00:00.000Z', daysOverdue: 20, regime: 'gdpr',
+};
 
 test('CA AG complaint cites CCPA and the California Attorney General', () => {
   const c = buildComplaint({ person: PERSON, broker: BROKER, overdue: OVERDUE_CCPA, regime: 'CA_AG' });

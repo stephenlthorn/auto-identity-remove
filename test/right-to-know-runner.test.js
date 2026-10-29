@@ -3,9 +3,13 @@
  *
  * Covers lib/right-to-know-runner.js sendKnowRequests:
  *   1. smtp configured -> nodemailer sends a know-request email; state recorded
- *   2. no smtp -> logged 'manual' with the template body; state recorded
+ *   2. no smtp -> logged 'manual' with the template body; NOT recorded (nothing
+ *      was sent, so no response clock may start - NET-11)
  *   3. dry-run -> no send, no state write
  *   4. non-email brokers are filtered out
+ *
+ * Recency, relay and blank-smtp behaviour live in
+ * right-to-know-send-guards.test.js.
  *
  * Mocks: nodemailer (Module._load), logger.logResult, config helpers - all at
  * the module-object level so the runner's cached requires see the patched
@@ -59,7 +63,34 @@ function restoreDeps() {
 
 const runner = require('../lib/right-to-know-runner');
 
-test('no smtp -> logs manual with template body, records state', async () => {
+const SMTP_CFG = { host: 'smtp.example.com', port: 587, user: 'u@x.com', pass: 'pw', from: 'u@x.com' };
+
+// Run `body(freshRunner, nmCalls)` with nodemailer mocked, then undo the mock.
+async function withMockedNodemailer(body) {
+  const nmCalls = [];
+  const origLoad = Module._load;
+  Module._load = function (request) {
+    if (request === 'nodemailer') {
+      return {
+        createTransport: () => ({
+          sendMail: async (opts) => { nmCalls.push(opts); return { messageId: 'mock' }; },
+        }),
+      };
+    }
+    return origLoad.apply(this, arguments);
+  };
+  delete require.cache[require.resolve('../lib/right-to-know-runner')];
+  const freshRunner = require('../lib/right-to-know-runner');
+  try {
+    return await body(freshRunner, nmCalls);
+  } finally {
+    Module._load = origLoad;
+    delete require.cache[require.resolve('../lib/right-to-know-runner')];
+    require('../lib/right-to-know-runner');
+  }
+}
+
+test('no smtp -> logs manual with template body, does NOT record state (NET-11)', async () => {
   const { logCalls, recorded } = patchDeps();
   const cfg = { person: PERSON };
 
@@ -69,9 +100,9 @@ test('no smtp -> logs manual with template body, records state', async () => {
 
   const manualLog = logCalls.find(l => l.broker === 'Pipl' && l.status === 'manual');
   assert.ok(manualLog, `expected manual log, got ${JSON.stringify(logCalls)}`);
-  assert.match(manualLog.detail, /CCPA|Right to Know/i);
+  assert.match(manualLog.detail, /Right to Know/i);
   assert.deepEqual(result.manual, ['Pipl']);
-  assert.deepEqual(recorded, ['Pipl']);
+  assert.deepEqual(recorded, [], 'nothing was sent, so nothing is recorded');
   // Web broker filtered out entirely.
   assert.equal(logCalls.filter(l => l.broker === 'WhitePages').length, 0);
 });
@@ -94,7 +125,8 @@ test('smtp configured -> nodemailer sends know request, records state', async ()
   const freshRunner = require('../lib/right-to-know-runner');
 
   const smtpCfg = { host: 'smtp.example.com', port: 587, user: 'u@x.com', pass: 'pw', from: 'u@x.com' };
-  const cfg = { person: PERSON, email: { smtp: smtpCfg } };
+  // California resident: the CCPA is only cited for them (NET-15).
+  const cfg = { person: { ...PERSON, city: 'Fresno', state: 'CA', zip: '93650' }, email: { smtp: smtpCfg } };
   const result = await freshRunner.sendKnowRequests([EMAIL_BROKER], cfg, {});
 
   Module._load = origLoad;
@@ -130,21 +162,26 @@ test('multi-person -> one request per (broker, person)', async () => {
   const personB = { ...PERSON, fullName: 'John Roe', firstName: 'John', lastName: 'Roe' };
   const cfg = { persons: [PERSON, personB] };
 
-  const result = await runner.sendKnowRequests([EMAIL_BROKER], cfg, {});
+  const noSmtp = await runner.sendKnowRequests([EMAIL_BROKER], cfg, {});
+  assert.equal(noSmtp.manual.length, 2, `expected 2 manual entries, got ${JSON.stringify(noSmtp.manual)}`);
+  assert.equal(recorded.length, 0, 'manual prints are not recorded');
+
+  const result = await withMockedNodemailer((r) =>
+    r.sendKnowRequests([EMAIL_BROKER], { ...cfg, email: { smtp: SMTP_CFG } }, {}));
 
   restoreDeps();
 
-  // Manual log per person, state recorded once per broker per person.
-  assert.equal(result.manual.length, 2, `expected 2 manual entries, got ${JSON.stringify(result.manual)}`);
+  // One real send per person, state recorded once per broker per person.
+  assert.equal(result.sent.length, 2, `expected 2 sends, got ${JSON.stringify(result.sent)}`);
   assert.equal(recorded.length, 2);
 });
 
 test('B6: recordKnowRequest is threaded the person + person count (multi-person keying)', async () => {
   const { recordedArgs } = patchDeps();
   const personB = { ...PERSON, fullName: 'John Roe', firstName: 'John', lastName: 'Roe' };
-  const cfg = { persons: [PERSON, personB] };
+  const cfg = { persons: [PERSON, personB], email: { smtp: SMTP_CFG } };
 
-  await runner.sendKnowRequests([EMAIL_BROKER], cfg, {});
+  await withMockedNodemailer((r) => r.sendKnowRequests([EMAIL_BROKER], cfg, {}));
 
   restoreDeps();
 
@@ -159,9 +196,9 @@ test('B6: recordKnowRequest is threaded the person + person count (multi-person 
 
 test('B6: single-person run threads person count 1 (bare-name keying preserved)', async () => {
   const { recordedArgs } = patchDeps();
-  const cfg = { person: PERSON };
+  const cfg = { person: PERSON, email: { smtp: SMTP_CFG } };
 
-  await runner.sendKnowRequests([EMAIL_BROKER], cfg, {});
+  await withMockedNodemailer((r) => r.sendKnowRequests([EMAIL_BROKER], cfg, {}));
 
   restoreDeps();
 

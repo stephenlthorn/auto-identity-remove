@@ -47,14 +47,17 @@ test('pickRegime: EU country -> GDPR', () => {
   assert.equal(pickRegime('gb'), 'GDPR');
 });
 
-test('pickRegime: US / non-EU / missing -> CCPA', () => {
+test('pickRegime: US / non-EU / missing country string -> CCPA (country-only legacy meaning)', () => {
   assert.equal(pickRegime('US'), 'CCPA');
   assert.equal(pickRegime('AU'), 'CCPA');
   assert.equal(pickRegime(undefined), 'CCPA');
 });
 
-test('buildKnowRequest: US person -> CCPA right-to-know wording', () => {
-  const { subject, body } = buildKnowRequest({ person: US_PERSON, broker: BROKER });
+test('buildKnowRequest: California person -> CCPA right-to-know wording', () => {
+  // The CCPA protects California residents only (NET-15); see
+  // right-to-know-regime.test.js for the non-California cases.
+  const ca = { ...US_PERSON, city: 'Fresno', state: 'CA', zip: '93650' };
+  const { subject, body } = buildKnowRequest({ person: ca, broker: BROKER });
   assert.match(subject, /Right to Know/i);
   assert.match(subject, /Jane Doe/);
   assert.match(body, /CCPA/);
@@ -63,7 +66,7 @@ test('buildKnowRequest: US person -> CCPA right-to-know wording', () => {
   assert.doesNotMatch(body, /erasure|right to be forgotten/i);
   // person fields interpolated
   assert.match(body, /Jane Doe/);
-  assert.match(body, /Austin, TX 73301/);
+  assert.match(body, /Fresno, CA 93650/);
   assert.match(body, /jane@example\.com/);
 });
 
