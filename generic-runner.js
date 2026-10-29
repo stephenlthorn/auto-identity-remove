@@ -23,6 +23,8 @@
 const path = require('path');
 const fs   = require('fs');
 const os   = require('os');
+const net  = require('net');
+const dns  = require('dns');
 
 const CONFIG_PATH     = path.join(__dirname, 'config.json');
 const STATE_PATH      = path.join(__dirname, 'state.json');
@@ -113,6 +115,173 @@ function classifyNavError(message) {
  */
 function isDeadStatus(code) {
   return code === 404 || code === 410 || code >= 500;
+}
+
+// ─── Target-URL guard (codex #2) ──────────────────────────────────────────────
+//
+// Registry and dataset rows are only "URLs that start with http". Left alone, a
+// hostile or broken row (loopback, RFC1918, cloud metadata, a host that redirects
+// to one) gets the browser pointed at an internal service, and the first form on
+// the page gets the user's name, email and address. Every broker URL is checked
+// before navigation and the page's final URL is checked again after it.
+
+// Reserved / internal-only names. None of these is ever a public data broker.
+const INTERNAL_HOST_SUFFIXES = ['localhost', 'local', 'internal', 'localdomain', 'home.arpa', 'lan', 'intranet', 'corp'];
+const DNS_LOOKUP_TIMEOUT_MS = 5000;
+
+function parseIPv4(str) {
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(str);
+  if (!m) return null;
+  const octets = m.slice(1).map(Number);
+  return octets.every(n => n <= 255) ? octets : null;
+}
+
+function isBlockedIPv4([a, b]) {
+  return a === 0                              // 0.0.0.0/8 unspecified / "this network"
+    || a === 10                               // 10.0.0.0/8 private
+    || a === 127                              // 127.0.0.0/8 loopback
+    || (a === 100 && b >= 64 && b <= 127)     // 100.64.0.0/10 CGNAT
+    || (a === 169 && b === 254)               // 169.254.0.0/16 link-local (cloud metadata)
+    || (a === 172 && b >= 16 && b <= 31)      // 172.16.0.0/12 private
+    || (a === 192 && b === 168)               // 192.168.0.0/16 private
+    || a >= 224;                              // 224.0.0.0/4 multicast, 240.0.0.0/4 reserved, broadcast
+}
+
+// Expand an IPv6 literal into its 8 16-bit groups, or null when it is not one.
+function parseIPv6(str) {
+  let s = String(str).split('%')[0];
+  if (!net.isIPv6(s)) return null;
+  if (s.includes('.')) {
+    const cut = s.lastIndexOf(':');
+    const v4 = parseIPv4(s.slice(cut + 1));
+    if (!v4) return null;
+    s = `${s.slice(0, cut + 1)}${((v4[0] << 8) | v4[1]).toString(16)}:${((v4[2] << 8) | v4[3]).toString(16)}`;
+  }
+  const groupsOf = (part) => (part === '' ? [] : part.split(':'));
+  let groups;
+  if (s.includes('::')) {
+    const [head, tail] = s.split('::');
+    const h = groupsOf(head);
+    const t = groupsOf(tail);
+    const missing = 8 - h.length - t.length;
+    if (missing < 0) return null;
+    groups = [...h, ...Array(missing).fill('0'), ...t];
+  } else {
+    groups = groupsOf(s);
+  }
+  if (groups.length !== 8) return null;
+  const nums = groups.map(g => parseInt(g, 16));
+  return nums.some(n => Number.isNaN(n)) ? null : nums;
+}
+
+function isBlockedIPv6(g) {
+  const allZero = (from, to) => g.slice(from, to).every(n => n === 0);
+  const v4Of = (hi, lo) => [hi >> 8, hi & 255, lo >> 8, lo & 255];
+  if (allZero(0, 8)) return true;                               // ::  unspecified
+  if (allZero(0, 7) && g[7] === 1) return true;                 // ::1 loopback
+  if ((g[0] & 0xffc0) === 0xfe80) return true;                  // fe80::/10 link-local
+  if ((g[0] & 0xffc0) === 0xfec0) return true;                  // fec0::/10 site-local (deprecated)
+  if ((g[0] & 0xfe00) === 0xfc00) return true;                  // fc00::/7 unique-local
+  if ((g[0] & 0xff00) === 0xff00) return true;                  // ff00::/8 multicast
+  if (g[0] === 0x100 && allZero(1, 4)) return true;             // 100::/64 discard-only
+  // Addresses that carry an IPv4 address: judge them by the IPv4 inside.
+  if (allZero(0, 5) && g[5] === 0xffff) return isBlockedIPv4(v4Of(g[6], g[7]));   // ::ffff:a.b.c.d mapped
+  if (allZero(0, 6)) return isBlockedIPv4(v4Of(g[6], g[7]));                       // ::a.b.c.d compatible
+  if (g[0] === 0x64 && g[1] === 0xff9b && allZero(2, 6)) return isBlockedIPv4(v4Of(g[6], g[7])); // 64:ff9b::/96 NAT64
+  if (g[0] === 0x2002) return isBlockedIPv4(v4Of(g[1], g[2]));                     // 2002::/16 6to4
+  return false;
+}
+
+/**
+ * True when an address must never be a broker target. Anything that is not
+ * recognisably an IP address is refused rather than trusted.
+ * @param {string} address
+ * @returns {boolean}
+ */
+function isDisallowedAddress(address) {
+  const family = net.isIP(String(address || '').split('%')[0]);
+  if (family === 4) return isBlockedIPv4(parseIPv4(address));
+  if (family === 6) {
+    const groups = parseIPv6(address);
+    return groups ? isBlockedIPv6(groups) : true;
+  }
+  return true;
+}
+
+async function resolveAll(host, lookup, timeoutMs) {
+  let timer;
+  const timedOut = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error('dns lookup timed out')), timeoutMs);
+    if (timer.unref) timer.unref();
+  });
+  try {
+    const found = await Promise.race([lookup(host, { all: true }), timedOut]);
+    return Array.isArray(found) ? found : [found];
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Decide whether a URL may be navigated to / may be where the page ended up.
+ *
+ * A failed or timed-out DNS lookup is NOT a rejection: an unresolvable host is
+ * just a dead broker, and the browser's own navigation error is what classifies
+ * it as 'dead' (ERR_NAME_NOT_RESOLVED). Only a lookup that succeeds and returns a
+ * disallowed address blocks the row.
+ *
+ * @param {string} rawUrl
+ * @param {{ lookup?: Function, timeoutMs?: number }} [opts] lookup is dns.promises.lookup-shaped
+ * @returns {Promise<{ ok: true } | { ok: false, reason: string }>}
+ */
+async function checkBrokerUrl(rawUrl, opts = {}) {
+  const lookup = opts.lookup || dns.promises.lookup;
+  const timeoutMs = opts.timeoutMs || DNS_LOOKUP_TIMEOUT_MS;
+  let url;
+  try {
+    url = new URL(rawUrl);
+  } catch (_) {
+    return { ok: false, reason: 'unparseable url' };
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    return { ok: false, reason: `scheme ${url.protocol.replace(/:$/, '')} is not http(s)` };
+  }
+  if (url.username || url.password) return { ok: false, reason: 'url embeds credentials' };
+
+  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+  if (!host) return { ok: false, reason: 'url has no host' };
+  if (net.isIP(host)) return { ok: false, reason: `ip literal ${host}` };
+  for (const suffix of INTERNAL_HOST_SUFFIXES) {
+    if (host === suffix || host.endsWith(`.${suffix}`)) return { ok: false, reason: `internal host name ${host}` };
+  }
+
+  let addresses;
+  try {
+    addresses = await resolveAll(host, lookup, timeoutMs);
+  } catch (_) {
+    return { ok: true };
+  }
+  for (const entry of addresses) {
+    const address = entry && entry.address;
+    if (isDisallowedAddress(address)) return { ok: false, reason: `${host} resolves to ${address}` };
+  }
+  return { ok: true };
+}
+
+/**
+ * A checker that remembers its verdict per host for one broker, so the redirect
+ * re-checks (after navigation, after a click) do not repeat the DNS lookup.
+ */
+function makeUrlChecker(opts = {}) {
+  const verdicts = new Map();
+  return async (rawUrl) => {
+    let key = rawUrl;
+    try { key = new URL(rawUrl).origin; } catch (_) {}
+    if (verdicts.has(key)) return verdicts.get(key);
+    const verdict = await checkBrokerUrl(rawUrl, opts);
+    verdicts.set(key, verdict);
+    return verdict;
+  };
 }
 
 // ─── Cookie banner + CCPA pop-up dismisser ────────────────────────────────────
@@ -413,12 +582,32 @@ async function processGenericUrl(page, broker, state, dryRun = false, injectedDe
     return { status: 'dead', detail: 'cached dead-url, skipped' };
   }
 
+  // codex #2: never point the browser at (or type PII into) a disallowed target.
+  const checkUrl = makeUrlChecker({ lookup: opts.dnsLookup });
+  const target = await checkUrl(broker.url);
+  if (!target.ok) return { status: 'error', detail: `blocked: ${target.reason}` };
+
+  // Re-check wherever the page actually is: HTTP redirects, meta refresh and JS
+  // redirects can all end on a host the registry row never named.
+  const guardLanding = async () => {
+    const landed = typeof page.url === 'function' ? page.url() : '';
+    if (!landed || landed === 'about:blank') return null;
+    const verdict = await checkUrl(landed);
+    if (verdict.ok) return null;
+    try { await page.goto('about:blank'); } catch (_) {}
+    return { status: 'error', detail: `blocked: redirected to ${verdict.reason}` };
+  };
+
   try {
     const response = await withRetry(() => page.goto(broker.url, { waitUntil: 'domcontentloaded', timeout: 20000 }));
     if (response && isDeadStatus(response.status())) {
       return { status: 'dead', detail: `HTTP ${response.status()}` };
     }
+    const landedBad = await guardLanding();
+    if (landedBad) return landedBad;
     await page.waitForTimeout(1500);
+    const driftedBad = await guardLanding();
+    if (driftedBad) return driftedBad;
 
     await dismissBanners(page);
 
@@ -656,7 +845,7 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
 
       let result;
       try {
-        result = await processFn(page, broker, state, dryRun, opts.injectedDeadSet, { person, stateKey: keyFor(broker.name), submissionEmail: opts.submissionEmail || undefined });
+        result = await processFn(page, broker, state, dryRun, opts.injectedDeadSet, { person, stateKey: keyFor(broker.name), submissionEmail: opts.submissionEmail || undefined, dnsLookup: opts.dnsLookup });
       } catch (err) {
         // One broker must never abort the whole run or skip the cleanup below.
         result = { status: 'error', detail: (err && err.message ? err.message.slice(0, 80) : 'error') };
@@ -723,4 +912,4 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
   };
 }
 
-module.exports = { runGenericBrokers, loadGenericBrokers, processGenericUrl, classifyNavError, classifyOutcome, isDeadStatus, loadDeadSet, DEAD_URLS_PATH, _setConfig, getFieldMap, fillGenericForm };
+module.exports = { runGenericBrokers, loadGenericBrokers, processGenericUrl, classifyNavError, classifyOutcome, isDeadStatus, loadDeadSet, DEAD_URLS_PATH, _setConfig, getFieldMap, fillGenericForm, checkBrokerUrl, isDisallowedAddress };
