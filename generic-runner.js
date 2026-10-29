@@ -176,27 +176,68 @@ async function clickDoNotSell(page) {
   return false;
 }
 
-// ─── OneTrust / TrustArc / Osano preference opt-out ─────────────────────────
+// ─── OneTrust / TrustArc preference opt-out ─────────────────────────────────
 
+// A consent manager is only "present" when its own container is on the page and
+// visible. Matching a bare "Save" / "Confirm" button anywhere (the old check)
+// accepted "Save job" on a careers page as a privacy manager, then reported an
+// opt-out that never happened (BRK-2).
+const PRIVACY_MANAGER_CONTAINERS = [
+  // OneTrust
+  '#onetrust-pc-sdk', '#onetrust-consent-sdk',
+  // TrustArc
+  '#truste-consent-track', '#teconsent', '#consent_blackbar', '.truste_box_overlay',
+];
+
+// Opt-out controls INSIDE the container, in order of preference. Deliberately
+// absent: #accept-recommended-btn-handler. In OneTrust's preference centre that
+// id is "Allow All", and the old list clicked it right after switching the
+// toggles off, which turned them all back on.
+const PRIVACY_MANAGER_SAVE_SELECTORS = [
+  '.save-preference-btn-handler',
+  '.ot-pc-refuse-all-handler',
+  'button:has-text("Confirm My Choices")',
+  'button:has-text("Required Only")',
+  'button:has-text("Reject All")',
+];
+
+async function findPrivacyManager(page) {
+  for (const sel of PRIVACY_MANAGER_CONTAINERS) {
+    try {
+      const el = page.locator(sel).first();
+      if ((await el.count()) > 0 && (await el.isVisible())) return el;
+    } catch (_) {}
+  }
+  return null;
+}
+
+/**
+ * Turn off the optional categories in a real OneTrust / TrustArc manager and save.
+ * Returns true only when a save control inside the manager was actually clicked;
+ * false (nothing found, or the click failed) lets the caller fall through to the
+ * next strategy instead of reporting a click that never happened.
+ */
 async function handlePrivacyManager(page) {
-  // OneTrust toggle - turn off all non-essential categories
-  const toggles = await page.locator('.ot-tgl input[type="checkbox"]:checked').all();
+  const manager = await findPrivacyManager(page);
+  if (!manager) return false;
+
+  // Only visible, enabled toggles: a hidden or disabled (strictly necessary)
+  // toggle cannot be clicked and used to burn the full 30 s default wait (BRK-12).
+  const toggles = await manager.locator('.ot-tgl input[type="checkbox"]:checked:not([disabled])').all();
   for (const t of toggles) {
-    try { await t.click(); } catch(_) {}
+    try {
+      if (await t.isVisible()) await t.click({ timeout: 2000 });
+    } catch (_) {}
   }
-  // Confirm / save
-  const saveBtn = page.locator(
-    '#accept-recommended-btn-handler, .save-preference-btn-handler, button:has-text("Confirm"), button:has-text("Save")'
-  ).first();
-  if ((await saveBtn.count()) > 0) {
-    await saveBtn.click().catch(() => {});
-    return true;
-  }
-  // TrustArc - "Required Only" button
-  const reqOnly = page.locator('button:has-text("Required Only"), button:has-text("Reject All")').first();
-  if ((await reqOnly.count()) > 0) {
-    await reqOnly.click().catch(() => {});
-    return true;
+
+  for (const sel of PRIVACY_MANAGER_SAVE_SELECTORS) {
+    try {
+      const btn = manager.locator(sel).first();
+      if ((await btn.count()) > 0 && (await btn.isVisible())) {
+        await btn.click({ timeout: 5000 });
+        return true;
+      }
+    } catch (_) {}
   }
   return false;
 }

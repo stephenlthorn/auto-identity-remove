@@ -128,7 +128,7 @@ function makeFakePage(spec = {}) {
       nth: () => self,
       all: async () => (present && spec.toggles && !scope ? spec.toggles(sel) : []),
       count: async () => (present ? 1 : 0),
-      isVisible: async () => present,
+      isVisible: async () => present && !(spec.hidden && spec.hidden(sel)),
       getAttribute: async () => null,
       evaluate: async (fn) => {
         if (fn && fn.name === 'describeFormElement') return effective ? effective.desc : null;
@@ -143,7 +143,7 @@ function makeFakePage(spec = {}) {
           if (effective.clickThrows) throw new Error(effective.clickThrows);
           submit(effective);
         }
-        if (!scope && spec.onPageClick) spec.onPageClick(sel, page);
+        if (!scope && !isSubmitSel && spec.onPageClick) spec.onPageClick(sel, page);
       },
       locator: (inner) => makeLocator(inner, scope),
       allTextContents: async () => [],
