@@ -65,9 +65,25 @@ const config = new Proxy({}, {
  */
 function _primaryPerson() {
   const cfg = _getConfig();
-  if (cfg.person) return cfg.person;
-  if (Array.isArray(cfg.persons) && cfg.persons.length > 0) return cfg.persons[0];
+  // persons[] wins when both keys exist, exactly like getPersonsFromConfig() in
+  // lib/config.js. The dashboard's Config tab writes a blank `person` onto a
+  // persons[] config when it saves, and the old person-first order then built
+  // every search URL from an empty name ("search?q=&type=pp"), which a
+  // --verify run reads as "verified clear" for every broker.
+  if (Array.isArray(cfg.persons) && cfg.persons.length > 0 && _isPersonObject(cfg.persons[0])) {
+    return cfg.persons[0];
+  }
+  if (_isPersonObject(cfg.person) && !_isBlankPerson(cfg.person)) return cfg.person;
   return {};
+}
+
+function _isPersonObject(p) {
+  return p !== null && typeof p === 'object' && !Array.isArray(p);
+}
+
+// A person whose every value is empty carries no identity. Treat it as absent.
+function _isBlankPerson(p) {
+  return Object.values(p).every(v => v == null || String(v).trim() === '');
 }
 
 // Never interpolate the literal string "undefined" into a URL or a form value.
