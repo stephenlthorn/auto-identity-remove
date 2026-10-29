@@ -181,5 +181,6 @@ test('formatConfigCheck on a missing config still prints where it looked', () =>
 test('the output contains no em or en dashes', () => withRoot((root) => {
   h.writePlain(root, { person: h.person({ zip: '' }) });
   const text = formatConfigCheck(checkConfig({ env: {}, root })).join('\n');
-  assert.equal(/[–—]/.test(text), false);
+  const dashes = new RegExp(`[${String.fromCharCode(0x2013, 0x2014)}]`);
+  assert.equal(dashes.test(text), false);
 }));
