@@ -214,14 +214,50 @@ test('docker-compose.yml never mounts over /app/data, which holds the shipped br
   assert.deepEqual(over, [], 'a mount at /app/data hides markup-parsed.json, badbool-extra.json and dead-urls.json');
 });
 
-test('docker-compose.yml mounts one home directory and points config and state inside it', () => {
-  const targets = mountTargets(compose);
-  assert.ok(targets.includes('/home/aidr'), 'mount a dedicated host directory at /home/aidr');
+/**
+ * Environment the container ends up with: the Dockerfile's ENV lines overlaid by
+ * the compose `environment:` list (compose wins, as it does at run time).
+ * Values like ${TZ:-UTC} are irrelevant here and kept verbatim.
+ * @returns {Record<string, string>}
+ */
+function containerEnv() {
+  const env = {};
+  for (const m of dockerfile.matchAll(/^ENV\s+([A-Z][A-Z0-9_]*)[= ](\S+)\s*$/gm)) env[m[1]] = m[2];
+  for (const m of compose.matchAll(/^\s*-\s+([A-Z][A-Z0-9_]*)=(\S+)\s*$/gm)) env[m[1]] = m[2];
+  return env;
+}
+
+test('docker-compose.yml mounts ONE home directory and tells the app to keep everything in it (R0)', () => {
+  assert.deepEqual(
+    mountTargets(compose),
+    ['/home/aidr'],
+    'one directory mount is the whole persistence story: config, state, logs, reports, history all live in AIDR_HOME',
+  );
+  assert.match(compose, /^\s*-\s+AIDR_HOME=\/home\/aidr\s*$/m, 'AIDR_HOME must point at the mount');
+});
+
+test('docker-compose.yml no longer carries the per-file path variables or a second logs mount', () => {
+  // They are redundant once AIDR_HOME is set, and two sources of truth is how a
+  // recipe drifts back into leaving logs in the container layer.
   for (const name of ['AIDR_CONFIG_PATH', 'AIDR_CONFIG_ENC_PATH', 'AIDR_STATE_PATH']) {
-    assert.match(
-      compose,
-      new RegExp(`${name}=/home/aidr/`),
-      `${name} must point inside the mounted directory, or the file lands in the container layer`,
+    assert.doesNotMatch(compose, new RegExp(`^\\s*-\\s+${name}=`, 'm'), `${name} is implied by AIDR_HOME`);
+  }
+  assert.ok(!mountTargets(compose).includes('/app/logs'), 'logs live under AIDR_HOME/logs now; /app/logs needs no mount');
+});
+
+test('the Dockerfile bakes in AIDR_HOME so a plain `docker run` with one mount just works', () => {
+  assert.match(dockerfile, /^ENV\s+AIDR_HOME=\/home\/aidr\s*$/m);
+});
+
+test('every runtime path the app resolves in the container lands inside the single mount', () => {
+  const { resolvePaths } = require('../lib/paths');
+  const mount = path.resolve('/home/aidr');
+  const p = resolvePaths(containerEnv(), path.resolve('/app'));
+  const runtime = ['config', 'configEnc', 'state', 'logs', 'snapshots', 'reports', 'complaints', 'data', 'inbox'];
+  for (const key of runtime) {
+    assert.ok(
+      p[key] === mount || p[key].startsWith(mount + path.sep),
+      `${key} resolves to ${p[key]} in the container, outside the mounted ${mount}: it would vanish with the container`,
     );
   }
 });
@@ -237,6 +273,11 @@ test('docker-compose.yml runs as a chosen uid so the host-owned 0600 files are r
 test('the Dockerfile creates /home/aidr owned by the runtime user so an unmounted run still works', () => {
   assert.match(dockerfile, /mkdir -p [^\n]*\/home\/aidr/);
   assert.match(dockerfile, /chown -R pwuser:pwuser [^\n]*\/home\/aidr/);
+});
+
+test('the Dockerfile header recipe teaches one directory mount and nothing else', () => {
+  const header = dockerfile.split(/^FROM\s/m)[0];
+  assert.deepEqual(mountTargets(header.replace(/^#\s?/gm, '')), ['/home/aidr']);
 });
 
 test('the Dockerfile header recipe does not teach single-file mounts', () => {

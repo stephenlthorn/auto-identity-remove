@@ -144,13 +144,17 @@ dependencies are pre-installed. No Mac required. Builds for `linux/amd64` and
 ### One directory holds everything
 
 Keep everything the container must remember in a single host directory,
-`aidr-home/`, and mount that. It holds your config, `state.json` and its `.bak`,
-`.lock` and resume `.checkpoint`, and (through a second mount) the run logs.
-Back it up and treat it like `config.json`: it is full of PII.
+`aidr-home/`, mount it at `/home/aidr`, and set `AIDR_HOME=/home/aidr` (the image
+already does). One mount is the whole story. It holds your config, `state.json`
+and its `.bak`, `.lock` and resume `.checkpoint`, the run logs, audit reports,
+snapshots and complaints (`logs/`), the confirmation inbox (`inbox/`), and the
+SERP, exposure, breach and broker-registry history (`data/`). The app creates
+those subdirectories itself. Back it up and treat it like `config.json`: it is
+full of PII.
 
 ```bash
 # Once, from the project directory
-mkdir -p aidr-home/logs
+mkdir -p aidr-home
 cp config.json aidr-home/config.json        # made on a laptop with `node setup.js`
 chmod 700 aidr-home && chmod 600 aidr-home/config.json
 sudo chown -R 1001:1001 aidr-home           # the container user is uid 1001
@@ -162,10 +166,6 @@ docker build -t auto-identity-remove .
 # Dry-run - navigates and checks reachability, submits nothing
 docker run --rm --init \
   -v "$(pwd)/aidr-home:/home/aidr" \
-  -v "$(pwd)/aidr-home/logs:/app/logs" \
-  -e AIDR_CONFIG_PATH=/home/aidr/config.json \
-  -e AIDR_CONFIG_ENC_PATH=/home/aidr/config.json.enc \
-  -e AIDR_STATE_PATH=/home/aidr/state.json \
   -e HOME=/tmp \
   -e TZ="$(date +%Z)" \
   auto-identity-remove node watcher.js --dry-run
@@ -173,8 +173,31 @@ docker run --rm --init \
 # Full run: the same command without the trailing `node watcher.js --dry-run`
 ```
 
-Or with compose, which already carries all of those mounts and variables:
+Or with compose, which already carries the mount and the variable:
 `docker compose run --rm watcher node watcher.js --dry-run`.
+
+**`AIDR_HOME` and its overrides.** `AIDR_HOME` is the default base for every
+runtime file. Each of these still wins over it for one file, if you ever need it
+somewhere else:
+
+| Variable | Default under `AIDR_HOME` |
+|---|---|
+| `AIDR_CONFIG_PATH` | `config.json` |
+| `AIDR_CONFIG_ENC_PATH` | `<config path>.enc` |
+| `AIDR_STATE_PATH` | `state.json` (the `.bak`, `.lock` and `.checkpoint` sit beside it) |
+| `AIDR_LOG_DIR` | `logs/` (snapshots, reports and complaints sit under it) |
+| `AIDR_DATA_DIR` | `data/` (the history and registry caches) |
+
+With none of them set, nothing moves: everything stays in the project directory
+exactly as before.
+
+**Upgrading from the older recipe.** It mounted `aidr-home/logs` at `/app/logs`
+and set `AIDR_CONFIG_PATH=/home/aidr/config.json`,
+`AIDR_CONFIG_ENC_PATH=/home/aidr/config.json.enc` and
+`AIDR_STATE_PATH=/home/aidr/state.json` one by one. That keeps working, and
+`AIDR_HOME=/home/aidr` is the same thing for all three. The `/app/logs` mount is
+no longer needed: logs now default to `/home/aidr/logs`, which is the same host
+directory (`aidr-home/logs`), so nothing has to be moved.
 
 **Why a directory, and why not `/app/data`.**
 - `rename()` onto a Docker single-file bind mount fails with `EBUSY`. A mounted
@@ -184,7 +207,9 @@ Or with compose, which already carries all of those mounts and variables:
   see each other's lock. A mounted directory has none of those problems.
 - `/app/data` holds the broker datasets that ship with the image
   (`markup-parsed.json`, `badbool-extra.json`, `dead-urls.json`). Mounting
-  anything over it hides them and the generic runner loses its broker list.
+  anything over it hides them and the generic runner loses its broker list. The
+  datasets you WRITE (history, caches) go to `aidr-home/data` instead; the
+  shipped ones keep loading from the image whatever `AIDR_HOME` says.
 
 **The container runs as uid 1001** (`pwuser`), and the files above are mode
 `0600` and owned by you, so without help the container gets `EACCES` on
@@ -216,17 +241,18 @@ fidelity for less background work on slow cores.
 | Path in the container | Persists? | Notes |
 |---|---|---|
 | `/home/aidr/config.json` or `config.json.enc` | yes | the mounted directory |
-| `/home/aidr/state.json`, `.bak`, `.lock`, `.checkpoint` | yes | the mounted directory |
-| `/app/logs` (run logs, audit reports, snapshots, complaints, reports) | yes | the second mount, `aidr-home/logs` |
-| `/app/inbox` (confirmation `.eml` files for `--confirm-emails`) | no | pass a directory inside the mount: `--confirm-emails /home/aidr/inbox` |
-| `/app/data/serp-history.json`, `exposure-history.json`, `feeds-brokers.json` | no | see below |
+| `/home/aidr/state.json`, `.bak`, `.lock`, `.checkpoint`, `confirm-processed.json` | yes | the mounted directory |
+| `/home/aidr/logs/` (run logs, audit reports, snapshots, complaints, reports) | yes | the mounted directory |
+| `/home/aidr/inbox/confirms/` (confirmation `.eml` files for `--confirm-emails`) | yes | the mounted directory |
+| `/home/aidr/data/serp-history.json`, `exposure-history.json`, `breach-result.json`, `feeds-brokers.json` | yes | the mounted directory |
+| `/app/data/*.json` (the shipped broker datasets) | n/a | read-only, part of the image |
 | the Chromium profile (`~/.config/auto-identity-remove`) | no | set `profileDir` in the config to a path under `/home/aidr` if you want it kept |
 
-The three history and cache files under `/app/data` are written next to the
-shipped datasets, and that directory cannot be mounted over. Until they can be
-pointed elsewhere they do not survive a container: `--serp-watch` has nothing to
-diff against, the exposure score has no trend, and `--update-brokers` has no
-lasting effect. Opt-outs, state, resume and logs are unaffected.
+`--serp-watch` has history to diff against, the exposure score has a trend, and
+`--update-brokers` has a lasting effect, because their files now live in the
+mounted directory. Drop confirmation `.eml` files in `aidr-home/inbox/confirms`
+and `--confirm-emails` reads them from there by default; you can also pass any
+directory inside the mount, for example `--confirm-emails /home/aidr/inbox/confirms`.
 
 A relative `email.smtp.ca` path resolves against `/app`; use an absolute path
 under `/home/aidr` for a certificate you keep in the mounted directory.
