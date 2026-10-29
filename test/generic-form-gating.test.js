@@ -198,6 +198,15 @@ test('codex #3: a feed row classified manual never reaches the form filler, even
   assert.equal(result.status, 'manual');
 });
 
+test('codex #3: only rows with no method (Markup/BADBOOL) or direct-form may use the form filler', async () => {
+  for (const method of ['search-form', 'email', 'unknown']) {
+    const page = makeFakePage({ forms: [optOutForm({ afterSubmit: { body: 'Your request has been received.' } })] });
+    const result = await run(page, row({ method, source: 'ca' }));
+    assert.deepEqual(page.filled, [], `method ${method} must not reach the form filler`);
+    assert.equal(result.status, 'manual');
+  }
+});
+
 test('codex #3: a homepage-only row never reaches the form filler', async () => {
   const page = makeFakePage({ url: 'https://broker.example/', forms: [optOutForm({ afterSubmit: { body: 'Your request has been received.' } })] });
   const result = await run(page, row({ url: 'https://broker.example/', source: 'markup' }));

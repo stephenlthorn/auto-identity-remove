@@ -1,21 +1,31 @@
 /**
  * generic-runner.js
  *
- * Handles the ~460 brokers from The Markup's 499-URL dataset and BADBOOL
- * that aren't explicitly mapped in brokers.js.
+ * Handles the ~460 brokers from The Markup's 499-URL dataset, BADBOOL and the
+ * live registry feeds that aren't explicitly mapped in brokers.js.
  *
  * Strategy per site:
+ *   0. Refuse targets that are not public http(s) hosts (before and after
+ *      navigation), and rows that duplicate an explicit broker
  *   1. Navigate to the opt-out URL
  *   2. Dismiss cookie banners
  *   3. Try these in order:
- *      a. "Do Not Sell My Personal Information" button → click it
- *      b. OneTrust / TrustArc / Osano preference manager → opt out all
- *      c. Form with email field only → fill + submit
- *      d. Form with name + email fields → fill + submit
- *      e. DSAR / data request form → fill + submit
- *   4. If nothing automatable → manual list
+ *      a. "Do Not Sell My Personal Information" link -> click it, submit the form
+ *         it opens
+ *      b. a visible OneTrust / TrustArc preference manager -> opt out of optional
+ *         categories and save
+ *      c. an opt-out / deletion / privacy-request <form> -> fill it and click ITS
+ *         submit control. Never a newsletter / login / search / contact / checkout
+ *         form, never for a row classified manual or pointing at a bare homepage
+ *      d. a DSAR / privacy-request link -> hand it to the user
+ *   4. If nothing automatable -> manual list
  *
- * Returns: { succeeded, skipped, manual, errors }
+ * A click is not an opt-out. Every strategy that clicks judges the outcome from
+ * the text that APPEARED afterwards: success wording -> success, validation or
+ * error text -> error, confirmation-email wording -> pending_confirm, anything
+ * else -> unverified (no 90-day cooldown).
+ *
+ * Returns: { count, genericStats }
  */
 
 'use strict';
@@ -438,12 +448,19 @@ function readLangInPage() {
 }
 
 async function readBodyText(page) {
-  try {
-    const text = await page.evaluate(readBodyInPage);
-    return typeof text === 'string' ? text : '';
-  } catch (_) {
-    return '';
+  // One retry: right after a click that navigates, the first evaluate can land
+  // in a context that is being torn down.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const text = await page.evaluate(readBodyInPage);
+      return typeof text === 'string' ? text : '';
+    } catch (_) {
+      if (attempt === 0 && typeof page.waitForTimeout === 'function') {
+        try { await page.waitForTimeout(500); } catch (__) {}
+      }
+    }
   }
+  return '';
 }
 
 async function readPageLang(page) {
@@ -1006,7 +1023,8 @@ async function processGenericUrl(page, broker, state, dryRun = false, injectedDe
     // Strategy 3: fill the opt-out form. Not for rows the feed classified manual
     // or that point at a bare homepage (codex #3), and only for a form that looks
     // like an opt-out request.
-    if (broker.method !== 'manual' && !isHomepageUrl(broker.url)) {
+    const methodAllowsForms = broker.method === undefined || broker.method === null || broker.method === 'direct-form';
+    if (methodAllowsForms && !isHomepageUrl(broker.url)) {
       const submitted = await submitOptOutForm(page, {
         person, submissionEmail, checkUrl,
         formCtx: { afterOptOutClick: false },
