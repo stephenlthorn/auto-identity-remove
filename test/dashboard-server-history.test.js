@@ -191,6 +191,8 @@ test('GET /api/runs/:id rejects path traversal and never reads outside the logs 
       '/api/runs/../run-outside',
       '/api/runs/....//run-outside',
       '/api/runs/' + encodeURIComponent('run-' + 'a'.repeat(300)),
+      '/api/runs/%E0%A4%A',
+      '/api/runs/%',
     ];
     for (const pathname of attempts) {
       const r = await h.request({ pathname });
