@@ -1034,11 +1034,147 @@ async function processGenericUrl(page, broker, state, dryRun = false, injectedDe
   }
 }
 
+// ─── Explicit-broker identity (BRK roadmap item 4) ────────────────────────────
+//
+// The generic list is "everything the explicit list does not already cover".
+// Comparing exact hostnames missed the same company on another host (Acxiom's
+// isapps.acxiom.com vs www.acxiom.com, LexisNexis, PeopleFinders) and companies
+// with no URL at all (Pipl is email-only), so they ran twice. An explicit broker
+// now covers its registrable domain, the domain of its opt-out email, and its
+// company name.
+
+// Authenticated government portal handled by the explicit CalPrivacy DROP entry
+// (its optOutUrl is the registry page, a different host).
+const EXPLICIT_HOST_ALIASES = ['consumer.drop.privacy.ca.gov'];
+
+// Mail providers say nothing about which company an email broker is.
+const FREE_MAIL_DOMAINS = new Set([
+  'gmail.com', 'googlemail.com', 'yahoo.com', 'outlook.com', 'hotmail.com', 'live.com', 'msn.com',
+  'aol.com', 'icloud.com', 'me.com', 'proton.me', 'protonmail.com', 'gmx.com', 'mail.com',
+]);
+
+// Domains shared by many unrelated organisations: an explicit broker on one of
+// them says nothing about a different company's page on the same domain (a
+// PureCars opt-out Google Form is not Google's "Results about you"). Only an
+// exact host match counts there.
+const SHARED_PLATFORM_DOMAINS = new Set([
+  'google.com', 'microsoft.com', 'live.com', 'ca.gov', 'force.com', 'salesforce.com', 'zendesk.com',
+  'onetrust.com', 'trustarc.com', 'osano.com', 'termly.io', 'iubenda.com', 'transcend.io', 'ketch.com',
+  'typeform.com', 'jotform.com', 'formstack.com', 'airtable.com', 'notion.site', 'github.io', 'wordpress.com',
+  'wixsite.com', 'squarespace.com', 'herokuapp.com', 'azurewebsites.net', 'amazonaws.com', 'cloudfront.net',
+]);
+
+const MULTI_LABEL_SUFFIXES = new Set([
+  'co.uk', 'org.uk', 'ac.uk', 'gov.uk', 'com.au', 'net.au', 'org.au', 'co.nz', 'co.jp', 'co.in', 'com.br', 'com.mx', 'co.za',
+]);
+
+function bareHost(host) {
+  return String(host || '').toLowerCase().replace(/^www\./, '').replace(/\.$/, '');
+}
+
+/** Approximate registrable domain (eTLD+1) without a public-suffix list. */
+function registrableDomain(host) {
+  const labels = bareHost(host).split('.').filter(Boolean);
+  if (labels.length <= 2) return labels.join('.');
+  const lastTwo = labels.slice(-2).join('.');
+  return MULTI_LABEL_SUFFIXES.has(lastTwo) ? labels.slice(-3).join('.') : lastTwo;
+}
+
+const LEGAL_SUFFIXES = new Set(['inc', 'llc', 'ltd', 'limited', 'corp', 'corporation', 'co', 'company', 'lp', 'llp', 'plc', 'gmbh', 'sa', 'ag', 'bv', 'pty', 'pllc']);
+
+/** "Acxiom LLC" -> ['acxiom']; "BeenVerified, Inc. and its subsidiaries" -> ['beenverified']. */
+function companyTokens(name) {
+  const text = String(name || '').toLowerCase()
+    .replace(/\band its (subsidiaries|affiliates).*$/, '')
+    .replace(/\.(com|net|org|io|ai|us)\b/g, '')
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+  const tokens = text.split(' ').filter(Boolean);
+  while (tokens.length > 1 && LEGAL_SUFFIXES.has(tokens[tokens.length - 1])) tokens.pop();
+  return tokens;
+}
+
+/**
+ * Hosts and company keys that the explicit broker list already covers.
+ * @param {Iterable<string>} explicitBrokerHosts  the hosts the caller computed
+ * @param {Array<object>} [explicitBrokers]       brokers.js entries (name, optOutUrl, searchUrl, emailTo)
+ */
+function buildExplicitIdentity(explicitBrokerHosts, explicitBrokers = []) {
+  const domains = new Set();
+  const exactHosts = new Set();
+  const addHost = (host) => {
+    const d = registrableDomain(host);
+    if (!d) return;
+    domains.add(d);
+    exactHosts.add(bareHost(host));
+  };
+  for (const host of explicitBrokerHosts || []) addHost(host);
+  for (const host of EXPLICIT_HOST_ALIASES) addHost(host);
+
+  const keys = [];
+  const addKey = (name) => {
+    const tokens = companyTokens(name);
+    if (tokens.length > 0) keys.push({ tokens, squashed: tokens.join('') });
+  };
+  for (const b of explicitBrokers) {
+    if (!b) continue;
+    for (const url of [b.optOutUrl, b.searchUrl]) {
+      try { addHost(new URL(url).hostname); } catch (_) {}
+    }
+    const mailDomain = String(b.emailTo || '').split('@')[1];
+    if (mailDomain && !FREE_MAIL_DOMAINS.has(bareHost(mailDomain))) addHost(mailDomain);
+    const name = String(b.name || '');
+    addKey(name);
+    // "Experian (marketing)" and "Google - Results About You" are the company
+    // named before the qualifier.
+    const head = name.split(/\s+-\s+|\s*\(/)[0];
+    if (head !== name) addKey(head);
+  }
+
+  return {
+    coversHost: (host) => {
+      if (!host) return false;
+      if (exactHosts.has(bareHost(host))) return true;
+      const domain = registrableDomain(host);
+      return domains.has(domain) && !SHARED_PLATFORM_DOMAINS.has(domain);
+    },
+    coversName: (name) => {
+      const tokens = companyTokens(name);
+      if (tokens.length === 0) return false;
+      const squashed = tokens.join('');
+      return keys.some(k =>
+        k.tokens.every((t, i) => tokens[i] === t)
+        // "PeoplefindersDaaS" is PeopleFinders; only for names long enough that a
+        // prefix cannot be a coincidence.
+        || (k.squashed.length >= 8 && squashed.startsWith(k.squashed)));
+    },
+  };
+}
+
+// The explicit list, for callers (the watcher today) that only pass hosts.
+// Required lazily and defensively: brokers.js reads config, which must never
+// make the generic pass fail to start.
+function defaultExplicitBrokers() {
+  try {
+    const list = require('./brokers');
+    return Array.isArray(list) ? list : [];
+  } catch (_) {
+    return [];
+  }
+}
+
 // ─── Load all generic brokers (deduped against explicit broker list) ──────────
 
-function loadGenericBrokers(explicitBrokerHosts) {
+/**
+ * @param {Iterable<string>} explicitBrokerHosts  bare, www-stripped hosts of the explicit brokers
+ * @param {{ explicitBrokers?: Array<object> }} [extra]  the explicit broker entries, for company-level dedupe
+ */
+function loadGenericBrokers(explicitBrokerHosts, extra = {}) {
   const brokers = [];
   const seen = new Set(explicitBrokerHosts);
+  const explicit = buildExplicitIdentity(explicitBrokerHosts, extra.explicitBrokers);
+  const covered = (name, host) => explicit.coversHost(host) || explicit.coversName(name);
 
   // The Markup dataset (494 entries)
   if (fs.existsSync(MARKUP_PATH)) {
@@ -1047,7 +1183,7 @@ function loadGenericBrokers(explicitBrokerHosts) {
       if (!row.urlFinal || !row.urlFinal.startsWith('http')) continue;
       try {
         const host = new URL(row.urlFinal).hostname.replace(/^www\./, '');
-        if (seen.has(host)) continue;
+        if (seen.has(host) || covered(row.name, host)) continue;
         seen.add(host);
         brokers.push({ name: row.name || host, url: row.urlFinal, source: 'markup' });
       } catch(_) {}
@@ -1056,12 +1192,12 @@ function loadGenericBrokers(explicitBrokerHosts) {
 
   // BADBOOL extras (27 additional people-search sites)
   if (fs.existsSync(BADBOOL_PATH)) {
-    const extra = JSON.parse(fs.readFileSync(BADBOOL_PATH, 'utf8'));
-    for (const url of extra) {
+    const extraRows = JSON.parse(fs.readFileSync(BADBOOL_PATH, 'utf8'));
+    for (const url of extraRows) {
       if (!url.startsWith('http')) continue;
       try {
         const host = new URL(url).hostname.replace(/^www\./, '');
-        if (seen.has(host)) continue;
+        if (seen.has(host) || covered(host, host)) continue;
         seen.add(host);
         brokers.push({ name: host, url, source: 'badbool' });
       } catch(_) {}
@@ -1073,7 +1209,8 @@ function loadGenericBrokers(explicitBrokerHosts) {
   // Markup/BADBOOL so the Markup dataset stays the fallback and feed entries are
   // deduped against everything already loaded. Each row is the normalized shape
   // { name, optOutUrl, method, source }; the generic runner navigates `url`, so
-  // url-less manual rows are skipped here.
+  // url-less manual rows are skipped here. `method` rides along: a row the feed
+  // classified manual never reaches the form filler (codex #3).
   if (fs.existsSync(FEEDS_PATH)) {
     try {
       const feeds = JSON.parse(fs.readFileSync(FEEDS_PATH, 'utf8'));
@@ -1083,7 +1220,7 @@ function loadGenericBrokers(explicitBrokerHosts) {
           if (!url || !url.startsWith('http')) continue;
           try {
             const host = new URL(url).hostname.replace(/^www\./, '');
-            if (seen.has(host)) continue;
+            if (seen.has(host) || covered(row.name, host)) continue;
             seen.add(host);
             brokers.push({ name: row.name || host, url, source: row.source || 'feed', method: row.method });
           } catch(_) {}
@@ -1150,9 +1287,11 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
   const personCount = opts.personCount || 1;
   const keyFor = (name) => stateKey(name, person, personCount);
   // Allow tests to inject a custom broker list and/or process function.
+  // Company-level dedupe needs the explicit broker entries, not just their hosts.
+  // Callers that pass only hosts (watcher.js today) get them from brokers.js.
   const brokers = opts.injectedBrokers !== undefined
     ? opts.injectedBrokers
-    : loadGenericBrokers(explicitBrokerHosts);
+    : loadGenericBrokers(explicitBrokerHosts, { explicitBrokers: opts.explicitBrokers || defaultExplicitBrokers() });
   const processFn = opts.injectedProcessFn || processGenericUrl;
   // CORE-4: --only / --skip / --retry-failed arrive as one predicate. Excluded
   // brokers are dropped here, before any log line, navigation or state write.
