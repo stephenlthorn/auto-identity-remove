@@ -14,6 +14,10 @@ Environment=AIDR_PORT=8080
 # Set a real login (the dashboard edits PII and can submit opt-outs):
 Environment=AIDR_USER=admin
 Environment=AIDR_PASS=change-me
+# Binding anything but loopback needs credentials (above) and, to browse it by
+# name, the names you will use:
+#Environment=AIDR_HOST=0.0.0.0
+#Environment=AIDR_ALLOWED_HOSTS=nas.lan
 # Playwright browser cache used by watcher.js runs spawned from the dashboard:
 Environment=PLAYWRIGHT_BROWSERS_PATH=/root/.cache/ms-playwright
 Restart=on-failure
