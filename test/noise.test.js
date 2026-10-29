@@ -43,13 +43,13 @@ test('phone is exactly 10 digits (no punctuation)', () => {
 
 // ── Email format ──────────────────────────────────────────────────────────────
 
-test('email is a valid gmail address with + suffix', () => {
+test('email is first.last.random on an RFC 2606 reserved domain (NET-14: undeliverable)', () => {
   for (let i = 0; i < 20; i++) {
     const { email } = generateBogusPerson();
     assert.match(
       email,
-      /^[a-z]+\.[a-z]+\+[a-z0-9]+@gmail\.com$/i,
-      `email "${email}" must match firstname.lastname+random@gmail.com`
+      /^[a-z]+\.[a-z]+\.[a-z0-9]+@example\.(com|net|org)$/i,
+      `email "${email}" must match first.last.random@example.(com|net|org)`
     );
   }
 });
