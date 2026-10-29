@@ -38,7 +38,7 @@
 | WhitePages | search-form | no | untested | yes |
 | FastPeopleSearch | search-form | no | untested | yes |
 | TruePeopleSearch | direct-form | no | untested | yes |
-| BeenVerified | search-form | yes | untested | yes |
+| BeenVerified | direct-form | yes | untested | yes |
 | Radaris | search-form | no | untested | no |
 | Intelius | direct-form | no | untested | no |
 | PeopleFinders | direct-form | no | untested | no |

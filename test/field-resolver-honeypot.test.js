@@ -138,6 +138,8 @@ const HONEYPOTS = {
   'parked off-screen to the right': { rect: { left: 9999, top: 100, right: 10199, bottom: 130, width: 200, height: 30 } },
   'zero-size': { rect: { left: 20, top: 100, right: 20, bottom: 100, width: 0, height: 0 } },
   '1px by 1px': { rect: { left: 20, top: 100, right: 21, bottom: 101, width: 1, height: 1 } },
+  // A 1px-wide <input> renders about 7px once default padding and border apply.
+  '1px with default padding (7px box)': { rect: { left: 20, top: 100, right: 27, bottom: 107, width: 7, height: 7 } },
   'aria-hidden on the field': { attrs: { 'aria-hidden': 'true' } },
   'aria-hidden on an ancestor': { ancestors: [{ attrs: {} }, { attrs: { 'aria-hidden': 'true' } }] },
   'tabindex=-1': { attrs: { tabindex: '-1' } },

@@ -181,6 +181,7 @@ function buildBrokers(person) {
     method: 'search-form',
     searchUrl: `https://www.spokeo.com/search?q=${enc(N)}&type=pp&state=${ST}`,
     listingPattern: /spokeo\.com\/[^/]+\/[^/]+\/[^/]+-p\d+/i,
+    lastName: L,
     optOutUrl: 'https://www.spokeo.com/optout',
     formFields: { 'input[name="email"]': E },
     submitSelector: 'button[type="submit"],input[type="submit"]',
@@ -195,6 +196,7 @@ function buildBrokers(person) {
     method: 'search-form',
     searchUrl: `https://www.whitepages.com/name/${enc(F)}-${enc(L)}/${ST}`,
     listingPattern: /whitepages\.com\/people\//i,
+    lastName: L,
     optOutUrl: 'https://www.whitepages.com/suppression-requests',
     formFields: { 'input[name="name"]': N, 'input[name="email"]': E },
     submitSelector: 'button[type="submit"]',
@@ -209,6 +211,7 @@ function buildBrokers(person) {
     method: 'search-form',
     searchUrl: `https://www.fastpeoplesearch.com/name/${enc(F)}-${enc(L)}_${ST}`,
     listingPattern: /fastpeoplesearch\.com\/name\//i,
+    lastName: L,
     optOutUrl: 'https://www.fastpeoplesearch.com/optout',
     formFields: { [`input[id="optout_name"],${fullNameInput('name')}`]: N, 'input[type="email"]': E },
     submitSelector: 'button[type="submit"]',
@@ -230,10 +233,16 @@ function buildBrokers(person) {
   },
 
   {
+    // direct-form since BRK-9. This entry used to be search-form with
+    // listingPattern /beenverified\.com/, which matches the site's own logo and
+    // nav links, so the "listing" it found was always the homepage and --verify
+    // could never report anything but "still listed". Its searchUrl was also the
+    // opt-out search FORM, a page with no person-specific links, so a tighter
+    // pattern alone would have turned that into "never listed" (opt-out skipped,
+    // --verify "verified clear"). The page is the form: fill it, nothing to look
+    // up first, and --verify reports it unverifiable instead of guessing.
     name: 'BeenVerified',
-    method: 'search-form',
-    searchUrl: 'https://www.beenverified.com/app/optout/search',
-    listingPattern: /beenverified\.com/i,
+    method: 'direct-form',
     optOutUrl: 'https://www.beenverified.com/app/optout/search',
     formFields: { 'input[name="firstName"]': F, 'input[name="lastName"]': L, 'select[name="state"]': ST },
     submitSelector: 'button[type="submit"]',
@@ -248,6 +257,7 @@ function buildBrokers(person) {
     method: 'search-form',
     searchUrl: `https://radaris.com/p/${enc(F)}/${enc(L)}/`,
     listingPattern: /radaris\.com\/p\//i,
+    lastName: L,
     optOutUrl: 'https://radaris.com/control/privacy',
     formFields: { 'input[name*="first"],input[placeholder*="first" i]': F, 'input[name*="last"],input[placeholder*="last" i]': L, 'input[type="email"]': E },
     submitSelector: 'button[type="submit"]',
@@ -294,6 +304,7 @@ function buildBrokers(person) {
     method: 'search-form',
     searchUrl: `https://www.mylife.com/find-people/results.pubview?searchtype=PEOPLE&firstname=${enc(F)}&lastname=${enc(L)}&state=${ST}`,
     listingPattern: /mylife\.com\/[^/]+\/[^/]+-\d+\.html/i,
+    lastName: L,
     optOutUrl: 'https://www.mylife.com/privacy-policy/',
     formFields: { 'input[type="email"]': E },
     submitSelector: 'button[type="submit"]',
@@ -307,6 +318,7 @@ function buildBrokers(person) {
     method: 'search-form',
     searchUrl: `https://nuwber.com/person/search?name=${enc(N)}&state=${ST}`,
     listingPattern: /nuwber\.com\/person\//i,
+    lastName: L,
     optOutUrl: 'https://nuwber.com/removal/link',
     formFields: { 'input[type="email"]': E },
     submitSelector: 'button[type="submit"]',
