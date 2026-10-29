@@ -96,6 +96,25 @@ jobs:
             aidr-ci node scripts/ci/docker-state-check.js
           grep -q CiProbe "$RUNNER_TEMP/state.json" || { echo "host file not updated"; exit 1; }
 
+      - name: State must persist through a DIRECTORY bind mount
+        # The documented recipe (docker-compose.yml, docs/SYNOLOGY.md) mounts a
+        # directory, not a file: rename() works there, and state.json.bak, the lock
+        # and the checkpoint land beside the state instead of in the container layer.
+        # Run as the host user, as the recipe's AIDR_UID / AIDR_GID does, so the
+        # files the container creates (0600) are readable here.
+        run: |
+          mkdir -m 700 "$RUNNER_TEMP/aidr-home"
+          echo '{"optOuts":{}}' > "$RUNNER_TEMP/aidr-home/state.json"
+          docker run --rm --init \
+            --user "$(id -u):$(id -g)" \
+            -e HOME=/tmp \
+            -e AIDR_STATE_PATH=/home/aidr/state.json \
+            -v "$RUNNER_TEMP/aidr-home:/home/aidr" \
+            aidr-ci node scripts/ci/docker-state-check.js
+          grep -q CiProbe "$RUNNER_TEMP/aidr-home/state.json" || { echo "host state.json not updated"; exit 1; }
+          grep -q CiProbe "$RUNNER_TEMP/aidr-home/state.json.bak" || { echo "state.json.bak not written beside the state"; exit 1; }
+          if ls "$RUNNER_TEMP/aidr-home" | grep -E '\.tmp$'; then echo "an atomic-write temp file was left behind"; exit 1; fi
+
       - name: Image must not contain PII or secrets
         # COPY . . runs after npm ci, so a .dockerignore gap bakes the
         # maintainer's own config into a layer that travels with the image.

@@ -61,7 +61,7 @@
   },
 
   "relay": {
-    "_comment": "OPTIONAL masked-email relay. When set, opt-out submissions use a per-person alias instead of person.email so brokers never get your real address. Currently supports provider 'simplelogin' via API. Apple Hide My Email and Firefox Relay are manual-only - see docs/relay.md. Omit this block entirely to submit with your real email (default).",
+    "_comment": "OPTIONAL masked-email relay. When set, opt-out submissions use a per-person alias instead of person.email so brokers never get your real address. Currently supports provider 'simplelogin' via API. Apple Hide My Email and Firefox Relay are manual-only - see docs/relay.md. Omit this block entirely to submit with your real email (default). The relay FAILS CLOSED: if an alias cannot be created for a person, nothing is submitted for that person (and the run exits 1) rather than falling back to your real address. Add \"failOpen\": true to this block to allow that fallback, with a warning.",
     "provider": "simplelogin",
     "apiKey": "YOUR_SIMPLELOGIN_API_KEY"
   },
