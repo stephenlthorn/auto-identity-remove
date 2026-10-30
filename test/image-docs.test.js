@@ -127,6 +127,13 @@ test('the Synology doc says plainly that the footprint numbers come from arm64 D
   assert.match(footprint, /not measured it on the J4125|have not measured/i);
 });
 
+test('the Synology doc spells the config check as watcher.js takes it: --config-check, not a "config check" subcommand', () => {
+  // `aidr config check` is the wrapper; node watcher.js only knows flags, and
+  // answers "unexpected argument config" to the subcommand form.
+  assert.doesNotMatch(synology, /watcher\.js config check/);
+  assert.match(synology, /watcher\.js --config-check/);
+});
+
 test('the Synology doc opens by saying the NAS no longer builds the image', () => {
   const intro = synology.slice(0, synology.indexOf('## What was broken'));
 

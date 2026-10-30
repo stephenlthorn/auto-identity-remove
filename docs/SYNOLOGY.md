@@ -288,9 +288,9 @@ files at `/app`, those mounts are ignored now: the image sets `AIDR_HOME=/home/a
 from the one directory you mount there. The run says where it found your files and where
 they must go. Copy **both** into `aidr-home` (`cp config.json state.json aidr-home/`) and
 mount the directory as in step 4. Copying only the config makes the next run re-submit every
-broker, because the history stayed behind; `node watcher.js config check` warns about that
+broker, because the history stayed behind; `node watcher.js --config-check` warns about that
 while a `state.json` is still left at the old location (run it like the dry run in step 4,
-with `node watcher.js config check` as the last words of the command).
+with `node watcher.js --config-check` as the last words of the command).
 
 **`--encrypt-config` says it could not delete `config.json`.** A single-file mount cannot
 be removed from inside the container. The file is left untouched (never emptied: the
