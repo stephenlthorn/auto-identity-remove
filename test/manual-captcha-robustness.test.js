@@ -119,3 +119,10 @@ test('BRK2-5: a token still wins whatever else changed', async () => {
   const outcome = await handleCaptcha(page, { manual: true, broker: BROKER, now: clock.now, sleep: clock.sleep, onWaiting() {} });
   assert.equal(outcome, 'solved');
 });
+
+test('BRK2-5: a full-page challenge that never had a form is solved when it lets the visitor through, even to another URL', async () => {
+  const page = makeCaptchaPage({ type: null, state: { humanText: true }, controls: 0 });
+  const clock = makeClock([{ at: 300, run: (p) => { p.model.state.humanText = false; p.model.url = 'https://example.test/home'; } }], page);
+  const outcome = await handleCaptcha(page, { manual: true, broker: BROKER, now: clock.now, sleep: clock.sleep, onWaiting() {} });
+  assert.equal(outcome, 'solved');
+});

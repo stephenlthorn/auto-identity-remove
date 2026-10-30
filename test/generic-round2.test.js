@@ -113,9 +113,10 @@ function rows(n) {
   return Array.from({ length: n }, (_, i) => ({ name: `Row ${i}`, url: `https://row${i}.example/opt-out` }));
 }
 
-test('CLI2-5: when the browser dies and no page can be opened, the pass stops cleanly and says so', async () => {
+/** A context whose first page comes back already closed and whose later newPage() calls throw. */
+function dyingContext() {
   let opened = 0;
-  const context = {
+  return {
     pages: () => [],
     async newPage() {
       opened += 1;
@@ -125,40 +126,81 @@ test('CLI2-5: when the browser dies and no page can be opened, the pass stops cl
       return page;
     },
   };
-  const logged = [];
-  const result = await gr.runGenericBrokers(context, new Set(), { optOuts: {} }, (name, status, detail) => logged.push({ name, status, detail }), () => {}, {
-    injectedBrokers: rows(6),
-    injectedProcessFn: async () => { throw new Error('Target page, context or browser has been closed'); },
-  });
-  assert.equal(result.browserClosed, true);
-  assert.ok(logged.length < 6, `the remaining rows are not logged as ${logged.length} errors`);
-  assert.ok(result.count <= logged.length + 1);
-});
+}
 
-test('CLI2-5: a caller that can relaunch gets the chance to (opts.reopenContext) and the pass goes on', async () => {
+test('CLI2-5: getContext rebuilds the working page on the relaunched browser and the row that hit the dead page is tried again', async () => {
   const fresh = { pages: () => [], newPage: async () => makeFakePage({}) };
-  let opened = 0;
-  const dying = {
-    pages: () => [],
-    async newPage() {
-      opened += 1;
-      if (opened > 1) throw new Error('Target closed');
-      const page = makeFakePage({});
-      page.isClosed = () => true;
-      return page;
-    },
-  };
   const logged = [];
-  let reopened = 0;
+  let asked = 0;
   let calls = 0;
-  const result = await gr.runGenericBrokers(dying, new Set(), { optOuts: {} }, (name, status) => logged.push({ name, status }), () => {}, {
+  const result = await gr.runGenericBrokers(dyingContext(), new Set(), { optOuts: {} }, (name, status) => logged.push({ name, status }), () => {}, {
     injectedBrokers: rows(4),
     injectedProcessFn: async () => { calls += 1; if (calls === 1) throw new Error('Target closed'); return { status: 'manual', detail: 'x' }; },
-    reopenContext: async () => { reopened += 1; return fresh; },
+    getContext: async () => { asked += 1; return fresh; },
   });
-  assert.equal(reopened, 1);
+  assert.equal(asked, 1);
   assert.equal(result.browserClosed, undefined);
+  assert.deepEqual(logged.map((l) => l.status), ['manual', 'manual', 'manual', 'manual']);
+  assert.equal(calls, 5, 'row 0 ran twice: once on the dead page, once on the new one');
+});
+
+test('CLI2-5: when getContext throws (the browser cannot be relaunched) every remaining row is recorded as an error that says so', async () => {
+  const logged = [];
+  const failures = [];
+  const config = require('../lib/config');
+  const origFailure = config.recordFailure;
+  config.recordFailure = (key, kind) => failures.push({ key, kind });
+  let ran = 0;
+  try {
+    const result = await gr.runGenericBrokers(dyingContext(), new Set(), { optOuts: {} }, (name, status, detail) => logged.push({ name, status, detail }), () => {}, {
+      injectedBrokers: rows(6),
+      injectedProcessFn: async () => { ran += 1; throw new Error('Target page, context or browser has been closed'); },
+      getContext: async () => { throw new Error('launch failed 3 times'); },
+    });
+    assert.equal(result.browserClosed, true);
+    assert.equal(logged.length, 6, 'no row disappears from the log');
+    assert.ok(logged.every((l) => l.status === 'error' && /browser could not be relaunched/i.test(l.detail)), JSON.stringify(logged));
+    assert.equal(ran, 1, 'nothing more is run on a browser that is gone');
+    assert.equal(result.genericStats.error, 6);
+    assert.deepEqual(failures, [], 'a dead browser is not evidence against the brokers: nothing counts toward defunct');
+  } finally {
+    config.recordFailure = origFailure;
+  }
+});
+
+test('CLI2-5: with no getContext the pass behaves the same way on a browser that cannot open a page', async () => {
+  const logged = [];
+  const result = await gr.runGenericBrokers(dyingContext(), new Set(), { optOuts: {} }, (name, status, detail) => logged.push({ name, status, detail }), () => {}, {
+    injectedBrokers: rows(4),
+    injectedProcessFn: async () => { throw new Error('Target closed'); },
+  });
+  assert.equal(result.browserClosed, true);
   assert.equal(logged.length, 4);
+  assert.ok(logged.every((l) => l.status === 'error' && /browser closed/i.test(l.detail)), JSON.stringify(logged));
+});
+
+test('CLI2-5: the checkpoint stays on the first row the browser could not run, so --resume starts there', async () => {
+  const checkpoints = [];
+  await gr.runGenericBrokers(dyingContext(), new Set(), { optOuts: {} }, () => {}, () => {}, {
+    injectedBrokers: rows(5),
+    injectedProcessFn: async () => { throw new Error('Target closed'); },
+    getContext: async () => { throw new Error('gone'); },
+    saveCheckpoint: (record) => checkpoints.push(record),
+    now: () => 0,
+  });
+  assert.equal(checkpoints.at(-1).index, 0);
+});
+
+test('CLI2-5: a browser that is already unusable when the pass starts fails every row the same way, without a throw', async () => {
+  const logged = [];
+  const context = { pages: () => [], async newPage() { throw new Error('closed'); } };
+  const result = await gr.runGenericBrokers(context, new Set(), { optOuts: {} }, (name, status, detail) => logged.push({ name, status, detail }), () => {}, {
+    injectedBrokers: rows(3),
+    injectedProcessFn: async () => { throw new Error('unreachable'); },
+    getContext: async () => { throw new Error('gone'); },
+  });
+  assert.equal(result.browserClosed, true);
+  assert.equal(logged.length, 3);
 });
 
 // ── codex #8 ──────────────────────────────────────────────────────────────────

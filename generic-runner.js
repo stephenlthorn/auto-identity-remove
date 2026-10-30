@@ -1655,24 +1655,31 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
   };
 
   // CLI2-5: when the browser dies under a pass, a page can no longer be opened. The
-  // pass then stops where it is and says so, instead of turning every remaining row
-  // into an error (each one a failure written to state, which feeds the defunct
-  // check against brokers that did nothing wrong). A caller that can launch a new
-  // browser passes opts.reopenContext and the pass carries on in it.
+  // working page is rebuilt on the current context first; if that fails,
+  // opts.getContext() (the watcher's: an async () => live context that relaunches
+  // Chromium when it died and throws after repeated launch failures) supplies a live
+  // one. With neither, or when it throws, nothing more can be run: every remaining row
+  // is recorded as an error that says so (see `failRemaining`) instead of the pass
+  // swallowing the failure or aborting the run.
   let page = null;
-  let browserClosed = false;
+  let browserGone = null;
   const recoverPage = async () => {
-    try { page = await newWorkingPage(); return true; } catch (_) { /* fall through to a new browser */ }
-    if (typeof opts.reopenContext === 'function') {
+    try { page = await newWorkingPage(); return true; } catch (_) { /* relaunch below */ }
+    if (typeof opts.getContext === 'function') {
       try {
-        context = await opts.reopenContext();
+        context = await opts.getContext();
         page = await newWorkingPage();
         return true;
-      } catch (_) { /* no browser to be had */ }
+      } catch (_) {
+        browserGone = 'browser could not be relaunched';
+        return false;
+      }
     }
+    browserGone = 'browser closed - no page could be opened';
     return false;
   };
-  if (!(await recoverPage())) browserClosed = true;
+  let stoppedAt = start;
+  if (!(await recoverPage())) stoppedAt = start;
 
   const stats = {
     attempted: 0,
@@ -1684,6 +1691,22 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
     'dry-run-skipped': 0,
     'skipped-recent': 0,
     dead: 0,
+  };
+
+  // The browser is gone and cannot be relaunched: every row that was not run is logged
+  // as an error that says why, so none disappears from the run log. No failure is
+  // written to state for them: a dead browser is no evidence about a broker, and
+  // 'error' entries count toward the defunct check. The checkpoint stays on the first
+  // row that could not run, so --resume starts there.
+  const failRemaining = (from) => {
+    console.log(`\n⚠️  ${browserGone} during the generic pass; ${queue.length - from} row(s) were not run. Run again with --resume to pick the pass up from there.`);
+    for (let i = from; i < queue.length; i++) {
+      if (finishedRows.has(i)) continue;
+      const broker = queue[i];
+      logResult(broker.name, 'error', browserGone, { host: hostOfBroker(broker) });
+      stats.attempted++;
+      stats.error++;
+    }
   };
 
   // Broker sites frequently spawn popups / _blank tabs / consent / OAuth windows.
@@ -1701,10 +1724,9 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
   const RECYCLE_EVERY = 25; // periodically replace the working page to bound renderer growth
   let processed = 0;
 
-  let reached = 0;
   try {
     let retriedRow = -1;
-    for (let rowIndex = start; rowIndex < queue.length && !browserClosed; rowIndex++) {
+    for (let rowIndex = start; rowIndex < queue.length && !browserGone; rowIndex++) {
       if (finishedRows.has(rowIndex)) continue;
       const broker = queue[rowIndex];
       checkpointRow(rowIndex, broker);
@@ -1720,11 +1742,10 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
         // row that hit the dead page did nothing wrong: it is tried again once on the
         // new page, and when there is no new page the pass stops instead.
         if (typeof page.isClosed === 'function' && page.isClosed()) {
-          if (!(await recoverPage())) { browserClosed = true; break; }
+          if (!(await recoverPage())) { stoppedAt = rowIndex; break; }
           if (retriedRow !== rowIndex) { retriedRow = rowIndex; rowIndex--; continue; }
         }
       }
-      reached++;
       doneKeys.push(keyHash(keyFor(broker.name)));
 
       // Rows are named by company, so record which host this one was about:
@@ -1766,21 +1787,19 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
       // A page that was closed under the row (a CAPTCHA wait that gave up on a page
       // that stopped answering, a crash) is replaced before the next one.
       if (typeof page.isClosed === 'function' && page.isClosed()) {
-        if (!(await recoverPage())) { browserClosed = true; break; }
+        if (!(await recoverPage())) { stoppedAt = rowIndex + 1; break; }
       }
 
       // Recycle the working page every N brokers to release accumulated
       // renderer / site-isolation processes that survive same-page navigation.
       if (++processed % RECYCLE_EVERY === 0) {
         try { await page.close(); } catch (_) {}
-        if (!(await recoverPage())) { browserClosed = true; break; }
+        if (!(await recoverPage())) { stoppedAt = rowIndex + 1; break; }
       }
 
       try { await page.waitForTimeout(400); } catch (_) {} // polite delay
     }
-    if (browserClosed) {
-      console.log(`\n⚠️  The browser closed during the generic pass (${queue.length - start - reached} row(s) not run). Nothing was recorded for them; run again with --resume to pick the pass up from there.`);
-    }
+    if (browserGone) failRemaining(stoppedAt);
   } finally {
     // The last row is always written, throttled or not: it is the one a resume
     // would otherwise lose.
@@ -1791,9 +1810,9 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
 
   return {
     // The rows that ran (a resumed pass does not count the rows it skipped).
-    count: browserClosed ? reached : queue.length - start - finishedRows.size,
+    count: queue.length - start - finishedRows.size,
     resumeSkipped: start + finishedRows.size,
-    ...(browserClosed ? { browserClosed: true, stoppedAt: start + reached } : {}),
+    ...(browserGone ? { browserClosed: true, stoppedAt } : {}),
     genericStats: {
       attempted: stats.attempted,
       submitted: stats.submitted,

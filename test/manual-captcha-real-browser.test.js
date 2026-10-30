@@ -172,13 +172,13 @@ describe('manual CAPTCHA, real browser', { skip: !ENABLED }, () => {
     }
   });
 
-  test('a page that navigates during the wait is tolerated and the new page decides', async () => {
+  test('a form page replaced during the wait is tolerated and reported as navigated, not solved (BRK2-5): the caller reads the new page', async () => {
     const page = await openPage(FORM(RECAPTCHA));
     const timer = setTimeout(() => {
       page.setContent('<!doctype html><body><h1>Thank you</h1></body>').catch(() => {});
     }, 400);
     try {
-      assert.equal(await realManual.handleCaptcha(page, fast({ manual: true, broker: BROKER, timeoutMs: 10000 })), 'solved');
+      assert.equal(await realManual.handleCaptcha(page, fast({ manual: true, broker: BROKER, timeoutMs: 10000 })), 'navigated');
     } finally {
       clearTimeout(timer);
       await page.close();
