@@ -26,13 +26,26 @@
  *     preview/real/retry. Sending filters for list/pending/confirm/doctor/verify/
  *     serp modes is silently ignored by watcher.js; this helper gates them at
  *     the server so the caller gets clear feedback instead of silent no-ops.
+ *
+ * The same module also holds the other pure decisions the server makes: which
+ * Host headers are acceptable (DNS rebinding), whether a bind address is safe,
+ * what a new username may contain, and how a broker's status is aggregated over
+ * the per-person keys multi-person configs write.
  */
 
 'use strict';
 
+const net = require('net');
+
 // Modes that perform real, outward-facing actions (submit PII to brokers, click
 // confirmation links, retry live submissions). These require explicit confirm.
 const LIVE_MODES = new Set(['real', 'retry', 'snapshot', 'confirm']);
+
+// The placeholder dashboard/examples/aidr-dashboard.service used to ship. Never a credential.
+const EXAMPLE_PASSWORD = 'change-me';
+const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
+const MAX_FILTER_LENGTH = 4096;
+const MAX_USERNAME_LENGTH = 64;
 
 // Modes in which watcher.js actually applies --only / --skip filtering.
 // For all other modes the filter flags are parsed but never used, so we gate
@@ -65,7 +78,8 @@ function modeHonorsFilters(mode) {
  *
  * Returns one of: 'ok' | 'notfound' | 'pending' | 'error' | 'manual' | 'other'
  *
- * NOTE: the browser app.js mirrors this mapping; keep them in sync.
+ * The browser no longer mirrors this: GET /api/brokers ships the classified
+ * status, so there is one mapping and it lives here.
  *
  * @param {*} status  Raw status string from state.json history.
  * @returns {string}
@@ -97,6 +111,17 @@ function classifyStatus(status) {
 function resolveEnvCreds(envUser, envPass) {
   const hasUser = typeof envUser === 'string' && envUser.length > 0;
   const hasPass = typeof envPass === 'string' && envPass.length > 0;
+  // The password the shipped example service file used to carry. Anyone who copied
+  // the file and forgot to edit it would otherwise protect the dashboard (which
+  // edits PII and starts real runs) with a password that is public.
+  if (hasPass && envPass === EXAMPLE_PASSWORD) {
+    return {
+      envUser: '',
+      envPass: '',
+      envConfigured: false,
+      warning: `AIDR_PASS is still the example value "${EXAMPLE_PASSWORD}" - env credentials ignored. Set a real password.`,
+    };
+  }
   if (hasUser && hasPass) {
     return { envUser, envPass, envConfigured: true };
   }
@@ -128,6 +153,14 @@ function validateFilter(value) {
   if (typeof value !== 'string') {
     return { ok: false, error: 'filter must be a string' };
   }
+  // A NUL byte makes child_process.spawn() throw synchronously; any other control
+  // character is never part of a broker name and only muddles the run console.
+  if (CONTROL_CHARS.test(value)) {
+    return { ok: false, error: 'filter contains a control character' };
+  }
+  if (value.length > MAX_FILTER_LENGTH) {
+    return { ok: false, error: `filter is too long (max ${MAX_FILTER_LENGTH} characters)` };
+  }
   const tokens = value.split(',').map(t => t.trim()).filter(Boolean);
   if (tokens.length === 0) {
     return { ok: true, value: undefined };
@@ -148,6 +181,12 @@ function validateFilter(value) {
  */
 function validateRunRequest(body, modeArgsMap) {
   const b = body || {};
+  // A non-string mode is how {"mode":["real"]} slipped past the confirm guard:
+  // hasOwnProperty coerced the array to "real" while the LIVE_MODES Set lookup
+  // (strict equality) did not, so a real run started with no confirm.
+  if (b.mode !== undefined && b.mode !== null && typeof b.mode !== 'string') {
+    return { ok: false, status: 400, error: 'mode must be a string' };
+  }
   const mode = b.mode || 'preview';
 
   if (!Object.prototype.hasOwnProperty.call(modeArgsMap, mode)) {
@@ -170,6 +209,184 @@ function validateRunRequest(body, modeArgsMap) {
   return { ok: true, mode, only: only.value, skip: skip.value };
 }
 
+/**
+ * Validate the optional newUsername sent with a password change.
+ *
+ * HTTP Basic splits the decoded credential on the FIRST ":", so a username
+ * holding one can be saved but never logs in again - the owner is locked out of
+ * their own dashboard until they delete dashboard/.auth.json by hand. Control
+ * characters are rejected for the same reason plus header/log injection.
+ *
+ * @param {*} value
+ * @returns {{ ok: true, value: string|undefined } | { ok: false, error: string }}
+ */
+function validateUsername(value) {
+  if (value === undefined || value === null) return { ok: true, value: undefined };
+  if (typeof value !== 'string') return { ok: false, error: 'username must be a string' };
+  const v = value.trim();
+  if (v === '') return { ok: true, value: undefined };
+  if (v.includes(':')) {
+    return { ok: false, error: 'username cannot contain ":" (it would never be able to log in)' };
+  }
+  if (CONTROL_CHARS.test(v)) return { ok: false, error: 'username contains a control character' };
+  if (v.length > MAX_USERNAME_LENGTH) {
+    return { ok: false, error: `username is too long (max ${MAX_USERNAME_LENGTH} characters)` };
+  }
+  return { ok: true, value: v };
+}
+
+// Worst-first. 'notfound' ranks lowest so one person's "not listed" never hides
+// another person's success; 'error' ranks highest so a failure is never averaged away.
+const STATUS_RANK = { error: 6, manual: 5, pending: 4, other: 3, ok: 2, notfound: 1 };
+
+function lastHistoryStatus(entry) {
+  const h = Array.isArray(entry && entry.history) ? entry.history : [];
+  return String(h[h.length - 1] || (entry && entry.status) || '').toLowerCase();
+}
+
+/**
+ * Collapse every state.optOuts entry that belongs to one broker into a single
+ * display status.
+ *
+ * Single-person runs key state by the bare broker name; multi-person runs key it
+ * "Broker|First Last" (lib/config.js stateKey). Looking up only the bare name
+ * made a multi-person install read "0 opted out" with every broker succeeded.
+ *
+ * @param {object} optOuts      state.optOuts (anything else is treated as empty)
+ * @param {string} brokerName
+ * @returns {{ key: string, label: string, date: string, count: number,
+ *             people: Array<{ person: string|null, key: string, label: string, date: string }> }}
+ */
+function aggregateBrokerStatus(optOuts, brokerName) {
+  const map = optOuts && typeof optOuts === 'object' && !Array.isArray(optOuts) ? optOuts : {};
+  const prefix = `${brokerName}|`;
+  const people = [];
+  for (const k of Object.keys(map)) {
+    if (k !== brokerName && !k.startsWith(prefix)) continue;
+    const entry = map[k];
+    if (!entry || typeof entry !== 'object') continue;
+    const raw = lastHistoryStatus(entry);
+    people.push({
+      person: k === brokerName ? null : k.slice(prefix.length),
+      key: raw ? classifyStatus(raw) : 'other',
+      label: raw || '-',
+      date: String(entry.lastSuccess || entry.lastAttempt || ''),
+    });
+  }
+  if (people.length === 0) return { key: 'none', label: '-', date: '', count: 0, people: [] };
+  const worst = people.reduce((a, b) => {
+    const d = (STATUS_RANK[b.key] || 0) - (STATUS_RANK[a.key] || 0);
+    if (d !== 0) return d > 0 ? b : a;
+    return b.date > a.date ? b : a;
+  });
+  return { key: worst.key, label: worst.label, date: worst.date, count: people.length, people };
+}
+
+// ---- Host header allow-list (DNS rebinding) ---------------------------------
+
+/**
+ * Hostname (no port, lower-case) of a Host header value, or null when it is
+ * empty or not a plain host[:port]. IPv6 literals keep their brackets.
+ * @param {*} hostHeader
+ * @returns {string|null}
+ */
+function hostnameOf(hostHeader) {
+  if (typeof hostHeader !== 'string') return null;
+  const raw = hostHeader.trim();
+  if (!raw || /[\s/\\@?#]/.test(raw)) return null;
+  try {
+    return new URL(`http://${raw}`).hostname.toLowerCase() || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+/**
+ * Is this a loopback name or address? Accepts brackets around IPv6.
+ * @param {string} host
+ * @returns {boolean}
+ */
+function isLoopbackHost(host) {
+  const h = String(host || '').toLowerCase().replace(/^\[|\]$/g, '');
+  // A literal 127.x.y.z only: matching the prefix alone also took 127.evil.example
+  // and 127.0.0.1.nip.io, names an attacker controls (CFG2-3).
+  return h === 'localhost' || h.endsWith('.localhost') || h === '::1' || (net.isIPv4(h) && h.startsWith('127.'));
+}
+
+const WILDCARD_BINDS = new Set(['', '0.0.0.0', '::', '[::]']);
+
+/**
+ * The non-loopback hostnames a request may carry in its Host header: whatever
+ * AIDR_ALLOWED_HOSTS lists (comma separated, ports ignored) plus the concrete
+ * address the server was told to bind. Loopback is always allowed separately.
+ *
+ * A browser only sends a Host the user typed or a rebinding page controls, so
+ * checking it is what stops evil.example (resolving to 127.0.0.1 for a moment)
+ * from driving an unauthenticated dashboard.
+ *
+ * @param {{ env?: object, bindHost?: string }} opts
+ * @returns {Set<string>}
+ */
+function buildAllowedHosts({ env = {}, bindHost = '' } = {}) {
+  const out = new Set();
+  for (const entry of String(env.AIDR_ALLOWED_HOSTS || '').split(',')) {
+    const h = hostnameOf(entry);
+    if (h) out.add(h);
+  }
+  const bind = String(bindHost || '').trim().toLowerCase();
+  if (!WILDCARD_BINDS.has(bind)) {
+    const h = hostnameOf(bind.includes(':') && !bind.startsWith('[') ? `[${bind}]` : bind);
+    if (h) out.add(h);
+  }
+  return out;
+}
+
+/**
+ * @param {*} hostHeader
+ * @param {Set<string>} allowed  from buildAllowedHosts()
+ * @returns {boolean}
+ */
+function isHostAllowed(hostHeader, allowed) {
+  const h = hostnameOf(hostHeader);
+  if (!h) return false;
+  return isLoopbackHost(h) || allowed.has(h);
+}
+
+/**
+ * Decide whether the server may start on `host`.
+ *
+ * Credentials are required on every bind, loopback included (codex round 2 #1):
+ * "loopback only" is not a boundary on a machine with other local accounts, and
+ * the dashboard edits personal data and can submit real opt-outs. The one way to
+ * run without them is the explicit AIDR_DASHBOARD_NO_AUTH=1 (`allowNoAuth`), meant
+ * for tests and local development, and it is honoured on loopback only: a network
+ * bind with no credentials hands every machine on the network the config editor
+ * (names, addresses, SMTP password) and a button that submits real opt-outs.
+ *
+ * @param {{ host: string, authConfigured: boolean, allowNoAuth?: boolean }} opts
+ * @returns {{ ok: true } | { ok: false, code: string, error: string }}
+ */
+function checkBindSafety({ host, authConfigured, allowNoAuth = false }) {
+  if (authConfigured) return { ok: true };
+  if (isLoopbackHost(host)) {
+    if (allowNoAuth) return { ok: true };
+    return {
+      ok: false,
+      code: 'AIDR_NO_CREDENTIALS',
+      error: `refusing to listen on ${host} with no credentials: the dashboard edits personal data and can `
+        + 'submit real opt-outs, and other accounts on this machine can reach a loopback port. '
+        + 'Run `aidr dashboard` (it generates a login), or set AIDR_USER and AIDR_PASS (or AIDR_TOKEN). '
+        + 'For local development only, AIDR_DASHBOARD_NO_AUTH=1 turns authentication off on a loopback bind.',
+    };
+  }
+  return {
+    ok: false,
+    code: 'AIDR_UNSAFE_BIND',
+    error: `refusing to listen on ${host} with no credentials: the dashboard edits personal data and can `
+      + 'submit real opt-outs. Set AIDR_USER and AIDR_PASS (or AIDR_TOKEN), or bind AIDR_HOST=127.0.0.1.',
+  };
+}
+
 module.exports = {
   LIVE_MODES,
   FILTER_MODES,
@@ -179,4 +396,11 @@ module.exports = {
   resolveEnvCreds,
   validateFilter,
   validateRunRequest,
+  validateUsername,
+  aggregateBrokerStatus,
+  hostnameOf,
+  isLoopbackHost,
+  buildAllowedHosts,
+  isHostAllowed,
+  checkBindSafety,
 };

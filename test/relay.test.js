@@ -6,7 +6,7 @@
  *
  * Tested behaviours:
  *  1. getSubmissionEmail - no relay configured -> returns person.email unchanged
- *  2. getSubmissionEmail - relay configured but no apiKey -> returns person.email
+ *  2. getSubmissionEmail - relay configured but no apiKey -> fails closed (see relay-simplelogin.test.js)
  *  3. getSubmissionEmail - relay configured -> calls createImpl, caches alias
  *  4. getSubmissionEmail - second call reuses cached alias (createImpl not called again)
  *  5. getSubmissionEmail - distinct persons get distinct cache slots
@@ -63,19 +63,20 @@ test('no relay configured returns person.email unchanged', async () => {
   assert.equal(state.relayAliases, undefined, 'state must not be mutated when relay is absent');
 });
 
-test('relay configured but missing apiKey falls back to person.email', async () => {
+test('relay configured but missing apiKey fails closed instead of falling back to person.email (NET-3)', async () => {
   const state = makeState();
   let createCalls = 0;
   const createImpl = async () => { createCalls += 1; return 'x@aliases.test'; };
 
-  const out = await getSubmissionEmail({
-    config: { relay: { provider: 'simplelogin' } },
-    person: PERSON_A,
-    state,
-    createImpl,
-  });
-
-  assert.equal(out, 'jane.doe@example.com');
+  await assert.rejects(
+    () => getSubmissionEmail({
+      config: { relay: { provider: 'simplelogin' } },
+      person: PERSON_A,
+      state,
+      createImpl,
+    }),
+    (err) => err.code === 'RELAY_UNAVAILABLE'
+  );
   assert.equal(createCalls, 0, 'createImpl must not be called without an apiKey');
 });
 
@@ -144,7 +145,7 @@ test('createSimpleLoginAlias posts to the documented endpoint with Authenticatio
 
   assert.equal(alias, 'generated.alias@aliases.simplelogin.io');
   assert.equal(fetchCalls.length, 1);
-  assert.equal(fetchCalls[0].url, 'https://app.simplelogin.io/api/alias/custom/new');
+  assert.equal(fetchCalls[0].url, 'https://app.simplelogin.io/api/alias/random/new');
   assert.equal(fetchCalls[0].init.method, 'POST');
   assert.equal(fetchCalls[0].init.headers.Authentication, 'sl-test-key');
   assert.equal(fetchCalls[0].init.headers['Content-Type'], 'application/json');

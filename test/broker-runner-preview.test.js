@@ -90,7 +90,7 @@ function clearAll() {
   recorded.pending.length = 0;
 }
 
-test('preview: logResult called with status "preview" containing field values', async () => {
+test('preview: logResult called with status "preview" listing field names, never values', async () => {
   clearAll();
   configure({ dryRun: true, preview: true, person: { country: 'US' }, capsolver: null });
 
@@ -98,8 +98,9 @@ test('preview: logResult called with status "preview" containing field values', 
 
   const entry = logged.find(l => l.name === BROKER.name && l.status === 'preview');
   assert.ok(entry, 'logResult must be called with status "preview"');
-  assert.match(entry.detail, /Jane/, 'detail should include field value "Jane"');
-  assert.match(entry.detail, /jane@example\.com/, 'detail should include email value');
+  assert.match(entry.detail, /first=filled/, 'detail should name the field and its fill status');
+  assert.match(entry.detail, /email=filled/);
+  assert.ok(!/Jane|jane@example\.com/.test(entry.detail), 'codex #6: values are PII and must not be printed');
 });
 
 test('preview: detail includes target URL', async () => {

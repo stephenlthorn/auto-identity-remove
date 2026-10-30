@@ -144,11 +144,14 @@ test('a single person config still works exactly as before', () => {
   assert.deepEqual(allSearchUrls(brokers).filter(u => u.includes('undefined')), []);
 });
 
-test('config.person still wins over persons[] for the default export', () => {
-  // Preserves the historical default so an existing hybrid config behaves the
-  // same; the per-person loop is what fixes cross-person contamination.
+test('persons[0] wins over person for the default export (same precedence as getPersonsFromConfig)', () => {
+  // This used to assert the opposite (person first). The runtime loop reads
+  // persons[] when both keys exist, so a default list built from `person` could
+  // search for someone the run never processes (DASH-2). See also
+  // brokers-primary-person.test.js.
   const brokers = loadBrokersWithConfig({ person: ALICE, persons: [BOB] });
-  assert.ok(allFieldValues(brokers).includes(ALICE.email));
+  assert.ok(allFieldValues(brokers).includes(BOB.email));
+  assert.ok(!allFieldValues(brokers).includes(ALICE.email));
 });
 
 test('no config.json at all still loads without throwing', () => {

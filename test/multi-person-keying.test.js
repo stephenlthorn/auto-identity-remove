@@ -63,7 +63,12 @@ const configMockFactory = () => ({
   RECHECK_DAYS: 90,
   CONFIRM_RECHECK_DAYS: 14,
   lastOptOutDaysAgo: () => Infinity,
-  shouldSkip: (key) => { recorded.skipCheckedKeys.push(key); return null; },
+  // shouldSkip(brokerName, { person, personCount, personIndex }): record the state
+  // key the lookup resolves to.
+  shouldSkip: (name, o) => {
+    recorded.skipCheckedKeys.push(o && o.person ? require('../lib/config').stateKey(name, o.person, o.personCount) : name);
+    return null;
+  },
   isPendingConfirmation: () => false,
   recordSuccess: (key) => recorded.successKeys.push(key),
   recordPendingConfirmation: () => {},
@@ -103,6 +108,9 @@ function clearRecorded() {
 }
 
 function makeContext() {
+  // Result text appears only after the submit click: the runner classifies text
+  // that is new since the click (BRK-4).
+  let clicked = false;
   return {
     newPage: async () => ({
       goto: async () => {},
@@ -111,10 +119,10 @@ function makeContext() {
           fill: async () => {},
           count: async () => 1,
           isVisible: async () => true,
-          click: async () => {},
+          click: async () => { clicked = true; },
         }),
       }),
-      evaluate: async () => 'You have been removed.',
+      evaluate: async () => (clicked ? 'You have been removed.' : 'Opt out of this site'),
       close: async () => {},
     }),
   };

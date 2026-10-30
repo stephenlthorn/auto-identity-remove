@@ -129,7 +129,8 @@ test('desktopNotify: returns without throwing even when all underlying calls fai
 test('openInBrowser: on linux calls xdg-open via spawn for each URL', () => {
   const { calls, restore } = stubSpawn();
 
-  notify.openInBrowser(['https://a.com', 'https://b.com'], 'linux');
+  // A display is required on Linux (CORE-11); inject one so this passes on a headless CI box too.
+  notify.openInBrowser(['https://a.com', 'https://b.com'], 'linux', { DISPLAY: ':0' });
 
   restore();
 
@@ -142,7 +143,7 @@ test('openInBrowser: on linux calls xdg-open via spawn for each URL', () => {
 
 // ─── openInBrowser: win32 ────────────────────────────────────────────────────
 
-test('openInBrowser: on win32 uses cmd /c start with empty title argument', () => {
+test('openInBrowser: on win32 uses rundll32 FileProtocolHandler with no shell (CLI2-6)', () => {
   const { calls, restore } = stubSpawn();
 
   notify.openInBrowser(['https://example.com'], 'win32');
@@ -150,14 +151,8 @@ test('openInBrowser: on win32 uses cmd /c start with empty title argument', () =
   restore();
 
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].cmd, 'cmd');
-  assert.ok(calls[0].args.includes('/c'), 'should include /c');
-  assert.ok(calls[0].args.includes('start'), 'should include start');
-  // The empty title arg must be present before the URL
-  const urlIdx = calls[0].args.indexOf('https://example.com');
-  const emptyTitleIdx = calls[0].args.indexOf('');
-  assert.ok(emptyTitleIdx !== -1, 'should have empty title argument');
-  assert.ok(emptyTitleIdx < urlIdx, 'empty title should come before the URL');
+  assert.equal(calls[0].cmd, 'rundll32');
+  assert.deepEqual(calls[0].args, ['url.dll,FileProtocolHandler', 'https://example.com']);
 });
 
 // ─── openInBrowser: error swallowing ─────────────────────────────────────────
@@ -166,7 +161,7 @@ test('openInBrowser: swallows spawn errors and does not throw', () => {
   const origSpawn = childProcess.spawn;
   childProcess.spawn = () => { throw new Error('spawn failed'); };
 
-  assert.doesNotThrow(() => notify.openInBrowser(['https://a.com'], 'linux'));
+  assert.doesNotThrow(() => notify.openInBrowser(['https://a.com'], 'linux', { DISPLAY: ':0' }));
   assert.doesNotThrow(() => notify.openInBrowser(['https://a.com'], 'win32'));
   assert.doesNotThrow(() => notify.openInBrowser(['https://a.com'], 'darwin'));
 
@@ -200,4 +195,24 @@ test('setPlatformForTesting: resets to process.platform when set to null', () =>
 
 test('desktopNotify: is exported from lib/notify.js', () => {
   assert.equal(typeof notify.desktopNotify, 'function', 'desktopNotify must be exported');
+});
+
+// ─── pickManualUrlsToOpen ────────────────────────────────────────────────────
+
+test('pickManualUrlsToOpen: dedupes, caps at the limit, and counts the rest', () => {
+  // A real run marks hundreds of generic brokers manual, once per person, and
+  // every one used to open as its own tab.
+  const urls = [];
+  for (let i = 0; i < 30; i++) urls.push(`https://broker${i}.com`, `https://broker${i}.com`);
+  const { open, more } = notify.pickManualUrlsToOpen(urls, 10);
+  assert.equal(open.length, 10);
+  assert.equal(new Set(open).size, 10, 'no URL should open twice');
+  assert.equal(open[0], 'https://broker0.com', 'keeps run order');
+  assert.equal(more, 20, '30 unique URLs minus the 10 opened');
+});
+
+test('pickManualUrlsToOpen: under the limit opens everything, more is 0', () => {
+  const { open, more } = notify.pickManualUrlsToOpen(['https://a.com', 'https://b.com']);
+  assert.deepEqual(open, ['https://a.com', 'https://b.com']);
+  assert.equal(more, 0);
 });

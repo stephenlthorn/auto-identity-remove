@@ -31,6 +31,35 @@ const ROOT = path.join(__dirname, '..');
 const PROBE = path.join(ROOT, 'scripts', 'cross-model-preflight.sh');
 
 /**
+ * The bash to run the scripts with, and a PATH for it holding the stub dir
+ * plus just enough system tools for the scripts themselves.
+ *
+ * On Windows `/usr/bin:/bin` means nothing to Node, so spawning `bash` under
+ * that PATH failed outright (status null) and every probe test failed without
+ * running. There we use Git for Windows' bash, found from git itself rather
+ * than PATH so WSL's System32ash.exe is never picked, and hand it a
+ * Windows-style PATH, which Git Bash converts on startup.
+ */
+function shell() {
+  if (process.platform !== 'win32') {
+    return { bash: 'bash', pathFor: (dir) => `${dir}:/usr/bin:/bin:/usr/sbin:/sbin` };
+  }
+  // git --exec-path is <git root>/mingw64/libexec/git-core
+  const exec = spawnSync('git', ['--exec-path'], { encoding: 'utf8' }).stdout.trim();
+  const gitRoot = path.resolve(exec, '..', '..', '..');
+  const bins = [
+    path.join(gitRoot, 'usr', 'bin'),
+    path.join(gitRoot, 'mingw64', 'bin'),
+    path.dirname(process.execPath),
+  ];
+  return {
+    bash: path.join(gitRoot, 'usr', 'bin', 'bash.exe'),
+    pathFor: (dir) => [dir, ...bins].join(';'),
+  };
+}
+const { bash: BASH, pathFor } = shell();
+
+/**
  * Run the probe with a throwaway PATH containing only `body` as `codex`
  * (plus the real system paths, so the script's own tools still resolve).
  * @param {string|null} body shell source for the stub, or null for no codex
@@ -42,13 +71,13 @@ function runProbe(body, extraEnv = {}) {
       const stub = path.join(dir, 'codex');
       fs.writeFileSync(stub, body, { mode: 0o755 });
     }
-    // A PATH that excludes the real codex: the stub dir plus the standard
-    // system bins. If a real codex lives in /usr/local/bin this would still
-    // find it, so the stub dir goes first and the stubs are total.
-    const r = spawnSync('bash', [PROBE], {
+    // A PATH that excludes the real codex: the stub dir plus the system bins
+    // from pathFor(). The stub dir goes first, so even if a real codex sat in
+    // one of those bins the stub would shadow it.
+    const r = spawnSync(BASH, [PROBE], {
       cwd: ROOT,
       encoding: 'utf8',
-      env: { ...process.env, PATH: `${dir}:/usr/bin:/bin:/usr/sbin:/sbin`, ...extraEnv },
+      env: { ...process.env, PATH: pathFor(dir), ...extraEnv },
       timeout: 60000,
     });
     return { code: r.status, out: (r.stdout || '') + (r.stderr || '') };
@@ -148,12 +177,12 @@ exit 1
 test('the review script exits with the probe status, not 0, when the reviewer is dead', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aidr-review-'));
   try {
-    const r = spawnSync('bash', [path.join(ROOT, 'scripts', 'cross-model-review.sh')], {
+    const r = spawnSync(BASH, [path.join(ROOT, 'scripts', 'cross-model-review.sh')], {
       cwd: ROOT,
       encoding: 'utf8',
       // No codex anywhere on PATH: the probe must fail with 3 and the review
       // script must surface that exact code.
-      env: { ...process.env, PATH: `${dir}:/usr/bin:/bin:/usr/sbin:/sbin` },
+      env: { ...process.env, PATH: pathFor(dir) },
       timeout: 60000,
     });
     const out = (r.stdout || '') + (r.stderr || '');
@@ -231,10 +260,10 @@ case "$1" in
 esac
 exit 1
 `, { mode: 0o755 });
-    const r = spawnSync('bash', [path.join(ROOT, 'scripts', 'cross-model-review.sh'), '--base', 'HEAD~1'], {
+    const r = spawnSync(BASH, [path.join(ROOT, 'scripts', 'cross-model-review.sh'), '--base', 'HEAD~1'], {
       cwd: ROOT,
       encoding: 'utf8',
-      env: { ...process.env, PATH: `${dir}:/usr/bin:/bin:/usr/sbin:/sbin` },
+      env: { ...process.env, PATH: pathFor(dir) },
       timeout: 120000,
     });
     const out = (r.stdout || '') + (r.stderr || '');

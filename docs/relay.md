@@ -23,10 +23,63 @@ email-based opt-outs. Without `config.relay`, behavior is unchanged.
    ```
 
 4. Run the tool normally. On the first run per person it POSTs to
-   `https://app.simplelogin.io/api/alias/custom/new` (with header
-   `Authentication: <apiKey>`) to mint a custom alias, then caches it in
-   `state.json` so no new alias is created on later runs. If the API call fails,
-   the run falls back to your real email so opt-outs are never blocked.
+   `https://app.simplelogin.io/api/alias/random/new` (with header
+   `Authentication: <apiKey>`) to mint a random alias, then caches it in
+   `state.json` so no new alias is created on later runs.
+
+### If the alias cannot be created
+
+The relay **fails closed**. When SimpleLogin is unreachable, the API key is
+wrong, or your alias quota is used up, the tool does **not** quietly fall back
+to your real email: that is exactly the address you asked to keep from brokers.
+Instead it reports the relay as unavailable and skips the opt-outs that would
+carry an email address for that person (the run prints why). Fix the key or
+quota and run again.
+
+If you would rather send the real address than skip those brokers, opt in
+explicitly:
+
+```json
+"relay": {
+  "provider": "simplelogin",
+  "apiKey": "YOUR_SIMPLELOGIN_API_KEY",
+  "failOpen": true
+}
+```
+
+With `failOpen` set to `true` (the JSON boolean, not a string) a failed alias
+creation falls back to your real email and prints a loud warning.
+
+### The sender address must not be yours
+
+The alias replaces your address in form fields, in the email body and in
+`Reply-To`. It cannot replace the address the email is actually sent **from**:
+the From header and the SMTP envelope come from `email.smtp.from` (or, when that
+is blank, from the login `email.smtp.user`). If either of those is one of your
+real addresses, every email broker still receives it, which is exactly what the
+relay was set up to prevent.
+
+So `email.smtp.from` must be a dedicated sending address (a mailbox or alias
+that is not one of the addresses in `config.person.email`). With a relay set and
+a real address as the sender, the run refuses the email opt-outs (one error per
+broker) unless `relay.failOpen` is `true`, in which case it sends with a warning.
+`aidr config check` and `aidr doctor` name the problem before a run does, without
+printing the address.
+
+### Dry runs and previews
+
+`--dry-run` and `--preview` never create an alias (they do not save state, so
+every dry run would mint a new one). They show the cached alias if one exists,
+otherwise a placeholder (`relay-alias-would-be-created@example.invalid`) that is
+only ever printed.
+
+### Confirmation emails
+
+`--confirm-emails` maps each saved confirmation message to the person it was
+sent to by reading the `To:` / `Delivered-To:` headers and matching either
+`person.email` or that person's cached alias. With more than one person
+configured, a message that matches nobody (or several people) is left alone
+rather than guessed at.
 
 ## Apple Hide My Email (manual fallback)
 

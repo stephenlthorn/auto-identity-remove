@@ -73,14 +73,27 @@ test('resolveHeadless auto-detects headless for a linux box with no DISPLAY', ()
 
 test('every chromium launch site in watcher.js goes through lib/browser', () => {
   const watcher = fs.readFileSync(path.join(__dirname, '..', 'watcher.js'), 'utf8');
+
+  // R7: the main run no longer launches a context itself. createPersonContexts hands
+  // out one context per person, each on its own profile directory, and builds the
+  // launch options per launch. --confirm-emails no longer launches one either: every
+  // link gets a throwaway profile of its own from createThrowawayContexts (BRK2-11).
+  // What is left in watcher.js are the two one-shot modes that render local HTML
+  // (complaint PDFs, report rendering), which launch on the utility profile, a
+  // directory that belongs to no person.
   const launches = watcher.match(/launchPersistentContext\(/g) || [];
-  assert.ok(launches.length >= 4, `expected at least 4 launch sites, found ${launches.length}`);
+  assert.equal(launches.length, 2, `expected 2 direct launch sites, found ${launches.length}`);
+  assert.equal((watcher.match(/createPersonContexts\(/g) || []).length, 1, 'the main run goes through createPersonContexts');
+  assert.equal((watcher.match(/createThrowawayContexts\(/g) || []).length, 1, '--confirm-emails goes through createThrowawayContexts');
 
   const optionCalls = watcher.match(/buildLaunchOptions\(/g) || [];
   assert.equal(
     optionCalls.length,
-    launches.length,
-    `all ${launches.length} launchPersistentContext calls must build their options via buildLaunchOptions(); `
+    launches.length + 2,
+    `every direct launch, the per-person launchOptions and the per-click launchOptions must build their options via buildLaunchOptions(); `
     + `found ${optionCalls.length}. A launch site with hand-rolled options silently loses the container flags.`,
   );
+
+  const utility = watcher.match(/launchPersistentContext\(utilityProfileDir\(/g) || [];
+  assert.equal(utility.length, launches.length, 'a one-shot launch must use the utility profile, never a person\'s directory');
 });

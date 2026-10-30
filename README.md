@@ -23,14 +23,15 @@ Beyond the monthly run, it can also:
 - **Add teeth** - send CCPA/GDPR right-to-know requests (`aidr know`) and auto-generate regulator complaints when a broker blows the legal deadline (`aidr complaints`)
 - **Protect proactively** - check Have I Been Pwned (`aidr breach`) and walk a credit/identity-freeze checklist (`aidr freeze`)
 - **Stay private** - submit from a masked relay email (SimpleLogin), encrypt `config.json` at rest (AES-256-GCM, opt-in via `AIDR_PASSPHRASE`), and detect success/confirmation text in 6 languages
-- **Run from a browser** - an optional local web dashboard with a first-run config wizard, live run console, and status board (`aidr dashboard`)
+- **Run from a browser** - an optional local web dashboard with a first-run config wizard, live run console, status board and a **History** tab of past runs (`aidr dashboard`)
+- **Stay in control of the job** - solve the CAPTCHAs a solver cannot (`aidr captchas`), check and remove the monthly job (`aidr schedule`), resume a killed run, check your config (`aidr config check`) and purge old PII files (`aidr purge`)
 - **Keep coverage fresh** - pull the broker list from the official California (SB 362) and Vermont registries (`aidr update-brokers`), and keep brokers you *want* to stay listed on via an allowlist
 
 ---
 
 ## Requirements
 
-- Node.js 18+
+- Node.js 20+
 - macOS, Linux, or Windows (scheduling adapts automatically)
 - [Playwright](https://playwright.dev) browsers installed
 
@@ -74,6 +75,7 @@ maps to an existing entrypoint:
 | `aidr setup` | Interactive first-run setup (creates `config.json`, schedules the monthly job) |
 | `aidr preview` | Dry-run: fills forms but submits nothing |
 | `aidr run` | Runs the opt-out pass for real |
+| `aidr captchas` | Re-runs only the brokers that ended on a CAPTCHA last time, in a visible browser, so you can solve them |
 | `aidr verify` | Re-searches brokers and reports whether you still appear |
 | `aidr score` | Prints your 0-100 exposure score and its month-over-month trend |
 | `aidr report` | Generates the monthly PDF + emails the summary |
@@ -87,11 +89,19 @@ maps to an existing entrypoint:
 | `aidr update-brokers` | Refreshes the broker list from the CA + Vermont registries |
 | `aidr list` | Lists configured brokers and their last-known status |
 | `aidr doctor` | Self-diagnoses your environment and configuration |
-| `aidr dashboard` | Starts the local web dashboard and prints its URL + a one-time login |
+| `aidr config check` | Checks `config.json`, the passphrase source and where state lives; exits 1 on a problem |
+| `aidr schedule status` | Shows whether the monthly job is installed and how its last run ended (`--json` for scripts) |
+| `aidr schedule install` | Installs (or reinstalls) the monthly job |
+| `aidr schedule uninstall` | Removes the monthly job |
+| `aidr purge` | Deletes old logs, audit reports and screenshots, which hold your details (never complaints or the latest run) |
+| `aidr dashboard` | Starts the local web dashboard and prints its URL + a one-time login. A login is always required, loopback included |
 
 Pass extra flags straight through, e.g. `aidr run --only Spokeo` or
 `aidr preview --skip BeenVerified`. Run `aidr --help` for the full list.
-Every subcommand maps to the equivalent `node watcher.js --<flag>` invocation.
+Every subcommand maps to the equivalent `node watcher.js --<flag>` invocation
+(`aidr schedule status` is `--schedule-status`, `aidr config check` is
+`--config-check`). `aidr schedule` with no verb shows the status; an unknown
+verb (`aidr schedule remove`) stops with the list of real ones before anything runs.
 
 > A native desktop wrapper (Electron/Tauri) is a planned follow-up and is **not**
 > included here - this release is clean CLI packaging only.
@@ -133,6 +143,56 @@ Some opt-out forms have reCAPTCHA. Without CapSolver, those sites go to your man
 > manual and opened in your browser for completion. Pass `--no-capsolver` to skip
 > them entirely rather than opening the browser.
 
+### Solving CAPTCHAs yourself
+
+A CAPTCHA the solver cannot do (no key, or CapSolver failed) used to end the
+broker as `captcha_failed` at once, before anyone could look at the window. With
+a visible browser you can now solve it yourself, and the run carries on:
+
+- The window comes to the front, the terminal bell rings, a desktop notification
+  names the broker, and the run waits (3 minutes by default) until the widget
+  reports a token or the challenge goes away. The form is filled and submitted
+  for you afterwards. If the time runs out the broker is `captcha_failed`, the
+  run moves on, and nothing is submitted into an unsolved CAPTCHA. This applies
+  to the form brokers and to the 500+ generic brokers alike.
+- A usable CapSolver key is still tried first; you are asked only after it fails.
+- It happens when the browser is visible and either you are at an interactive
+  terminal (`captcha.manual: "auto"`, the default) or you asked for it:
+
+```json
+"captcha": {
+  "manual": "auto",
+  "manualTimeoutSec": 180
+}
+```
+
+| Setting | Meaning |
+|---|---|
+| `captcha.manual` | `"auto"` (default): wait for you when a window is visible and a terminal is attached. `true`: wait whenever a window is visible (a desktop notification still reaches you without a terminal). `false`: never wait. A headless run never waits, whatever this says. Anything else is read as `"auto"`, and `aidr config check` warns about it. |
+| `captcha.manualTimeoutSec` | Seconds you get per CAPTCHA. Default 180, at most 3600. |
+| `--solve-captchas` | Asks for manual solving on one run, whatever `captcha.manual` says (still needs a visible browser). |
+
+**`aidr captchas`** is the second chance. It reads the most recent run (its log,
+or its journal if that run crashed), finds every broker that ended on a CAPTCHA
+(`captcha_failed`, or a manual entry that names one), and re-runs only those, in a
+visible browser with manual solving on. With nothing to retry it says so and
+opens no browser; with no display it says that it needs one. Run it on a desktop
+machine after a headless or Docker run: the run's last lines name it. It takes
+`--dry-run` and `--solve-captchas`, but not `--only`, `--skip`, `--retry-failed`,
+`--resume` or `--pollute`: it picks the brokers itself, and a second selector
+would silently fight the first. A run that ends on a CAPTCHA opens the broker's
+opt-out page in your browser (up to 10 sites) so you can finish it by hand too.
+CAPTCHAs that show no widget until the page is judged to be a bot (invisible
+reCAPTCHA v3, bot-manager challenges) cannot be waited on; those are reported as
+skipped and `aidr captchas` will not help with them. A run that waits for you holds the
+run lock the whole time. A running watcher refreshes its lock every few minutes, so
+a long manual session is never taken for an abandoned one.
+
+**Upgrading?** `captcha.manual` defaults to `"auto"`: an interactive `aidr run` with a
+visible browser now waits up to 3 minutes per CAPTCHA that CapSolver cannot do, where
+earlier versions moved straight on. Scheduled runs (no terminal) are unchanged. Set
+`captcha.manual` to `false` to keep the old behaviour.
+
 ---
 
 ## Running with Docker
@@ -141,59 +201,185 @@ The `Dockerfile` uses the official Playwright image, so Chromium and all system
 dependencies are pre-installed. No Mac required. Builds for `linux/amd64` and
 `linux/arm64`; the amd64 image is about 940 MB.
 
-```bash
-# Build the image (once)
-docker build -t auto-identity-remove .
+### One directory holds everything
 
+Keep everything the container must remember in a single host directory,
+`aidr-home/`, mount it at `/home/aidr`, and set `AIDR_HOME=/home/aidr` (the image
+already does). One mount is the whole story. It holds your config, `state.json`
+and its `.bak`, `.lock` and resume `.checkpoint`, the run logs, audit reports,
+snapshots and complaints (`logs/`), the confirmation inbox (`inbox/`), and the
+SERP, exposure, breach and broker-registry history (`data/`). The app creates
+those subdirectories itself. Back it up and treat it like `config.json`: it is
+full of PII.
+
+```bash
+# Once, from the project directory
+mkdir -p aidr-home
+cp config.json aidr-home/config.json        # made on a laptop with `node setup.js`
+chmod 700 aidr-home && chmod 600 aidr-home/config.json
+sudo chown -R 1001:1001 aidr-home           # the container user is uid 1001
+
+docker build -t auto-identity-remove .
+```
+
+```bash
 # Dry-run - navigates and checks reachability, submits nothing
 docker run --rm --init \
-  -v "$(pwd)/config.json:/app/config.json" \
-  -v "$(pwd)/state.json:/app/state.json" \
-  -v "$(pwd)/logs:/app/logs" \
+  -v "$(pwd)/aidr-home:/home/aidr" \
+  -e HOME=/tmp \
   -e TZ="$(date +%Z)" \
   auto-identity-remove node watcher.js --dry-run
 
-# Full run
-docker run --rm --init \
-  -v "$(pwd)/config.json:/app/config.json" \
-  -v "$(pwd)/state.json:/app/state.json" \
-  -v "$(pwd)/logs:/app/logs" \
-  -e TZ="$(date +%Z)" \
-  auto-identity-remove
+# Full run: the same command without the trailing `node watcher.js --dry-run`
 ```
 
-Or with compose: `docker compose run --rm watcher node watcher.js --dry-run`.
+Or with compose, which already carries the mount and the variable:
+`docker compose run --rm watcher node watcher.js --dry-run`.
 
-**Create `state.json` before the first run** - `touch state.json` is enough. If
-the path does not exist, Docker creates a *directory* there and the run fails on
-a confusing `EISDIR`.
+**`AIDR_HOME` and its overrides.** `AIDR_HOME` is the default base for every
+runtime file. Each of these still wins over it for one file, if you ever need it
+somewhere else:
+
+| Variable | Default under `AIDR_HOME` |
+|---|---|
+| `AIDR_CONFIG_PATH` | `config.json` |
+| `AIDR_CONFIG_ENC_PATH` | `<config path>.enc` |
+| `AIDR_STATE_PATH` | `state.json` (the `.bak`, `.lock` and `.checkpoint` sit beside it) |
+| `AIDR_LOG_DIR` | `logs/` (snapshots, reports and complaints sit under it) |
+| `AIDR_DATA_DIR` | `data/` (the history and registry caches) |
+
+With none of them set, nothing moves: everything stays in the project directory
+exactly as before.
+
+**Upgrading from the older recipe.** It mounted `aidr-home/logs` at `/app/logs`
+and set `AIDR_CONFIG_PATH=/home/aidr/config.json`,
+`AIDR_CONFIG_ENC_PATH=/home/aidr/config.json.enc` and
+`AIDR_STATE_PATH=/home/aidr/state.json` one by one. That keeps working, and
+`AIDR_HOME=/home/aidr` is the same thing for all three. The `/app/logs` mount is
+no longer needed: logs now default to `/home/aidr/logs`, which is the same host
+directory (`aidr-home/logs`), so nothing has to be moved.
+
+**Upgrading from the single-file recipe.** The very first Docker recipe bind-mounted
+two single files, `config.json` and `state.json`, at `/app/config.json` and
+`/app/state.json`. The image now sets `AIDR_HOME=/home/aidr`, so those mounts are ignored: the run reads
+`/home/aidr/config.json`, finds nothing, and used to exit 1 with only "Run node setup.js
+first". It now says where it found your files and where they must go, for example:
+
+```
+config: found /app/config.json
+        expected /home/aidr/config.json
+state:  found /app/state.json
+        expected /home/aidr/state.json
+```
+
+Move both into the one directory and mount that instead (the commands above), and keep
+the history: `cp state.json aidr-home/state.json`. If you copy only the config, the first
+run starts with an empty `state.json` and re-submits every broker; `aidr config check`
+and `aidr doctor` warn about that while a state file is still left at the old location.
+Setting only `AIDR_CONFIG_PATH` has the same effect on the state, and gets the same warning.
+
+**Why a directory, and why not `/app/data`.**
+- `rename()` onto a Docker single-file bind mount fails with `EBUSY`. A mounted
+  `state.json` forces a non-atomic fallback, and the lock, `.bak` and
+  `.checkpoint` that sit beside it would live in the container's throwaway
+  layer: `--resume` could never find a checkpoint and two containers could not
+  see each other's lock. A mounted directory has none of those problems.
+- `/app/data` holds the broker datasets that ship with the image
+  (`markup-parsed.json`, `badbool-extra.json`, `dead-urls.json`). Mounting
+  anything over it hides them and the generic runner loses its broker list. The
+  datasets you WRITE (history, caches) go to `aidr-home/data` instead; the
+  shipped ones keep loading from the image whatever `AIDR_HOME` says.
+
+**The container runs as uid 1001** (`pwuser`), and the files above are mode
+`0600` and owned by you, so without help the container gets `EACCES` on
+`config.json` and on every state write. Pick one:
+
+- `sudo chown -R 1001:1001 aidr-home` (shown above), or
+- run as the directory's owner instead: add `--user "$(id -u):$(id -g)"` to
+  `docker run`, or `AIDR_UID=$(id -u) AIDR_GID=$(id -g) docker compose run ...`.
+  Keep `-e HOME=/tmp`; an arbitrary uid has no writable home directory.
 
 **`--init` matters.** Without it node is PID 1, `docker stop` cannot reap the
-Chromium children, and the state lock is left behind, wedging the next run.
+Chromium children, and the state lock is left behind, wedging the next run. If a
+run is killed anyway, `aidr-home/state.json.lock` can be left behind. A lock that
+nobody has refreshed for 6 hours is treated as stale and taken over even if its
+process id looks alive (a pid recycled after a reboot would otherwise hold it
+forever); a running watcher refreshes its own every 5 minutes, so a full run that
+takes longer than that is safe. A new container has a new hostname, so it cannot check
+the dead one's process id; it takes over a lock whose holder has stopped refreshing
+for 15 minutes, instead of waiting the 6 hours. `AIDR_LOCK_MAX_AGE_HOURS` still sets
+the 6.
 
 **`TZ` matters.** Containers are UTC. Without it a "1st of the month, 9am"
 schedule and every report timestamp land in the wrong hour.
-
-**Prefer mounting a directory over individual files.** `rename()` onto a Docker
-single-file bind mount fails with `EBUSY`, which is how every state write in
-Docker used to be silently discarded. There is now a fallback that keeps state
-working with file mounts, but it gives up crash-atomicity. To keep the
-guarantee, mount a directory and point `AIDR_STATE_PATH` inside it:
-
-```bash
-docker run --rm --init \
-  -v "$(pwd):/app/data" \
-  -e AIDR_STATE_PATH=/app/data/state.json \
-  auto-identity-remove
-```
 
 **Low-RAM hosts** (NAS, Raspberry Pi, small VPS): add `-e AIDR_LOW_MEMORY=1`. A
 full 40-broker run peaks at about 250 MB either way; the flag trades some render
 fidelity for less background work on slow cores.
 
+#### What survives a `--rm` container, and what does not
+
+| Path in the container | Persists? | Notes |
+|---|---|---|
+| `/home/aidr/config.json` or `config.json.enc` | yes | the mounted directory |
+| `/home/aidr/state.json`, `.bak`, `.lock`, `.checkpoint`, `confirm-processed.json` | yes | the mounted directory |
+| `/home/aidr/logs/` (run logs, audit reports, snapshots, complaints, reports) | yes | the mounted directory |
+| `/home/aidr/inbox/confirms/` (confirmation `.eml` files for `--confirm-emails`) | yes | the mounted directory |
+| `/home/aidr/data/serp-history.json`, `exposure-history.json`, `breach-result.json`, `feeds-brokers.json` | yes | the mounted directory |
+| `/app/data/*.json` (the shipped broker datasets) | n/a | read-only, part of the image |
+| the Chromium profile (`~/.config/auto-identity-remove`) | no | set `profileDir` in the config to a path under `/home/aidr` if you want it kept |
+
+`--serp-watch` has history to diff against, the exposure score has a trend, and
+`--update-brokers` has a lasting effect, because their files now live in the
+mounted directory. Drop confirmation `.eml` files in `aidr-home/inbox/confirms`
+and `--confirm-emails` reads them from there by default; you can also pass any
+directory inside the mount, for example `--confirm-emails /home/aidr/inbox/confirms`.
+
+A relative `email.smtp.ca` path resolves against `/app`; use an absolute path
+under `/home/aidr` for a certificate you keep in the mounted directory.
+
 > **Synology / NAS users:** see [docs/SYNOLOGY.md](docs/SYNOLOGY.md) for a full
 > DSM Container Manager walkthrough, measured memory numbers, DSM Task Scheduler
 > setup, and the three defects that used to make the container unusable.
+
+### Encrypted config and unattended runs
+
+`node watcher.js --encrypt-config` replaces `config.json` with `config.json.enc`
+(AES-256-GCM). Every later run needs the passphrase. For a one-off, set
+`AIDR_PASSPHRASE` in the environment. A scheduled job has no terminal and never
+sets it, so give it a file instead:
+
+```bash
+printf '%s\n' 'your passphrase' > aidr-home/aidr.passphrase
+chmod 600 aidr-home/aidr.passphrase && sudo chown 1001:1001 aidr-home/aidr.passphrase
+# then add to the environment of the run (compose: uncomment the line):
+#   AIDR_PASSPHRASE_FILE=/home/aidr/aidr.passphrase
+```
+
+`AIDR_PASSPHRASE_FILE` points at a `0600` file whose first line is the
+passphrase; it is read only when `AIDR_PASSPHRASE` is unset. Be clear about what
+it buys you: a passphrase file next to the encrypted config protects a stolen
+copy of `config.json.enc` (a backup, a cloud sync), not someone who can read the
+whole directory. Keep the two in directories with different access if that
+matters to you. Both `*.passphrase` and `aidr-home/` are gitignored and
+dockerignored.
+
+To encrypt inside Docker:
+
+```bash
+AIDR_PASSPHRASE='your passphrase' docker compose run --rm -e AIDR_PASSPHRASE \
+  watcher node watcher.js --encrypt-config
+```
+
+`--encrypt-config` removes `config.json` and then the plaintext copies that sit beside it:
+the dashboard's `config.json.bak` and `config.json.unreadable-*.bak`, and the temp files
+of an interrupted write. **If `config.json` cannot be deleted** (it is a single-file bind
+mount, for example), it is left exactly as it is and the command says so: check that
+`config.json.enc` is really on the host, then delete `config.json` yourself. It is never
+emptied, because the encrypted copy you just read back may be sitting in the container's
+throwaway layer. `aidr config check` and `aidr doctor` warn about any plaintext copy that
+remains next to an encrypted config. Re-running `node setup.js` on an encrypted install
+re-encrypts in place; the plaintext never touches the disk.
 
 ### Webhook notifications (any OS)
 
@@ -208,9 +394,13 @@ Slack incoming-webhook, or Discord webhook URL:
 }
 ```
 
-The tool POSTs `{"text": "<summary>"}` after every run. Works on macOS, Linux,
-and Windows - the webhook fires in addition to (not instead of) any platform
-notification that is available.
+The tool POSTs `{"text": "<summary>"}` at the end of every real run, and again if the
+run crashes (`❌ Privacy Watcher crashed: ...`). A run in which every broker ended in
+an error says so (`❌ Privacy Watcher FAILED ...`) and exits `1`. A dry run or a
+preview never sends it. The POST gives up after 10 seconds, so a webhook host that
+does not answer cannot hold up the end of a run. Works on macOS, Linux, and Windows -
+the webhook fires in addition to (not instead of) any platform notification that is
+available.
 
 ---
 
@@ -228,8 +418,20 @@ auto-identity-remove/
 │
 ├── config.json         ← YOUR personal info (gitignored, created by setup.js)
 ├── state.json          ← Opt-out history / skip logic (gitignored)
-└── logs/               ← Per-run JSON logs (gitignored)
+├── last-run.json       ← Run heartbeat: start, end, outcome, counts (gitignored)
+└── logs/               ← Per-run JSON logs and .jsonl journals, audit reports,
+                          snapshots/, reports/, complaints/ (gitignored)
 ```
+
+**Where these live.** Set `AIDR_HOME` to put every runtime file (config, state and its
+`.bak` / `.lock` / `.checkpoint`, `last-run.json`, `logs/`, `data/`, `inbox/`) in one
+directory instead of the project directory, on any install, not only Docker; the
+variables in the [Docker section](#one-directory-holds-everything) (`AIDR_CONFIG_PATH`,
+`AIDR_STATE_PATH`, `AIDR_LOG_DIR`, `AIDR_DATA_DIR`, ...) still win over it for one file
+each. `aidr doctor` prints every resolved path and what decided it. `run.sh`, the
+dashboard and the scheduled job all follow the same variables (the installer carries
+them into the job). With none set, nothing moves. With `AIDR_HOME` set, the default inbox
+for `node watcher.js --confirm-emails` is `<AIDR_HOME>/inbox/confirms`.
 
 ---
 
@@ -258,6 +460,18 @@ On each run you'll see:
 - `❌ Error` - network/timeout issue, will retry next run
 - `💀 Dead (stale URL)` - broker URL is gone (DNS/404); not counted as an error
 
+Every entry is stamped with a short **fingerprint of the person it was written for**
+(a hash of the normalised name, ZIP and email; the phone number is not part of it, so
+adding a number or writing it `+1 512...` does not re-run anything). If you correct a ZIP
+or an email, the old entries no longer match and count as never run, so those
+brokers are submitted again at the next run instead of waiting out 90 days; two people
+with the same name no longer share an entry's stamp. Entries written before this
+(which have no stamp) are trusted, so nothing re-runs just because you upgraded.
+`aidr config check` shows how many entries belong to a previous identity, and the
+dashboard does not count them as done. If `state.json` cannot be read (a file left
+root-owned by a `sudo` run, say), a run refuses to save over it rather than replacing
+your whole history; `aidr config check` reports it and tells you how to fix the owner.
+
 > **Submitted ≠ confirmed deleted.** Use `node watcher.js --verify` for spot-check verification. See [STATUS.md](STATUS.md) for a per-broker confidence table.
 
 ## How confident should I be?
@@ -266,7 +480,7 @@ This tool covers 500+ data brokers in two tiers:
 
 | Tier | Count | Confidence |
 |---|---|---|
-| **Explicit brokers** ([STATUS.md](STATUS.md)) | 52 | Hand-mapped with specific selectors. **None are currently marked `verified`** - the selectors compile and were correct when written, but none has been re-tested against the live site recently, so any of them may have drifted. |
+| **Explicit brokers** ([STATUS.md](STATUS.md)) | 51 | Hand-mapped with specific selectors. **None are currently marked `verified`** - the selectors compile and were correct when written, but none has been re-tested against the live site recently, so any of them may have drifted. |
 | **Generic runner** | ~490 | Best-effort heuristic - tries 4 strategies (Do Not Sell click, OneTrust/TrustArc, generic form, DSAR link). Many succeed; some fail silently. |
 
 Be skeptical of the counts this tool prints. Broker sites change their DOM
@@ -303,19 +517,18 @@ If you want to know exactly which brokers are hand-verified vs heuristic, see [S
 | CheckPeople | Direct opt-out form |
 | ThatsThem | Direct opt-out form |
 | USPhonebook | Direct opt-out form |
-| PublicDataUSA | Direct opt-out form |
 | SmartBackgroundChecks | Direct opt-out form |
 | SearchPeopleFree | Direct opt-out form |
 | PeopleSearchNow | Direct opt-out form |
 | InfoTracer | Direct opt-out form |
 | SocialCatfish | Direct opt-out form |
 | NationalPublicData | Direct opt-out form |
-| ClustrMaps | Direct opt-out form |
 | PrivateRecords | Direct opt-out form |
 | **Acxiom** | Direct form (feeds dozens of downstream brokers) |
 | **LexisNexis** | Direct form (legal/financial data) |
 | **ZoomInfo** | Direct form (B2B professional data) |
 | **Clearbit** | Direct form (B2B enrichment data) |
+| Andrews Wharton | Manual (Stirista opt-out portal) |
 | Pipl | Email opt-out via Mail.app |
 
 ### Phone numbers (caller ID and reverse phone lookup)
@@ -403,25 +616,108 @@ Or to run in the background and log output:
 ./run.sh >> logs/manual-run.log 2>&1 &
 ```
 
+### Flags are checked, and filters reach every broker
+
+`node watcher.js --help` lists every flag. The command line is checked before
+anything runs: an unknown flag, a flag missing its value, a stray word, or two
+modes together (`--list --score`) is an error. Nothing is submitted, the closest
+flag is suggested, and the exit status is 2. (A misspelt `--dryrun` used to be
+ignored, which turned a preview into a real run.)
+
+`--only A,B`, `--skip A,B` and `--retry-failed` apply to the whole run: the
+form brokers, the **email** brokers and the 500+ **generic** brokers. Names are
+case-insensitive. Together they **narrow** each other: a broker runs when it is
+named by `--only`, is in the `--retry-failed` set, and is not named by `--skip`
+(`--skip` always wins, so `--retry-failed --skip A` leaves A out). `--only` and
+`--skip` also apply to `--pollute`, `--know`, `--verify`, `--serp-scan` and
+`--serp-watch`; `--retry-failed` reads a run log that those modes do not use, so it
+is refused with them. `--retry-failed` re-runs what the last run log recorded as an
+error, a CAPTCHA failure, awaiting an email confirmation, or *unconfirmed* (the
+form was sent but the result page could not be read). A filtered or resumed run
+marks its log as partial, so the next full run is not compared against it.
+
+`--dry-run` and `--preview` promise that nothing changes, so they are refused (exit
+`2`) with the modes that never read them and would otherwise run for real:
+`--install-scheduler`, `--uninstall-scheduler`, `--encrypt-config`,
+`--decrypt-config`, `--allow`, `--unallow`, `--freeze-done`, `--freeze-clear` and
+`--update-brokers`. `--allow` and `--unallow` are modes like the rest: combining
+either with another mode (`--list --allow X`) is an error, not a silent no-op.
+
+A relative `AIDR_*` path (`AIDR_HOME`, `AIDR_STATE_PATH`, ...) means relative to the
+directory you ran the command from, whether you start the tool with `run.sh` or with
+`aidr`, so a scheduled run and a manual one read the same files.
+
+**`--resume` carries on where a killed run stopped, in the generic pass too.** The
+run records a checkpoint as it goes: the explicit broker in progress, and, in the
+~490-broker generic pass that is most of the wall-clock, the person and the row.
+`--resume` skips every person whose explicit pass is finished, continues a
+person's generic pass at the recorded row (and skips the generic passes of people
+already done), and clears the checkpoint when the run completes. An old
+checkpoint (a bare broker name) still works. If the checkpointed broker is no
+longer in the list, the pass starts over rather than guess. The checkpoint lives
+beside `state.json`. A filtered run (`--only`, `--skip`, `--retry-failed`,
+`--captchas`) never writes or clears it, so a killed full run can still be resumed
+after one. A person the masked-email relay could not serve is never counted as
+finished: `--resume` runs their passes even though the checkpoint is further along.
+
+### The run journal and the heartbeat
+
+Every result is also appended, as it happens, to `logs/run-<timestamp>.jsonl` (mode
+`0600`) next to the end-of-run `run-<timestamp>.json` summary, so a crash, an out-of-memory
+kill or `docker stop` leaves a log instead of a hole. `--retry-failed` and `aidr
+captchas` read the journal when the newest run never wrote its summary (and say so:
+brokers a crashed run never reached are not in it, which is what `--resume` is for),
+and the diff against the previous run never uses a crashed run as its baseline. A
+dry run writes no journal.
+
+Each real opt-out run also writes `last-run.json` beside `state.json`: when it
+started, when it ended, `ok` / `partial` / `failed` and the counts, numbers only,
+never a name or a broker. A filtered run (`--only`, `--skip`, `--retry-failed`,
+`--captchas`) is marked `partial: true` and carries the last full run's record forward
+beside its own, so it can never hide a monthly run that failed: `aidr schedule status`
+and `aidr doctor` report the last **full** run, with the newer filtered one on a line of
+its own. A start with no end reads as `running` while it is younger
+than the lock's maximum age (`AIDR_LOCK_MAX_AGE_HOURS`, default 6) and as `crashed`
+after. `aidr schedule status` and `aidr doctor` read it. A dry run, `--verify` and the
+SERP modes do not write it.
+
+Exit status: `0` finished; `1` could not start (no config, an unedited
+`config.example.json`, a malformed `browser` section, another run holds the lock, a
+state directory the lock cannot be created in) or finished incomplete (a person
+skipped because the masked-email relay was down) or **failed** (every broker ended in
+an error, so nothing was submitted; some errors beside some progress still exit `0`,
+since an unreachable site is normal); `2` a
+bad command line (including a modifier without its mode, such as `--yes` outside
+`--purge`), or a check that could not reach a verdict (`--breach-check`,
+`--serp-scan`, `--serp-watch` with every search engine unavailable); `130`/`143`
+interrupted by Ctrl-C or `docker stop`, after the browser is closed and state is
+saved. The read-only commands answer for scripts: `aidr schedule status` exits `0`
+for an installed, active job whose last full run did not fail, `1` when none is
+installed, `2` when one exists but will not fire and `3` when it is installed and
+active but its last full run failed or crashed; `aidr schedule install` exits `1`
+and says `NOT installed` when the OS scheduler refused (no cron in the container, a
+crontab write that failed); `aidr config check` exits `1` when it finds a problem that would stop
+a run (warnings alone exit `0`); `aidr purge` exits `2` when it was told nothing
+to confirm with (no terminal and no `--yes`).
+
 ### Verifying removals (`--verify`)
 
-Run a read-only spot-check to see whether previous opt-outs are still in effect:
+Re-search the brokers to see whether previous opt-outs are still in effect:
 
 ```bash
 node watcher.js --verify
 ```
 
-This opens a browser, searches each broker where you have a recorded successful opt-out, and reports what it finds. No forms are submitted, nothing is written to `state.json`.
+This opens a browser and, for each broker where a submission was recorded at least 7 days ago, searches for your listing. No forms are submitted. It **does** write to `state.json`: each checked entry gets `verifiedDeletedAt` (not found) or `verifiedStillListedAt` (found) plus a short `verifyHistory`, which is what `aidr report`, `aidr score` and `aidr complaints` read. It writes no report file; the result is printed to the console only.
 
-Output is grouped into three sections:
+The console shows a count for each outcome, then lists every broker that is still listed:
 
-| Section | Meaning |
+| Outcome | Meaning |
 |---------|---------|
-| `VERIFIED CLEAR` | Your name was not found in the broker's search today |
-| `STILL LISTED` | A listing was found - the opt-out may have failed, or your data was re-added |
-| `UNVERIFIABLE` | The broker uses a direct-form, email, or manual method - no automated search signal exists to check |
-
-A dated JSON report is saved to `logs/verify-YYYY-MM-DD.json`.
+| `verified_clear` | Your name was not found in the broker's search today |
+| `still_listed` | A listing was found - the opt-out may have failed, or your data was re-added |
+| `unverifiable` | The broker uses a direct-form, email, or manual method (no automated search signal exists), or its search page could not be read |
+| `skipped` | Nothing to check yet: no recorded submission, submitted fewer than 7 days ago, already verified since the last submission, or allowlisted |
 
 **Important caveats:**
 
@@ -495,7 +791,37 @@ The script is **idempotent** - running it twice produces no change. You can add 
 
 ---
 
+## The monthly job: `aidr schedule`
+
+```bash
+aidr schedule status          # is it installed, active, and how did the last run end?
+aidr schedule status --json   # the same, for a script
+aidr schedule install         # install or reinstall it (what `node setup.js` offers)
+aidr schedule uninstall       # remove it
+```
+
+`status` reads the OS scheduler (launchd, systemd or crontab, Task Scheduler) and
+`last-run.json`, and prints whether the job exists, whether it is active, what it runs,
+which `AIDR_*` paths it carries, and when it last ran and how that ended (`crashed` for a
+start that never reported back). It warns if a passphrase has been written into the job
+definition, and never prints it. Exit status: `0` installed and active (and its last full
+run did not fail), `1` not installed, `2` installed but not active, `3` installed and
+active but the last full run failed or crashed. `last run` is always the last **full**
+run: a filtered run (`--only`, `--retry-failed`, ...) is shown on a `Partial:` line and
+never replaces it. `install` exits `1` and prints `NOT installed` with the reason when the OS
+scheduler refused (the setup wizard says the same and fails). `uninstall` removes only the job this tool installed (a
+crontab keeps every other line) and reports anything it could not remove.
+`aidr doctor` adds the same checks: whether the job is installed and recently run, the
+age and holder of the run lock, and whether an encrypted config has a passphrase source
+a scheduled run can use.
+
+The Task Scheduler reading (Windows) and the `launchctl list` / `systemctl is-enabled`
+answers have not yet been checked against live hosts of every kind; they are read
+defensively, and a command that cannot answer reads as "unknown", never as "not installed".
+
 ## Uninstall / disable schedule
+
+`aidr schedule uninstall` does all of this for you. By hand:
 
 | Platform | Command |
 |----------|---------|
@@ -505,6 +831,83 @@ The script is **idempotent** - running it twice produces no change. You can add 
 | **Windows** (schtasks) | `schtasks /Delete /TN auto-identity-remove /F` |
 
 ---
+
+## Checking your config
+
+`aidr config check` reads `config.json` the way a run would and prints, in one pass: every
+reason it could not run (blank or still-example fields, a missing file, an encrypted config
+with no passphrase, a malformed `browser` section), which config file and passphrase source
+are in use, where state lives, and how much of it is stamped with an identity fingerprint. It
+also names a config or state file left at the old app-directory location while `AIDR_HOME`
+points elsewhere, and any plaintext copy of the config next to an encrypted one. It
+also warns about things that run but quietly do something else: a ZIP that lost its leading
+zero, two people with one name or one email, a mistyped `captcha.manual`, an unusable
+`retention.days`, and a masked-email relay whose sender (`email.smtp.from`, or the login
+`email.smtp.user`) is one of your real addresses: `email.smtp.from` must be a dedicated
+sending address, see [docs/relay.md](docs/relay.md). It is read-only, never exits on a bad config, and its output is made to be
+pasted into a bug report: initials and a masked address instead of names, and never a
+passphrase, a key, a proxy password or a quoted piece of the file. Exit `0` for ok (with or
+without warnings), `1` for a problem.
+
+## Retention: purging old logs
+
+Run logs, journals, audit reports, full-page screenshots and report PDFs each name you and
+the brokers that hold your data, and they accumulate forever. Two ways to trim them:
+
+```bash
+aidr purge --dry-run                     # list what would go, delete nothing
+aidr purge --older-than 180d             # list it, ask, delete
+aidr purge --older-than 6m --yes         # no question (for a script)
+```
+
+`--older-than` takes `30`, `180d`, `6m` or `1y` (default: `retention.days` from the config,
+else 180 days); anything under 7 days needs `--force`. It lists files by name only, asks
+`Delete these N files? [y/N]` (with no terminal and no `--yes` it deletes nothing and exits
+2), and never touches **complaints** (legal records), the state, config, lock or checkpoint,
+the newest run's log, journal and audit report, symlinks, subdirectories or any file whose
+name it does not recognise as its own.
+
+To do it automatically, set `retention.days` and every successful real run purges what is
+older than that at its end, never its own files; a dry run purges nothing and a bad value
+deletes nothing and says why:
+
+```json
+"retention": { "days": 180 }
+```
+
+## Browser profiles, proxy and user agent
+
+**One browser profile per person.** Cookies, localStorage and cached logins live in the
+browser profile, and one shared profile carried everything a broker learned about person A
+into person B's run. Each person now gets their own directory under `profileDir`
+(default `~/.config/auto-identity-remove`): `person-<index>-<hash>` (the hash comes from the
+same identity as the state fingerprint, so a person who is replaced or whose details change
+starts clean; a name never appears in a path). Their context is launched when their turn
+comes and the previous one is closed first, so a small NAS still runs **one Chromium at a
+time**; the explicit and the generic pass are separate loops, so with two people the browser
+is started four times in a full run (one launch each, per pass). The report, the complaint
+PDFs and `--confirm-emails` use a separate `utility` profile that belongs to no person. An
+existing install keeps its logins: person 0 keeps using the old profile directory itself
+while it holds a browser profile and no per-person directory exists, and from then on only
+that person may use it.
+
+**Headless user agent.** A headless Chromium announces itself as `HeadlessChrome`, an easy
+bot-block. Headless launches now present the matching regular Chrome user agent.
+
+```json
+"browser": {
+  "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+  "proxy": { "server": "http://proxy.example.net:8080", "username": "me", "password": "..." }
+}
+```
+
+`browser.userAgent` overrides it. `browser.proxy` (`server`, `username`, `password`,
+`bypass`) is passed to Playwright for the broker browsers and `--confirm-emails`; the scheme
+must be `http://`, `https://` or `socks5://` (no username or password with SOCKS5: Chromium
+cannot send them). A misspelt key or a bad proxy **refuses the run**, even a dry run:
+launching without the proxy you asked for would send your address to the brokers directly.
+The start-of-run banner names the proxy server and says `(authenticated)`; the password never
+reaches output, logs or the dashboard (its config editor masks it).
 
 ## International users
 
@@ -530,7 +933,6 @@ The following brokers are flagged `usOnly: true` and are silently skipped when y
 | TruePeopleSearch | US people-search |
 | BeenVerified | US background-check (requires US state) |
 | USPhonebook | US phone directory |
-| PublicDataUSA | US public records |
 | Sync.ME, NumLookup | Country picker defaults to +1 and is not driven yet |
 | National Do Not Call Registry, Spy Dialer | US-only services |
 

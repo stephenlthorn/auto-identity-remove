@@ -10,12 +10,20 @@
  *  - dryRun=true: does NOT call Playwright (no newPage)
  *  - dryRun=false: calls context.newPage() + page.goto(url) with extracted URL
  *  - After successful click, recordSuccess is called for the matched broker
+ *
+ * NET-1/NET-2/NET-10 changed the contract: a click now also needs the broker to be
+ * pending confirmation (injected here via _isPending), a response status < 400 and a
+ * final URL on the broker host. The stub context below models a healthy broker.
  */
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const path = require('node:path');
 
 const { processConfirmationEmails } = require('../lib/imap-confirm');
+
+// lib/imap-confirm.js builds file paths with path.join, so expected paths
+// must too: a hardcoded 'confirms/x.eml' never matches on Windows.
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -35,12 +43,14 @@ function makeContext({ pages = [] } = {}) {
   return {
     calls,
     newPage: async () => {
+      let current = 'about:blank';
       const page = {
         goto: async (url, opts) => {
           calls.push({ action: 'goto', url, opts });
-          return { url: () => url };
+          current = url;
+          return { status: () => 200, url: () => url };
         },
-        url: () => 'https://example.com/done',
+        url: () => current,
         textContent: async () => 'Your opt-out request has been processed.',
         close: async () => {},
       };
@@ -48,6 +58,11 @@ function makeContext({ pages = [] } = {}) {
       return page;
     },
   };
+}
+
+function memStore() {
+  const ids = new Set();
+  return { has: (id) => ids.has(id), add: (id) => { ids.add(id); } };
 }
 
 const SPOKEO_BROKER = {
@@ -64,11 +79,13 @@ const WHITEPAGES_BROKER = {
 
 test('dryRun: matched .eml appears in processed, Playwright NOT called', async () => {
   const eml = makeEml('optout@spokeo.com', 'Please visit https://spokeo.com/confirm/abc123 to confirm.');
-  const files = { 'confirms/spokeo.eml': eml };
+  const files = { [path.join('confirms', 'spokeo.eml')]: eml };
   const ctx = makeContext();
 
   const result = await processConfirmationEmails(ctx, [SPOKEO_BROKER], {
     dir: 'confirms',
+    _isPending: () => true,
+    _processedStore: memStore(),
     dryRun: true,
     _readDir: () => ['spokeo.eml'],
     _readFile: (f) => files[f],
@@ -90,6 +107,8 @@ test('unmatched: .eml sender has no matching broker -> unmatched with no_broker'
 
   const result = await processConfirmationEmails(ctx, [SPOKEO_BROKER], {
     dir: 'confirms',
+    _isPending: () => true,
+    _processedStore: memStore(),
     dryRun: true,
     _readDir: () => ['random.eml'],
     _readFile: () => eml,
@@ -97,7 +116,7 @@ test('unmatched: .eml sender has no matching broker -> unmatched with no_broker'
 
   assert.equal(result.processed.length, 0);
   assert.equal(result.unmatched.length, 1);
-  assert.equal(result.unmatched[0].file, 'confirms/random.eml');
+  assert.equal(result.unmatched[0].file, path.join('confirms', 'random.eml'));
   assert.equal(result.unmatched[0].reason, 'no_broker');
 });
 
@@ -107,6 +126,8 @@ test('unmatched: recognised sender but no confirmation URL -> no_url', async () 
 
   const result = await processConfirmationEmails(ctx, [SPOKEO_BROKER], {
     dir: 'confirms',
+    _isPending: () => true,
+    _processedStore: memStore(),
     dryRun: true,
     _readDir: () => ['spokeo.eml'],
     _readFile: () => eml,
@@ -123,6 +144,8 @@ test('URL keyword "verify" is recognised as a confirmation link', async () => {
 
   const result = await processConfirmationEmails(ctx, [SPOKEO_BROKER], {
     dir: 'confirms',
+    _isPending: () => true,
+    _processedStore: memStore(),
     dryRun: true,
     _readDir: () => ['spokeo.eml'],
     _readFile: () => eml,
@@ -138,6 +161,8 @@ test('URL keyword "optout" is recognised as a confirmation link', async () => {
 
   const result = await processConfirmationEmails(ctx, [SPOKEO_BROKER], {
     dir: 'confirms',
+    _isPending: () => true,
+    _processedStore: memStore(),
     dryRun: true,
     _readDir: () => ['spokeo.eml'],
     _readFile: () => eml,
@@ -153,6 +178,8 @@ test('URL keyword "opt-out" (hyphenated) is recognised', async () => {
 
   const result = await processConfirmationEmails(ctx, [SPOKEO_BROKER], {
     dir: 'confirms',
+    _isPending: () => true,
+    _processedStore: memStore(),
     dryRun: true,
     _readDir: () => ['spokeo.eml'],
     _readFile: () => eml,
@@ -167,6 +194,8 @@ test('URL keyword "removal" is recognised as a confirmation link', async () => {
 
   const result = await processConfirmationEmails(ctx, [SPOKEO_BROKER], {
     dir: 'confirms',
+    _isPending: () => true,
+    _processedStore: memStore(),
     dryRun: true,
     _readDir: () => ['spokeo.eml'],
     _readFile: () => eml,
@@ -181,6 +210,8 @@ test('URL keyword "delete" is recognised as a confirmation link', async () => {
 
   const result = await processConfirmationEmails(ctx, [SPOKEO_BROKER], {
     dir: 'confirms',
+    _isPending: () => true,
+    _processedStore: memStore(),
     dryRun: true,
     _readDir: () => ['spokeo.eml'],
     _readFile: () => eml,
@@ -191,14 +222,16 @@ test('URL keyword "delete" is recognised as a confirmation link', async () => {
 
 test('multiple .eml files processed in one call', async () => {
   const files = {
-    'confirms/spokeo.eml': makeEml('optout@spokeo.com', 'Click https://spokeo.com/confirm/aaa'),
-    'confirms/wp.eml': makeEml('noreply@whitepages.com', 'Go to https://whitepages.com/verify/bbb to complete'),
-    'confirms/unknown.eml': makeEml('info@nobody.org', 'Hello from nobody.'),
+    [path.join('confirms', 'spokeo.eml')]: makeEml('optout@spokeo.com', 'Click https://spokeo.com/confirm/aaa'),
+    [path.join('confirms', 'wp.eml')]: makeEml('noreply@whitepages.com', 'Go to https://whitepages.com/verify/bbb to complete'),
+    [path.join('confirms', 'unknown.eml')]: makeEml('info@nobody.org', 'Hello from nobody.'),
   };
   const ctx = makeContext();
 
   const result = await processConfirmationEmails(ctx, [SPOKEO_BROKER, WHITEPAGES_BROKER], {
     dir: 'confirms',
+    _isPending: () => true,
+    _processedStore: memStore(),
     dryRun: true,
     _readDir: () => ['spokeo.eml', 'wp.eml', 'unknown.eml'],
     _readFile: (f) => files[f],
@@ -215,6 +248,8 @@ test('dryRun=false: Playwright newPage + goto called with extracted URL', async 
 
   const result = await processConfirmationEmails(ctx, [SPOKEO_BROKER], {
     dir: 'confirms',
+    _isPending: () => true,
+    _processedStore: memStore(),
     dryRun: false,
     _readDir: () => ['spokeo.eml'],
     _readFile: () => eml,
@@ -240,6 +275,8 @@ test('dryRun=false: recordSuccess called for the matched broker', async () => {
   const successCalls = [];
   const result = await processConfirmationEmails(ctx, [SPOKEO_BROKER], {
     dir: 'confirms',
+    _isPending: () => true,
+    _processedStore: memStore(),
     dryRun: false,
     _readDir: () => ['spokeo.eml'],
     _readFile: () => eml,
@@ -259,6 +296,8 @@ test('expectedSender matching is case-insensitive substring', async () => {
 
   const result = await processConfirmationEmails(ctx, [broker], {
     dir: 'confirms',
+    _isPending: () => true,
+    _processedStore: memStore(),
     dryRun: true,
     _readDir: () => ['spokeo.eml'],
     _readFile: () => eml,
@@ -272,6 +311,8 @@ test('non-.eml files in dir are ignored', async () => {
 
   const result = await processConfirmationEmails(ctx, [SPOKEO_BROKER], {
     dir: 'confirms',
+    _isPending: () => true,
+    _processedStore: memStore(),
     dryRun: true,
     _readDir: () => ['readme.txt', '.gitkeep', 'archive.zip'],
     _readFile: () => { throw new Error('should not read non-eml'); },
@@ -287,6 +328,8 @@ test('processed entry includes broker, url, and person placeholder', async () =>
 
   const result = await processConfirmationEmails(ctx, [SPOKEO_BROKER], {
     dir: 'confirms',
+    _isPending: () => true,
+    _processedStore: memStore(),
     dryRun: true,
     _readDir: () => ['s.eml'],
     _readFile: () => eml,
@@ -318,6 +361,8 @@ test('M4: quoted-printable =3D in URL is decoded correctly', async () => {
 
   const result = await processConfirmationEmails(ctx, [SPOKEO_BROKER], {
     dir: 'confirms',
+    _isPending: () => true,
+    _processedStore: memStore(),
     dryRun: true,
     _readDir: () => ['spokeo.eml'],
     _readFile: () => eml,
@@ -350,6 +395,8 @@ test('M4: quoted-printable soft line break in URL is joined correctly', async ()
 
   const result = await processConfirmationEmails(ctx, [SPOKEO_BROKER], {
     dir: 'confirms',
+    _isPending: () => true,
+    _processedStore: memStore(),
     dryRun: true,
     _readDir: () => ['spokeo.eml'],
     _readFile: () => eml,
@@ -373,6 +420,8 @@ test('M4: unsubscribe link first, confirm link second - picks confirm', async ()
 
   const result = await processConfirmationEmails(ctx, [SPOKEO_BROKER], {
     dir: 'confirms',
+    _isPending: () => true,
+    _processedStore: memStore(),
     dryRun: true,
     _readDir: () => ['spokeo.eml'],
     _readFile: () => eml,
@@ -405,6 +454,8 @@ test('Fix1: confirm link on the broker domain is accepted and navigated', async 
 
   const result = await processConfirmationEmails(ctx, [broker], {
     dir: 'confirms',
+    _isPending: () => true,
+    _processedStore: memStore(),
     dryRun: false,
     _readDir: () => ['spokeo.eml'],
     _readFile: () => eml,
@@ -430,6 +481,8 @@ test('Fix1: confirm link on an off-domain host is rejected - no navigation, no r
 
   const result = await processConfirmationEmails(ctx, [broker], {
     dir: 'confirms',
+    _isPending: () => true,
+    _processedStore: memStore(),
     dryRun: false,
     _readDir: () => ['spokeo.eml'],
     _readFile: () => eml,
@@ -499,6 +552,8 @@ test('Fix1: subdomain of broker domain is accepted (same registrable domain)', a
 
   const result = await processConfirmationEmails(ctx, [broker], {
     dir: 'confirms',
+    _isPending: () => true,
+    _processedStore: memStore(),
     dryRun: false,
     _readDir: () => ['spokeo.eml'],
     _readFile: () => eml,
@@ -568,6 +623,8 @@ test('B16: spoofed From with broker domain as a sub-label is rejected (optout@sp
 
   const result = await processConfirmationEmails(ctx, [broker], {
     dir: 'confirms',
+    _isPending: () => true,
+    _processedStore: memStore(),
     dryRun: false,
     _readDir: () => ['spoof.eml'],
     _readFile: () => eml,
@@ -594,6 +651,8 @@ test('B16: legitimate From with display name and angle brackets still matches br
 
   const result = await processConfirmationEmails(ctx, [broker], {
     dir: 'confirms',
+    _isPending: () => true,
+    _processedStore: memStore(),
     dryRun: true,
     _readDir: () => ['ok.eml'],
     _readFile: () => eml,
@@ -613,6 +672,8 @@ test('B16: legitimate From from a broker subdomain sender still matches (bounces
 
   const result = await processConfirmationEmails(ctx, [broker], {
     dir: 'confirms',
+    _isPending: () => true,
+    _processedStore: memStore(),
     dryRun: true,
     _readDir: () => ['sub.eml'],
     _readFile: () => eml,
@@ -661,6 +722,8 @@ test('Fix2: QP body with UTF-8 non-ASCII in URL is preserved through processConf
 
   const result = await processConfirmationEmails(ctx, [SPOKEO_BROKER], {
     dir: 'confirms',
+    _isPending: () => true,
+    _processedStore: memStore(),
     dryRun: true,
     _readDir: () => ['spokeo.eml'],
     _readFile: () => eml,
@@ -689,6 +752,8 @@ test('failed: when goto throws, entry appears in failed array', async () => {
 
   const result = await processConfirmationEmails(errCtx, [SPOKEO_BROKER], {
     dir: 'confirms',
+    _isPending: () => true,
+    _processedStore: memStore(),
     dryRun: false,
     _readDir: () => ['spokeo.eml'],
     _readFile: () => eml,

@@ -65,15 +65,44 @@ const config = new Proxy({}, {
  */
 function _primaryPerson() {
   const cfg = _getConfig();
-  if (cfg.person) return cfg.person;
-  if (Array.isArray(cfg.persons) && cfg.persons.length > 0) return cfg.persons[0];
+  // persons[] wins when both keys exist, exactly like getPersonsFromConfig() in
+  // lib/config.js. The dashboard's Config tab writes a blank `person` onto a
+  // persons[] config when it saves, and the old person-first order then built
+  // every search URL from an empty name ("search?q=&type=pp"), which a
+  // --verify run reads as "verified clear" for every broker.
+  if (Array.isArray(cfg.persons) && cfg.persons.length > 0 && _isPersonObject(cfg.persons[0])) {
+    return cfg.persons[0];
+  }
+  if (_isPersonObject(cfg.person) && !_isBlankPerson(cfg.person)) return cfg.person;
   return {};
+}
+
+function _isPersonObject(p) {
+  return p !== null && typeof p === 'object' && !Array.isArray(p);
+}
+
+// A person whose every value is empty carries no identity. Treat it as absent.
+function _isBlankPerson(p) {
+  return Object.values(p).every(v => v == null || String(v).trim() === '');
 }
 
 // Never interpolate the literal string "undefined" into a URL or a form value.
 // A missing field becomes empty, which fails a lookup honestly (notFound)
 // instead of searching brokers for a person named "undefined".
 const enc = s => encodeURIComponent(s == null ? '' : s);
+
+// A bare input[name*="name" i] also matches firstname, lastname, company_name,
+// username and nickname, and fillForm takes the first match, so the person's
+// full name could land in a company or username box (BRK-8). These are the
+// words that make a "*name*" field somebody else's name or not a person's name.
+// :not() is evaluated per attribute, so the placeholder variant excludes
+// "Last name" / "Company name" placeholders the same way.
+const NOT_A_FULL_NAME = [
+  'first', 'last', 'fname', 'lname', 'surname', 'family', 'given', 'middle',
+  'user', 'nick', 'company', 'business', 'organi', 'file', 'maiden',
+];
+const fullNameInput = (attr) =>
+  `input[${attr}*="name" i]${NOT_A_FULL_NAME.map(w => `:not([${attr}*="${w}" i])`).join('')}`;
 
 /**
  * Split a phone number into the two shapes phone-lookup sites ask for.
@@ -152,6 +181,7 @@ function buildBrokers(person) {
     method: 'search-form',
     searchUrl: `https://www.spokeo.com/search?q=${enc(N)}&type=pp&state=${ST}`,
     listingPattern: /spokeo\.com\/[^/]+\/[^/]+\/[^/]+-p\d+/i,
+    lastName: L,
     optOutUrl: 'https://www.spokeo.com/optout',
     formFields: { 'input[name="email"]': E },
     submitSelector: 'button[type="submit"],input[type="submit"]',
@@ -166,6 +196,7 @@ function buildBrokers(person) {
     method: 'search-form',
     searchUrl: `https://www.whitepages.com/name/${enc(F)}-${enc(L)}/${ST}`,
     listingPattern: /whitepages\.com\/people\//i,
+    lastName: L,
     optOutUrl: 'https://www.whitepages.com/suppression-requests',
     formFields: { 'input[name="name"]': N, 'input[name="email"]': E },
     submitSelector: 'button[type="submit"]',
@@ -180,8 +211,9 @@ function buildBrokers(person) {
     method: 'search-form',
     searchUrl: `https://www.fastpeoplesearch.com/name/${enc(F)}-${enc(L)}_${ST}`,
     listingPattern: /fastpeoplesearch\.com\/name\//i,
+    lastName: L,
     optOutUrl: 'https://www.fastpeoplesearch.com/optout',
-    formFields: { 'input[id="optout_name"],input[name*="name"]': N, 'input[type="email"]': E },
+    formFields: { [`input[id="optout_name"],${fullNameInput('name')}`]: N, 'input[type="email"]': E },
     submitSelector: 'button[type="submit"]',
     captchaLikely: false,
     priority: 1,
@@ -192,7 +224,7 @@ function buildBrokers(person) {
     name: 'TruePeopleSearch',
     method: 'direct-form',
     optOutUrl: 'https://www.truepeoplesearch.com/removal',
-    formFields: { 'input[name*="name"],input[placeholder*="name" i]': N, 'input[type="email"]': E },
+    formFields: { [`${fullNameInput('name')},${fullNameInput('placeholder')}`]: N, 'input[type="email"]': E },
     submitSelector: 'button[type="submit"]',
     captchaLikely: false,
     priority: 1,
@@ -201,10 +233,16 @@ function buildBrokers(person) {
   },
 
   {
+    // direct-form since BRK-9. This entry used to be search-form with
+    // listingPattern /beenverified\.com/, which matches the site's own logo and
+    // nav links, so the "listing" it found was always the homepage and --verify
+    // could never report anything but "still listed". Its searchUrl was also the
+    // opt-out search FORM, a page with no person-specific links, so a tighter
+    // pattern alone would have turned that into "never listed" (opt-out skipped,
+    // --verify "verified clear"). The page is the form: fill it, nothing to look
+    // up first, and --verify reports it unverifiable instead of guessing.
     name: 'BeenVerified',
-    method: 'search-form',
-    searchUrl: 'https://www.beenverified.com/app/optout/search',
-    listingPattern: /beenverified\.com/i,
+    method: 'direct-form',
     optOutUrl: 'https://www.beenverified.com/app/optout/search',
     formFields: { 'input[name="firstName"]': F, 'input[name="lastName"]': L, 'select[name="state"]': ST },
     submitSelector: 'button[type="submit"]',
@@ -219,6 +257,7 @@ function buildBrokers(person) {
     method: 'search-form',
     searchUrl: `https://radaris.com/p/${enc(F)}/${enc(L)}/`,
     listingPattern: /radaris\.com\/p\//i,
+    lastName: L,
     optOutUrl: 'https://radaris.com/control/privacy',
     formFields: { 'input[name*="first"],input[placeholder*="first" i]': F, 'input[name*="last"],input[placeholder*="last" i]': L, 'input[type="email"]': E },
     submitSelector: 'button[type="submit"]',
@@ -265,6 +304,7 @@ function buildBrokers(person) {
     method: 'search-form',
     searchUrl: `https://www.mylife.com/find-people/results.pubview?searchtype=PEOPLE&firstname=${enc(F)}&lastname=${enc(L)}&state=${ST}`,
     listingPattern: /mylife\.com\/[^/]+\/[^/]+-\d+\.html/i,
+    lastName: L,
     optOutUrl: 'https://www.mylife.com/privacy-policy/',
     formFields: { 'input[type="email"]': E },
     submitSelector: 'button[type="submit"]',
@@ -278,6 +318,7 @@ function buildBrokers(person) {
     method: 'search-form',
     searchUrl: `https://nuwber.com/person/search?name=${enc(N)}&state=${ST}`,
     listingPattern: /nuwber\.com\/person\//i,
+    lastName: L,
     optOutUrl: 'https://nuwber.com/removal/link',
     formFields: { 'input[type="email"]': E },
     submitSelector: 'button[type="submit"]',
@@ -313,7 +354,7 @@ function buildBrokers(person) {
     name: 'ThatsThem',
     method: 'direct-form',
     optOutUrl: 'https://thatsthem.com/optout',
-    formFields: { 'input[name*="name" i]': N, 'input[name*="email" i]': E },
+    formFields: { [fullNameInput('name')]: N, 'input[name*="email" i]': E },
     submitSelector: 'button[type="submit"]',
     captchaLikely: false,
     priority: 2,
@@ -339,16 +380,11 @@ function buildBrokers(person) {
     usOnly: true,
   },
 
-  {
-    name: 'PublicDataUSA',
-    method: 'direct-form',
-    optOutUrl: 'https://www.publicdatausa.com/remove.php',
-    formFields: { 'input[name*="name" i]': N, 'input[name*="email" i]': E, 'input[name*="state" i]': ST },
-    submitSelector: 'input[type="submit"],button[type="submit"]',
-    captchaLikely: false,
-    priority: 2,
-    usOnly: true,
-  },
+  // PublicDataUSA removed 2026-10-23: domain no longer resolves
+  // (getaddrinfo EAI_AGAIN), and its twin site usa-official.com is also down.
+  // Multiple independent sources confirm the site was shut down around
+  // September 2026. Per the convention above ("Remove from brokers.js if
+  // site is gone"), there's no live site left to opt out of.
 
   {
     name: 'SmartBackgroundChecks',
@@ -364,7 +400,7 @@ function buildBrokers(person) {
     name: 'SearchPeopleFree',
     method: 'direct-form',
     optOutUrl: 'https://www.searchpeoplefree.com/opt-out',
-    formFields: { 'input[name*="name" i]': N, 'input[name*="email" i]': E },
+    formFields: { [fullNameInput('name')]: N, 'input[name*="email" i]': E },
     submitSelector: 'button[type="submit"]',
     captchaLikely: false,
     priority: 2,
@@ -376,7 +412,7 @@ function buildBrokers(person) {
     name: 'PeopleSearchNow',
     method: 'direct-form',
     optOutUrl: 'https://www.peoplesearchnow.com/opt-out',
-    formFields: { 'input[name*="name" i]': N, 'input[name*="email" i]': E },
+    formFields: { [fullNameInput('name')]: N, 'input[name*="email" i]': E },
     submitSelector: 'button[type="submit"]',
     captchaLikely: false,
     priority: 2,
@@ -400,7 +436,7 @@ function buildBrokers(person) {
     name: 'SocialCatfish',
     method: 'direct-form',
     optOutUrl: 'https://socialcatfish.com/opt-out/',
-    formFields: { 'input[name*="name" i]': N, 'input[name*="email" i]': E },
+    formFields: { [fullNameInput('name')]: N, 'input[name*="email" i]': E },
     submitSelector: 'button[type="submit"]',
     captchaLikely: false,
     priority: 2,
@@ -416,15 +452,13 @@ function buildBrokers(person) {
     priority: 2,
   },
 
-  {
-    name: 'ClustrMaps',
-    method: 'direct-form',
-    optOutUrl: 'https://clustrmaps.com/bl/opt-out',
-    formFields: { 'input[name*="name" i]': N, 'input[name*="email" i]': E },
-    submitSelector: 'button[type="submit"]',
-    captchaLikely: false,
-    priority: 2,
-  },
+  // ClustrMaps removed 2026-10-23: clustrmaps.com and www. resolve to
+  // 127.0.0.1 from ClustrMaps' own nameservers (srv53), confirmed via
+  // Cloudflare and Google DNS-over-HTTPS too, so no browser anywhere can
+  // reach it. The SOA serial dates the change to about 2026-09-21. The
+  // domain is still registered (to 2027-06), so it may come back - re-add
+  // this entry if it does, and drop clustrmaps.com from data/dead-urls.json
+  // (added so the generic runner's BADBOOL copy stops retrying it).
 
   {
     name: 'PrivateRecords',
@@ -460,23 +494,47 @@ function buildBrokers(person) {
   },
 
   {
+    // Manual since 2026-10-23: the removal page sits behind a HUMAN
+    // (PerimeterX) "Press & Hold" bot challenge - checked live, it returns
+    // 403 to an automated browser before any form renders. The old
+    // /update-my-info page is a 404.
     name: 'ZoomInfo',
-    method: 'direct-form',
-    optOutUrl: 'https://www.zoominfo.com/update-my-info',
-    formFields: { 'input[name*="first" i]': F, 'input[name*="last" i]': L, 'input[type="email"]': E },
-    submitSelector: 'button[type="submit"]',
-    captchaLikely: false,
+    method: 'manual',
+    optOutUrl: 'https://privacyrequest.zoominfo.com/remove/verify',
+    notes: 'Open https://privacyrequest.zoominfo.com/remove/verify, pass the "Press & Hold" check, then follow the email verification to request removal.',
     priority: 1,
   },
 
   {
+    // Manual since 2026-10-23. Clearbit is now HubSpot's "Breeze
+    // Intelligence"; requests go through a DataGrail Privacy Request Center
+    // (old clearbit.com/privacy/opt-out is a 404). Checked live, the deletion
+    // form at /form/deletion?locationCode=US-<ST> has first_name, last_name
+    // and email_address inputs, but direct-form cannot finish it: the
+    // required "relationship" field is a MUI select with a hidden input that
+    // fillForm cannot set, and "Review Request" leads to a second confirm
+    // step, so a single submit click would be reported for a request that
+    // was never sent.
     name: 'Clearbit',
-    method: 'direct-form',
-    optOutUrl: 'https://clearbit.com/privacy/opt-out',
-    formFields: { 'input[type="email"]': E },
-    submitSelector: 'button[type="submit"]',
-    captchaLikely: false,
+    method: 'manual',
+    optOutUrl: 'https://preferences.clearbit.com',
+    notes: 'Open https://preferences.clearbit.com, choose your country and state, then "Start Deletion Request". Pick "Myself", fill name and email, set relationship (usually "Other"), then Review Request and confirm.',
     priority: 1,
+  },
+
+  {
+    // Manual since 2026-10-24. Andrews Wharton ("A Stirista Solution") came in
+    // from the Markup dataset, and its homepage has a marketing sign-up form.
+    // The generic runner filled and submitted it, logged "Form submitted" as
+    // an opt-out, and the user got a "Confirm your subscription" email
+    // instead. Listing it here with the homepage as optOutUrl dedupes the
+    // generic entry by host so the runner never submits that form again; the
+    // real opt-out is Stirista's portal.
+    name: 'Andrews Wharton',
+    method: 'manual',
+    optOutUrl: 'https://www.andrewswharton.com/',
+    notes: 'Do not use the sign-up form on andrewswharton.com, and do not click any "Confirm your subscription" email from it. Andrews Wharton is part of Stirista: opt out at https://unsubscribe.stirista.com/ or email privacy@stirista.com with your name, email and current and prior addresses.',
+    priority: 3,
   },
 
   // ═══ Additional people-search / data broker sites ════════════════════════
@@ -540,9 +598,11 @@ function buildBrokers(person) {
   },
 
   {
+    // URL updated 2026-10-23: old /privacy/data-subject-rights-request
+    // returned 404. Confirmed-live replacement is legal.epsilon.com/dsr/.
     name: 'Epsilon',
     method: 'direct-form',
-    optOutUrl: 'https://www.epsilon.com/privacy/data-subject-rights-request',
+    optOutUrl: 'https://legal.epsilon.com/dsr/',
     formFields: { 'input[name*="first" i]': F, 'input[name*="last" i]': L, 'input[type="email"]': E },
     submitSelector: 'button[type="submit"]',
     captchaLikely: false,
@@ -560,9 +620,13 @@ function buildBrokers(person) {
   },
 
   {
+    // URL updated 2026-10-23: old /privacy/opt-out/ returned 404. Confirmed
+    // replacement is the "Your Privacy Choices" (sale/sharing opt-out) link
+    // on equifax.com - distinct from optoutprescreen.com, which is the
+    // separate prescreened-credit-offer opt-out already listed elsewhere.
     name: 'Equifax (marketing)',
     method: 'direct-form',
-    optOutUrl: 'https://www.equifax.com/privacy/opt-out/',
+    optOutUrl: 'https://myprivacy.equifax.com/opt-in-opt-out/personal-info/',
     formFields: { 'input[name*="first" i]': F, 'input[name*="last" i]': L, 'input[type="email"]': E, 'input[name*="zip" i]': Z },
     submitSelector: 'button[type="submit"],input[type="submit"]',
     captchaLikely: false,
@@ -573,7 +637,7 @@ function buildBrokers(person) {
     name: 'Experian (marketing)',
     method: 'direct-form',
     optOutUrl: 'https://www.experian.com/privacy/opting_out.html',
-    formFields: { 'input[name*="first" i]': F, 'input[name*="last" i]': L, 'input[name*="addr" i]': C, 'input[name*="zip" i]': Z },
+    formFields: { 'input[name*="first" i]': F, 'input[name*="last" i]': L, 'input[name*="city" i]': C, 'input[name*="zip" i]': Z },
     submitSelector: 'button[type="submit"],input[type="submit"]',
     captchaLikely: false,
     priority: 2,

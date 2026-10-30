@@ -14,7 +14,7 @@ jobs:
 
     strategy:
       matrix:
-        node-version: [18, 20, 22]
+        node-version: [20, 22, 24]
 
     steps:
       - uses: actions/checkout@v4
@@ -96,11 +96,34 @@ jobs:
             aidr-ci node scripts/ci/docker-state-check.js
           grep -q CiProbe "$RUNNER_TEMP/state.json" || { echo "host file not updated"; exit 1; }
 
+      - name: The whole home must persist through ONE directory mount
+        # The documented recipe (README, docker-compose.yml, docs/SYNOLOGY.md) is one
+        # directory mounted at /home/aidr and nothing else: the image sets
+        # AIDR_HOME=/home/aidr, so there is NO per-file variable here on purpose. This
+        # is the check that the recipe works as written: state, its .bak, the
+        # heartbeat and the log directory all land on the host. rename() works on a
+        # directory mount, so the .bak and the lock sit beside the state instead of in
+        # the container layer. Run as the host user, as the recipe's AIDR_UID /
+        # AIDR_GID does, so the files the container creates (0600) are readable here.
+        run: |
+          mkdir -m 700 "$RUNNER_TEMP/aidr-home"
+          echo '{"optOuts":{}}' > "$RUNNER_TEMP/aidr-home/state.json"
+          docker run --rm --init \
+            --user "$(id -u):$(id -g)" \
+            -e HOME=/tmp \
+            -v "$RUNNER_TEMP/aidr-home:/home/aidr" \
+            aidr-ci node scripts/ci/docker-state-check.js
+          grep -q CiProbe "$RUNNER_TEMP/aidr-home/state.json" || { echo "host state.json not updated"; exit 1; }
+          grep -q CiProbe "$RUNNER_TEMP/aidr-home/state.json.bak" || { echo "state.json.bak not written beside the state"; exit 1; }
+          test -s "$RUNNER_TEMP/aidr-home/last-run.json" || { echo "the run heartbeat did not reach the mounted home"; exit 1; }
+          grep -q CiProbe "$RUNNER_TEMP/aidr-home/logs/run-2026-01-01T00-00-00.json" || { echo "the log directory is not inside the mounted home"; exit 1; }
+          if ls "$RUNNER_TEMP/aidr-home" | grep -E '\.tmp$'; then echo "an atomic-write temp file was left behind"; exit 1; fi
+
       - name: Image must not contain PII or secrets
         # COPY . . runs after npm ci, so a .dockerignore gap bakes the
         # maintainer's own config into a layer that travels with the image.
         run: |
-          for f in config.json config.json.enc state.json state.json.bak state.json.checkpoint state.json.checkpoint.tmp .env .claude; do
+          for f in config.json config.json.enc state.json state.json.bak state.json.checkpoint state.json.checkpoint.tmp last-run.json .env .claude; do
             if docker run --rm --entrypoint sh aidr-ci -c "test -e /app/$f"; then
               echo "SECURITY: /app/$f is baked into the image"
               exit 1

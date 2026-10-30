@@ -40,10 +40,13 @@ echo "Tier-1 files changed:"
 printf '%s\n' "$TIER1_TOUCHED" | sed 's/^/  - /'
 echo
 
-# Trailer may be on any commit in the range, or in a commit body.
-if git log "$BASE_SHA".."$HEAD_SHA" --format='%B' | grep -q 'Cross-model-review:'; then
+# Trailer may be on any commit in the range, or in a commit body. The log is
+# read whole before searching: `git log | grep -q` under pipefail fails with
+# SIGPIPE when grep stops early on a long range, hiding a trailer that is there.
+TRAILERS="$(git log "$BASE_SHA".."$HEAD_SHA" --format='%B' | grep 'Cross-model-review:' || true)"
+if [ -n "$TRAILERS" ]; then
   echo "Found a Cross-model-review trailer:"
-  git log "$BASE_SHA".."$HEAD_SHA" --format='%B' | grep 'Cross-model-review:' | sed 's/^/  /'
+  printf '%s\n' "$TRAILERS" | sed 's/^/  /'
   exit 0
 fi
 

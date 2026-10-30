@@ -1,7 +1,25 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const cfg = require('../lib/config.js');
 const { runGenericBrokers } = require('../generic-runner.js');
+
+// A broker that errors makes runGenericBrokers call recordFailure, which
+// persists state. Point that at a temp file: the default is the repo-root
+// state.json, and any other test file writing it in parallel races on the
+// shared state.json.tmp (ENOENT on rename).
+let tmpDir;
+test.before(() => {
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leak-'));
+  cfg.setTestStatePath(path.join(tmpDir, 'state.json'));
+});
+test.after(() => {
+  cfg.setTestStatePath(null);
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
 
 // Regression test for the generic-runner browser-process leak.
 //

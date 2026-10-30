@@ -74,6 +74,8 @@ function makeContext({ preClickVisible = true } = {}) {
     get pagesOpened() { return pagesOpened; },
     newPage: async () => {
       pagesOpened++;
+      // The result text only appears once the submit button is clicked (BRK-4).
+      let submitted = false;
       return {
         goto: async () => {},
         locator: (sel) => ({
@@ -81,10 +83,10 @@ function makeContext({ preClickVisible = true } = {}) {
             fill: async () => {},
             count: async () => 1,
             isVisible: async () => (sel.includes('Accept') ? preClickVisible : true),
-            click: async () => { events.push(`click:${sel}`); },
+            click: async () => { events.push(`click:${sel}`); if (!sel.includes('Accept')) submitted = true; },
           }),
         }),
-        evaluate: async () => 'ok',
+        evaluate: async () => (submitted ? 'ok' : 'form'),
         close: async () => {},
       };
     },

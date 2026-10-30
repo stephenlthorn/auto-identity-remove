@@ -1,13 +1,30 @@
 /**
  * scripts/prune-dead.js
  *
- * Reads all logs/run-*.json files, finds hostnames that appear with
- * status:'dead' in EVERY run they appear in (and appear at least once),
- * then merges them into data/dead-urls.json.
+ * Reads logs/run-*.json and adds hosts that are provably gone to
+ * data/dead-urls.json, which makes every later run skip them without a request.
+ * Run it by hand; nothing calls it automatically.
+ *
+ * Adding a live broker to that file silently stops the user being opted out of
+ * it, so the bar is deliberately high. A host is added only when its most recent
+ * history is an unbroken streak of HARD failures - DNS name not resolved
+ * (ERR_NAME_NOT_RESOLVED / ENOTFOUND) or HTTP 404 / 410 - across at least
+ * MIN_RUNS separate runs spanning at least MIN_SPAN_DAYS days. One outage, a
+ * refused connection, a timeout or a 5xx never counts, and a single run in which
+ * the host answered ends the streak.
+ *
+ * Run-log shape (what watcher.js writes - see lib/logger.js): one object per
+ * run, bucketed by outcome:
+ *   { runAt, succeeded: [], skipped: [], notFound: [], captchaFailed: [],
+ *     manual: [], errors: [], dead: [], pendingConfirm: [], genericStats }
+ * Every entry is { broker, status, detail, time } and, for generic-pass entries,
+ * a `host`. Only entries that identify a host are considered: `entry.host`, or
+ * `entry.broker` when that is itself a bare hostname (BADBOOL rows are named by
+ * their host). A company name such as "Acxiom" is never treated as a hostname.
  *
  * Idempotent - running twice produces no change.
- * Exported `pruneDeadUrls(logsDir, deadUrlsPath)` is a pure function for
- * testability (takes explicit paths; no side-effects beyond writing the file).
+ * Exported `pruneDeadUrls(logsDir, deadUrlsPath)` takes explicit paths for
+ * testability.
  *
  * Usage:
  *   node scripts/prune-dead.js
@@ -19,17 +36,74 @@ const fs   = require('fs');
 const path = require('path');
 const { URL } = require('url');
 
+// A run in which most of the hosts that were actually tried failed hard is a machine
+// that was offline (or whose resolver was down), not evidence about any one host: it
+// is left out of every host's history. The thresholds are shared with the run
+// heartbeat (lib/outage.js), which refuses to call such a run ok.
+const { CACHED_SKIP, isOutage } = require('../lib/outage');
+
+const MIN_RUNS = 3;
+const MIN_SPAN_DAYS = 14;
+const DAY_MS = 24 * 3600 * 1000;
+
+// DNS name not resolved, or the page is gone. Not refused/closed connections,
+// timeouts or 5xx: those are what an outage looks like.
+const HARD_FAILURE = /ERR_NAME_NOT_RESOLVED|ENOTFOUND|\bHTTP (404|410)\b/;
+const BARE_HOSTNAME = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i;
+
+/** Normalised hostname for an entry, or null when it does not identify one. */
+function hostOf(entry) {
+  const candidate = typeof entry.host === 'string' && entry.host ? entry.host : entry.broker;
+  if (typeof candidate !== 'string') return null;
+  let host = candidate.trim();
+  if (/^https?:\/\//i.test(host)) {
+    try { host = new URL(host).hostname; } catch (_) { return null; }
+  }
+  host = host.toLowerCase().replace(/^www\./, '');
+  return BARE_HOSTNAME.test(host) ? host : null;
+}
+
+/** Every entry in a run log: bucketed object, { results: [] }, or a flat array. */
+function entriesOf(raw) {
+  if (Array.isArray(raw)) return raw;
+  if (!raw || typeof raw !== 'object') return [];
+  if (Array.isArray(raw.results)) return raw.results;
+  return Object.values(raw).filter(Array.isArray).flat();
+}
+
+/** When the run happened: runAt, else the file name's timestamp, else mtime. */
+function runTime(raw, file) {
+  const runAt = raw && !Array.isArray(raw) ? Date.parse(raw.runAt) : NaN;
+  if (!Number.isNaN(runAt)) return runAt;
+  const m = path.basename(file).match(/run-(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})/);
+  if (m) {
+    const fromName = Date.parse(`${m[1]}T${m[2]}:${m[3]}:${m[4]}Z`);
+    if (!Number.isNaN(fromName)) return fromName;
+  }
+  return fs.statSync(file).mtimeMs;
+}
+
 /**
- * Aggregate dead hostnames from log files in `logsDir`.
- * A hostname is "consistently dead" if every entry for that host across all
- * log files has status 'dead' (and it appears at least once).
- *
+ * What one run says about one host: 'hard' (only hard failures), 'other' (it
+ * answered, or failed in a way that proves nothing), or null (only cache hits).
+ */
+function runVerdict(entries) {
+  let sawHard = false;
+  for (const e of entries) {
+    if (e.status === 'dead' && CACHED_SKIP.test(String(e.detail || ''))) continue;
+    if (e.status === 'dead' && HARD_FAILURE.test(String(e.detail || ''))) { sawHard = true; continue; }
+    return 'other';
+  }
+  return sawHard ? 'hard' : null;
+}
+
+/**
  * @param {string} logsDir      - Directory containing run-*.json files
  * @param {string} deadUrlsPath - Path to data/dead-urls.json
- * @returns {{ added: string[], total: number }} Summary of changes made
+ * @returns {{ added: string[], total: number, ignoredRuns: number }} Summary of changes made;
+ *   ignoredRuns counts runs left out as outages (most hosts failed hard)
  */
 function pruneDeadUrls(logsDir, deadUrlsPath) {
-  // ── 1. Load existing dead set ──────────────────────────────────────────────
   let existing = [];
   try {
     const raw = JSON.parse(fs.readFileSync(deadUrlsPath, 'utf8'));
@@ -39,7 +113,6 @@ function pruneDeadUrls(logsDir, deadUrlsPath) {
   }
   const existingSet = new Set(existing);
 
-  // ── 2. Read all run-*.json log files ──────────────────────────────────────
   let logFiles = [];
   try {
     logFiles = fs.readdirSync(logsDir)
@@ -49,68 +122,73 @@ function pruneDeadUrls(logsDir, deadUrlsPath) {
     // logs dir missing - nothing to prune
   }
 
-  // ── 3. Aggregate: for each hostname, track {dead, total} across all runs ──
-  // Maps hostname → { deadCount: number, totalCount: number }
-  const hostStats = new Map();
-
-  for (const logFile of logFiles) {
-    let entries;
+  // host -> [{ at, verdict }], one item per run
+  const history = new Map();
+  let ignoredRuns = 0;
+  for (const file of logFiles) {
+    let raw;
+    let at;
     try {
-      const raw = JSON.parse(fs.readFileSync(logFile, 'utf8'));
-      // Support both array-of-entries and { results: [...] } shapes
-      entries = Array.isArray(raw) ? raw : (Array.isArray(raw.results) ? raw.results : []);
+      raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+      at = runTime(raw, file);
     } catch (_) {
-      continue; // skip malformed files
+      continue; // malformed or unreadable file
     }
 
-    for (const entry of entries) {
-      if (!entry || typeof entry.broker !== 'string') continue;
-
-      // Derive hostname from broker field (may be a hostname already or a URL)
-      let host;
-      try {
-        // If it looks like a full URL, parse it; otherwise treat as hostname directly
-        if (entry.broker.startsWith('http')) {
-          host = new URL(entry.broker).hostname.replace(/^www\./, '');
-        } else {
-          host = entry.broker.replace(/^www\./, '');
-        }
-      } catch (_) {
-        host = entry.broker.replace(/^www\./, '');
-      }
-
+    const byHost = new Map();
+    for (const entry of entriesOf(raw)) {
+      if (!entry || typeof entry !== 'object') continue;
+      const host = hostOf(entry);
       if (!host) continue;
-
-      const stats = hostStats.get(host) || { deadCount: 0, totalCount: 0 };
-      stats.totalCount += 1;
-      if (entry.status === 'dead') stats.deadCount += 1;
-      hostStats.set(host, stats);
+      if (!byHost.has(host)) byHost.set(host, []);
+      byHost.get(host).push(entry);
+    }
+    const verdicts = [];
+    for (const [host, entries] of byHost) {
+      const verdict = runVerdict(entries);
+      if (verdict) verdicts.push({ host, verdict });
+    }
+    const hardCount = verdicts.filter((v) => v.verdict === 'hard').length;
+    if (isOutage({ hard: hardCount, tried: verdicts.length })) {
+      ignoredRuns++;
+      continue;
+    }
+    for (const { host, verdict } of verdicts) {
+      if (!history.has(host)) history.set(host, []);
+      history.get(host).push({ at, verdict });
     }
   }
 
-  // ── 4. Identify consistently-dead hosts (dead in 100% of their appearances) ─
   const newlyDead = [];
-  for (const [host, { deadCount, totalCount }] of hostStats) {
-    if (totalCount > 0 && deadCount === totalCount && !existingSet.has(host)) {
-      newlyDead.push(host);
-    }
+  for (const [host, runs] of history) {
+    if (existingSet.has(host)) continue;
+    runs.sort((a, b) => a.at - b.at);
+    const streak = [];
+    for (let i = runs.length - 1; i >= 0 && runs[i].verdict === 'hard'; i--) streak.unshift(runs[i]);
+    if (streak.length < MIN_RUNS) continue;
+    if (streak[streak.length - 1].at - streak[0].at < MIN_SPAN_DAYS * DAY_MS) continue;
+    newlyDead.push(host);
   }
 
-  // ── 5. Merge, dedup, sort, write ──────────────────────────────────────────
   const merged = [...existingSet, ...newlyDead].sort();
-  fs.writeFileSync(deadUrlsPath, JSON.stringify({ hosts: merged }, null, 2) + '\n', 'utf8');
+  if (newlyDead.length > 0) {
+    fs.writeFileSync(deadUrlsPath, JSON.stringify({ hosts: merged }, null, 2) + '\n', 'utf8');
+  }
 
-  return { added: newlyDead.sort(), total: merged.length };
+  return { added: newlyDead.sort(), total: merged.length, ignoredRuns };
 }
 
 // ── CLI entry point ───────────────────────────────────────────────────────────
 
 if (require.main === module) {
-  const root        = path.join(__dirname, '..');
-  const logsDir     = path.join(root, 'logs');
+  const root         = path.join(__dirname, '..');
+  const logsDir      = path.join(root, 'logs');
   const deadUrlsPath = path.join(root, 'data', 'dead-urls.json');
 
-  const { added, total } = pruneDeadUrls(logsDir, deadUrlsPath);
+  const { added, total, ignoredRuns } = pruneDeadUrls(logsDir, deadUrlsPath);
+  if (ignoredRuns > 0) {
+    console.log(`prune-dead: ignored ${ignoredRuns} run(s) in which most hosts failed (an outage, not evidence about any host).`);
+  }
 
   if (added.length === 0) {
     console.log(`prune-dead: no new hosts added (${total} already cached).`);
@@ -120,4 +198,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { pruneDeadUrls };
+module.exports = { pruneDeadUrls, MIN_RUNS, MIN_SPAN_DAYS };

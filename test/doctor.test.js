@@ -30,6 +30,11 @@ const {
   runDoctor,
 } = require('../lib/doctor');
 
+// R4: runDoctor also reads the installed schedule. These tests are about other
+// checks, so the schedule is stubbed and nothing here asks the real crontab,
+// launchd or systemd anything.
+const NO_SCHEDULE = { installed: false, kind: null, kinds: [], schedule: null, target: null, active: null, env: {}, plaintextPassphrase: false, lastRun: null };
+
 // ─────────────────────────────────────────────────────────────────────────────
 // checkConfig
 // ─────────────────────────────────────────────────────────────────────────────
@@ -110,6 +115,41 @@ describe('checkConfig', () => {
     const result = await checkConfig(dir);
     assert.equal(result.ok, false);
     assert.match(result.hint, /person/i);
+  });
+
+  it('returns ok for a multi-person persons array', async () => {
+    const dir = tmpDir();
+    const cfg = { persons: [
+      { firstName: 'Alice', lastName: 'Smith', email: 'a@b.com', zip: '12345' },
+      { firstName: 'Bob', lastName: 'Jones', email: 'b@b.com', zip: '54321' },
+    ] };
+    fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify(cfg));
+
+    const result = await checkConfig(dir);
+    assert.equal(result.ok, true);
+  });
+
+  it('names the index of the person missing a field in a persons array', async () => {
+    const dir = tmpDir();
+    const cfg = { persons: [
+      { firstName: 'Alice', lastName: 'Smith', email: 'a@b.com', zip: '12345' },
+      { firstName: 'Bob', lastName: 'Jones', email: 'b@b.com' },
+    ] };
+    fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify(cfg));
+
+    const result = await checkConfig(dir);
+    assert.equal(result.ok, false);
+    assert.match(result.hint, /persons\[1\]\.zip/);
+  });
+
+  it('returns not-ok for an empty persons array, matching getPersonsFromConfig', async () => {
+    const dir = tmpDir();
+    const cfg = { persons: [], person: { firstName: 'Alice', lastName: 'Smith', email: 'a@b.com', zip: '12345' } };
+    fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify(cfg));
+
+    const result = await checkConfig(dir);
+    assert.equal(result.ok, false);
+    assert.match(result.hint, /non-empty/);
   });
 });
 
@@ -345,6 +385,7 @@ describe('runDoctor', () => {
       tcpProbe: () => Promise.resolve(true),
       headRequest: () => Promise.resolve(200),
       printOutput: false,
+      scheduleStatus: NO_SCHEDULE,
     });
 
     assert.ok(Array.isArray(results));
@@ -370,6 +411,7 @@ describe('runDoctor', () => {
       tcpProbe: () => Promise.resolve(true),
       headRequest: () => Promise.resolve(200),
       printOutput: false,
+      scheduleStatus: NO_SCHEDULE,
     });
 
     assert.equal(exitCode, 0);
@@ -386,6 +428,7 @@ describe('runDoctor', () => {
       tcpProbe: () => Promise.resolve(true),
       headRequest: () => Promise.resolve(200),
       printOutput: false,
+      scheduleStatus: NO_SCHEDULE,
     });
 
     assert.equal(exitCode, 1);
@@ -401,6 +444,7 @@ describe('runDoctor', () => {
       tcpProbe: () => Promise.resolve(true),
       headRequest: () => Promise.resolve(200),
       printOutput: false,
+      scheduleStatus: NO_SCHEDULE,
     });
 
     assert.ok(summary.failed >= 1, `expected >=1 failed, got: ${summary.failed}`);

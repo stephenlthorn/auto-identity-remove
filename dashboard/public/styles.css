@@ -73,7 +73,7 @@ input:focus { outline: none; border-color: var(--accent); }
 .grid th, .grid td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--border); font-size: 13px; }
 .grid th { color: var(--dim); font-weight: 600; position: sticky; top: 0; background: var(--panel); }
 .grid tr:hover td { background: var(--panel2); }
-.badge { font-size: 11px; padding: 2px 8px; border-radius: 999px; font-weight: 600; }
+.badge { font-size: 11px; padding: 2px 8px; border-radius: 999px; font-weight: 600; white-space: nowrap; }
 .badge.ok { background: #102a17; color: #7ee787; } .badge.pending { background: #2b2410; color: #f0c674; }
 .badge.manual { background: #211633; color: #d2a8ff; } .badge.none { background: #1b2029; color: var(--dim); }
 /* error/notfound/other: aligned to watcher vocab (keep in sync with statusFor in app.js) */
@@ -142,11 +142,12 @@ html, body { max-width: 100%; overflow-x: hidden; }
   .btn { padding: 10px 14px; min-height: 42px; flex: 1 1 auto; }
   .run-controls, .sched-actions { gap: 6px; }
   .adv-label { width: 100%; margin: 4px 0 0; }
-  /* Broker table: keep Broker / Status / action; drop Method, Pri, Scope, Last action */
-  .grid th:nth-child(2), .grid td:nth-child(2),
-  .grid th:nth-child(3), .grid td:nth-child(3),
-  .grid th:nth-child(4), .grid td:nth-child(4),
-  .grid th:nth-child(6), .grid td:nth-child(6) { display: none; }
+  /* Broker table: keep Broker / Status / people / action; drop Method, Pri, Scope, Last action.
+     By class, not position: the person columns sit between Status and Last action. */
+  .grid th.c-method, .grid td.c-method,
+  .grid th.c-pri, .grid td.c-pri,
+  .grid th.c-scope, .grid td.c-scope,
+  .grid th.c-last, .grid td.c-last { display: none; }
   .grid th, .grid td { padding: 11px 8px; }
   .row-run { padding: 6px 12px; min-height: 34px; }
   h1 { font-size: 16px; } .logo { font-size: 22px; }
@@ -182,3 +183,18 @@ html, body { max-width: 100%; overflow-x: hidden; }
   .wizard-actions { flex-wrap: wrap; }
   .wizard-actions #wizSkip { margin-left: 0; }
 }
+
+/* ---------- per-person status, run history ---------- */
+.person-col { text-align: center; white-space: nowrap; }
+.initials { display: inline-block; min-width: 2.4em; font-family: var(--mono); font-size: 12px; font-weight: 700; color: var(--accent); }
+.hist-person { margin: 2px 0; }
+.hist-id { font-family: var(--mono); font-size: 11px; }
+.pager { display: flex; gap: 8px; }
+.run-detail { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border); }
+.run-detail .toolbar h3 { margin: 0; font-family: var(--mono); font-size: 14px; word-break: break-all; }
+.banner code { color: #f0c674; }
+
+/* ---------- config banner + confirm modal action line ---------- */
+.banner { background: #2d1f06; border: 1px solid #9e6a03; color: #f0c674; border-radius: 10px;
+  padding: 12px 14px; margin-bottom: 18px; font-size: 13px; }
+.confirm-action { font-weight: 600; margin-bottom: 4px; }

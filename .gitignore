@@ -7,11 +7,31 @@ state.json.checkpoint
 state.json.checkpoint.tmp
 state.json.tmp
 state.json.lock
+config.json.tmp
+config.json.enc.tmp
+state.json.bak.tmp
+state.json.corrupt-*
+state.json.bak.corrupt-*
+confirm-processed.json
+confirm-processed.json.*.tmp
+last-run.json
+last-run.json.*.tmp
+config.json.bak
+config.json.enc.bak
+config.json.unreadable-*.bak
+config.json.enc.unreadable-*.bak
+# Temp files of the atomic writers (safe-write.js, private-fs.js): a write that was
+# killed mid-way leaves one behind, holding a full copy of what it was writing.
+*.tmp
+*.tmp-*
+dashboard/.auth.json
 serp-history.json
 data/serp-history.json
 data/feeds-brokers.json
 data/exposure-history.json
 data/exposure-history.json.bak
+data/breach-result.json
+data/*.tmp
 inbox/
 logs/
 logs/snapshots/
@@ -19,3 +39,12 @@ logs/reports/
 *.log
 .DS_Store
 .claude/
+
+# TLS material (e.g. an exported Proton Mail Bridge cert/key for SMTP)
+*.pem
+
+# Secrets and the Docker recipe's single data directory (config, state, logs).
+# aidr-home/ holds everything above, plus the passphrase file for unattended
+# runs on an encrypted config.
+*.passphrase
+aidr-home/

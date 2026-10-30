@@ -16,7 +16,9 @@
     "generic-runner.js",
     "run.sh",
     "config.example.json",
-    "data/",
+    "data/badbool-extra.json",
+    "data/dead-urls.json",
+    "data/markup-parsed.json",
     "README.md"
   ],
   "scripts": {
@@ -29,14 +31,15 @@
     "review:cross-model": "bash scripts/cross-model-review.sh"
   },
   "dependencies": {
-    "axios": "^1.7.2",
+    "axios": "^1.21.0",
+    "express": "^4.21.2",
     "playwright": "1.60.0"
   },
   "optionalDependencies": {
-    "nodemailer": "^8.0.9"
+    "nodemailer": "^10.3.1"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.0.0"
   },
   "keywords": ["privacy", "data-broker", "opt-out", "gdpr", "ccpa", "automation", "playwright"],
   "license": "MIT"

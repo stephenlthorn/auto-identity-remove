@@ -15,41 +15,21 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
 const { processGenericUrl, _setConfig } = require('../generic-runner');
+const { makeFakePage, optOutForm } = require('./helpers/generic-fake-page');
 
 const PHONE_SELECTORS = new Set(['input[type="tel"]', 'input[name*="phone" i]', 'input[placeholder*="phone" i]']);
-const EMAIL_SELECTORS = new Set(['input[type="email"]', 'input[name*="email" i]', 'input[placeholder*="email" i]']);
 
+// One opt-out form on the page, with or without an email box and a phone box.
 function makeStubPage({ hasEmail, hasPhone }) {
-  const filled = [];
-  const clicked = [];
-  const locator = (sel) => {
-    const isSubmitSel = sel.includes('button[type="submit"]');
-    const present = isSubmitSel
-      || (hasEmail && EMAIL_SELECTORS.has(sel))
-      || (hasPhone && PHONE_SELECTORS.has(sel));
-    const self = {
-      first: () => self,
-      all: async () => [],
-      count: async () => (present ? 1 : 0),
-      isVisible: async () => present,
-      evaluate: async (fn) => fn({ tagName: 'INPUT', type: 'text' }),
-      fill: async (v) => { filled.push({ sel, v }); },
-      selectOption: async () => {},
-      click: async () => { clicked.push(sel); },
-      locator: () => self,
-      allTextContents: async () => [],
-    };
-    return self;
-  };
-  return {
-    filled,
-    clicked,
-    goto: async () => ({ status: () => 200 }),
-    waitForTimeout: async () => {},
-    content: async () => '<html><body>thanks</body></html>',
-    locator,
-    url: () => 'https://broker.example/opt-out',
-  };
+  const fields = [hasEmail && 'email', hasPhone && 'phone'].filter(Boolean);
+  const page = makeFakePage({
+    forms: [optOutForm({ fields, afterSubmit: { body: 'Your request has been received.' } })],
+  });
+  // Older assertions read {sel, v}; keep that shape over the shared fake.
+  return Object.defineProperties(page, {
+    filledPairs: { get: () => page.filled.map(f => ({ sel: f.sel, v: f.value })) },
+    clickedSels: { get: () => page.clicked.map(c => c.sel) },
+  });
 }
 
 const BROKER = { name: 'ExampleBroker', url: 'https://broker.example/opt-out', source: 'markup' };
@@ -69,8 +49,8 @@ test('a deletion form with a phone field gets the phone number', async () => {
   const result = await processGenericUrl(page, BROKER, { optOuts: {} }, false, new Set());
 
   assert.equal(result.status, 'success');
-  assert.ok(page.filled.some(f => PHONE_SELECTORS.has(f.sel) && f.v === '(512) 555-0000'),
-    `phone should be filled, got ${JSON.stringify(page.filled)}`);
+  assert.ok(page.filledPairs.some(f => PHONE_SELECTORS.has(f.sel) && f.v === '(512) 555-0000'),
+    `phone should be filled, got ${JSON.stringify(page.filledPairs)}`);
 });
 
 test('a page with only a phone box is not submitted as an opt-out', async () => {
@@ -78,6 +58,6 @@ test('a page with only a phone box is not submitted as an opt-out', async () => 
   const result = await processGenericUrl(page, BROKER, { optOuts: {} }, false, new Set());
 
   assert.notEqual(result.status, 'success', 'a lone phone box is a search, not a removal form');
-  assert.ok(!page.clicked.some(s => s.includes('button[type="submit"]')), 'nothing may be submitted');
-  assert.deepEqual(page.filled, [], 'the number is not even typed into a lone search box');
+  assert.ok(!page.clickedSels.some(s => s.includes('button[type="submit"]')), 'nothing may be submitted');
+  assert.deepEqual(page.filledPairs, [], 'the number is not even typed into a lone search box');
 });

@@ -30,7 +30,7 @@ test('install.sh has a sh/bash shebang and set -e', () => {
 test('install.sh checks for node and a minimum major version', () => {
   const src = read();
   assert.match(src, /command -v node/);
-  assert.match(src, /\b18\b/, 'must reference the Node 18 minimum');
+  assert.match(src, /\b20\b/, 'must reference the Node 20 minimum');
 });
 
 test('install.sh runs npm ci', () => {

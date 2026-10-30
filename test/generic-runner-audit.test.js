@@ -7,8 +7,27 @@
  * and asserts the returned genericStats object reflects the correct counts.
  */
 
-const { test } = require('node:test');
+const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const cfg = require('../lib/config');
+
+// The 'error' outcomes below make runGenericBrokers call recordFailure, which
+// persists state. Point that at a temp file: the default is the repo-root
+// state.json, and any other test file writing it in parallel races on the
+// shared state.json.tmp (ENOENT on rename). freshRequire only re-requires
+// generic-runner, so lib/config (and this override) stays cached.
+let tmpDir;
+before(() => {
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'audit-'));
+  cfg.setTestStatePath(path.join(tmpDir, 'state.json'));
+});
+after(() => {
+  cfg.setTestStatePath(null);
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
 
 // We need to mock fs reads and the browser context so no real I/O happens.
 // Strategy: require the module with carefully-crafted stubs injected by
