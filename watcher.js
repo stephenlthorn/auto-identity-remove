@@ -21,8 +21,8 @@ const os   = require('os');
 // that sends the user's name, address and phone to ~540 sites (CORE-6).
 const ARGS = require('./lib/args').parseWatcherArgsOrExit();
 
-const { STATE_PATH, CONFIG_PATH, CONFIG_ENC_PATH, RECHECK_DAYS, loadConfig, loadState, saveState, recordSuccess, setDryRun, getPersonsFromConfig, loadCheckpoint, clearCheckpoint, findResumeIndex, readEntry, validateRunnableConfig } = require('./lib/config');
-const { results, logResult, buildSummary, setDefunctBrokers, setCurrentPerson, setStateForSummary } = require('./lib/logger');
+const { STATE_PATH, CONFIG_PATH, CONFIG_ENC_PATH, RECHECK_DAYS, loadConfig, loadState, saveState, recordSuccess, setDryRun, getPersonsFromConfig, loadCheckpoint, saveCheckpoint, clearCheckpoint, findResumeIndex, planResume, readEntry, validateRunnableConfig } = require('./lib/config');
+const { results, logResult, buildSummary, setDefunctBrokers, setCurrentPerson, setStateForSummary, setJournal } = require('./lib/logger');
 const { findDefunct, DEFUNCT_THRESHOLD } = require('./lib/defunct');
 const { sendText, desktopNotify, openInBrowser, canOpenBrowser, pickManualUrlsToOpen } = require('./lib/notify');
 const brokerRunner = require('./lib/broker-runner');
@@ -35,10 +35,16 @@ const { editAllowlist } = require('./lib/allowlist-edit');
 const { diffResults, loadPreviousLog } = require('./lib/diff');
 const { renderAuditMarkdown, writeAuditFile, timestampForFilename } = require('./lib/audit');
 const { buildStealthScript } = require('./lib/stealth');
-const { buildLaunchOptions, resolveHeadless, isLowMemory } = require('./lib/browser');
+const { buildLaunchOptions, resolveHeadless, isLowMemory, createPersonContexts, utilityProfileDir, browserConfigProblems, describeProxy } = require('./lib/browser');
 const { installShutdownHandlers } = require('./lib/shutdown');
 const { writePrivateFile, mkdirPrivate } = require('./lib/private-fs');
 const { resolveMode } = require('./lib/mode-dispatch');
+const { resolvePaths } = require('./lib/paths');
+const { openJournal, journalPathFor, countResults } = require('./lib/journal');
+const { startHeartbeat, defaultHeartbeatPath, outcomeFromResults } = require('./lib/heartbeat');
+const { applyRetention } = require('./lib/retention');
+const { isPlaceholderKey, detectAndSolveCaptcha } = require('./lib/captcha');
+const { handleCaptcha, resolveManualMode, manualTimeoutSec, captchaFailureDetail, announceCaptchaWait, captchaBrokersFromLog, captchaConfigWarnings } = require('./lib/manual-captcha');
 
 const PREVIEW           = ARGS.preview;
 const DRY_RUN           = ARGS.dryRun; // lib/args: --preview implies --dry-run
@@ -47,6 +53,12 @@ const SERP_SCAN         = ARGS.serpScan;
 const SERP_WATCH        = ARGS.serpWatch;
 const INSTALL_SCHEDULER = ARGS.installScheduler;
 const DOCTOR            = ARGS.doctor;
+const CAPTCHAS          = ARGS.captchas;        // aidr captchas: re-run only what ended on a CAPTCHA, headed
+const SOLVE_CAPTCHAS    = ARGS.solveCaptchas;   // wait for a person on a CAPTCHA the solver cannot do
+const CONFIG_CHECK      = ARGS.configCheck;
+const PURGE             = ARGS.purge;
+const SCHEDULE_STATUS   = ARGS.scheduleStatus;
+const UNINSTALL_SCHEDULER = ARGS.uninstallScheduler;
 
 // ── Filter flags ──────────────────────────────────────────────────────────────
 const ONLY_ARG     = ARGS.only;
@@ -81,8 +93,11 @@ const FREEZE_MODE      = ARGS.freezeMode;
 const CONFIRM_EMAILS   = ARGS.confirmEmails;
 const confirmEmailsDir = ARGS.confirmEmailsDir;
 
+// Where every runtime file lives is decided once, in lib/paths.js (AIDR_HOME and
+// its overrides; with none set, exactly where they always were).
+const PATHS = resolvePaths();
 const LOCK_PATH = STATE_PATH + '.lock';
-const LOG_DIR   = path.join(__dirname, 'logs');
+const LOG_DIR   = PATHS.logs;
 
 // Playwright's default is 30 s PER ACTION: one hidden toggle stalled a broker for
 // half a minute (BRK-12). Navigations keep a generous limit of their own, because
@@ -157,7 +172,10 @@ function loadRunnableConfigOrExit() {
     process.exit(1);
   }
 
-  const problems = validateRunnableConfig(config);
+  // A malformed browser section (a typo in "proxy", an unsupported proxy scheme)
+  // makes every launch throw, rather than start without the proxy; saying so here
+  // is a refusal before anything is submitted (R7).
+  const problems = [...validateRunnableConfig(config), ...browserConfigProblems(config.browser)];
   if (problems.length > 0) {
     console.error('❌ config is not runnable:\n  - ' + problems.join('\n  - '));
     console.error('   Run `node setup.js` or edit config.json, then re-run.');
@@ -498,7 +516,7 @@ async function modeComplaints() {
     process.exit(0);
   }
 
-  const outDir = path.join(LOG_DIR, 'complaints');
+  const outDir = PATHS.complaints;
   const pad = (s, n) => String(s).padEnd(n);
   console.log('\n' + pad('Broker', 32) + pad('Regime', 8) + pad('Days overdue', 14) + 'Requested');
   console.log('-'.repeat(78));
@@ -522,7 +540,9 @@ async function modeComplaints() {
   let context;
   if (!DRY_RUN) {
     const chromiumForPdf = loadChromium();
-    context = await chromiumForPdf.launchPersistentContext(profileDirOf(config), buildLaunchOptions({ headless: true }));
+    // The utility profile: rendering local HTML belongs to no person, and keeping it
+    // out of every person's directory means it cannot leave cookies in one (R7).
+    context = await chromiumForPdf.launchPersistentContext(utilityProfileDir(profileDirOf(config)), buildLaunchOptions({ headless: true }));
     tuneContext(context);
     newPage = () => context.newPage();
   } else {
@@ -556,7 +576,9 @@ async function modeConfirmEmails() {
 
   try {
     console.log(`\nProcessing confirmation emails from: ${confirmEmailsDir}`);
-    const context = await chromiumForConfirm.launchPersistentContext(profileDirOf(config), buildLaunchOptions({ headless: true }));
+    // Confirmation links are broker sites, so the configured proxy and user agent apply;
+    // the profile is the utility one, not any person's (R7).
+    const context = await chromiumForConfirm.launchPersistentContext(utilityProfileDir(profileDirOf(config)), buildLaunchOptions({ headless: true, browser: config.browser }));
     guard.register(() => context.close().catch(() => {}));
     tuneContext(context);
 
@@ -630,7 +652,7 @@ async function modeReport() {
     mkdirPrivate(REPORT_DIR);
     const outPath = reportPdfPath(new Date());
 
-    const context = await chromiumForReport.launchPersistentContext(profileDirOf(reportConfig), buildLaunchOptions({ headless: true }));
+    const context = await chromiumForReport.launchPersistentContext(utilityProfileDir(profileDirOf(reportConfig)), buildLaunchOptions({ headless: true }));
     guard.register(() => context.close().catch(() => {}));
     tuneContext(context);
 
@@ -706,12 +728,105 @@ function modeInstallScheduler() {
   const { installScheduleForPlatform } = require('./lib/scheduler');
   const { getPlatform } = require('./lib/platform');
   const scriptPath = path.join(__dirname, 'run.sh');
-  const logDir     = path.join(__dirname, 'logs');
+  const logDir     = PATHS.logs;
   const platform   = getPlatform();
   const result     = installScheduleForPlatform({ platform, scriptPath, logDir });
   console.log(`\nScheduler installed via ${result.method}:`);
   console.log(`  ${result.detail}\n`);
+  console.log('  Check it any time with: aidr schedule status\n');
   process.exit(0);
+}
+
+// ── --schedule-status: is the monthly job installed, and how did its last run end? ──
+// Read-only: it asks the OS scheduler and reads last-run.json, nothing else. Exit
+// status is for scripts: 0 installed and active, 1 not installed, 2 installed but
+// not active (a job that exists and will not fire is worse than one that is absent).
+function modeScheduleStatus() {
+  const { getScheduleStatus, formatScheduleStatus } = require('./lib/scheduler');
+  const status = getScheduleStatus({ scriptPath: path.join(__dirname, 'run.sh') });
+  console.log(ARGS.json ? JSON.stringify(status, null, 2) : '\n' + formatScheduleStatus(status) + '\n');
+  process.exit(!status.installed ? 1 : status.active === false ? 2 : 0);
+}
+
+// ── --uninstall-scheduler: remove the monthly job (only the one this tool installed) ──
+function modeUninstallScheduler() {
+  const { uninstallSchedule } = require('./lib/scheduler');
+  const result = uninstallSchedule({ scriptPath: path.join(__dirname, 'run.sh') });
+  console.log(`\n${result.detail}`);
+  for (const warning of result.warnings) console.log(`  warning: ${warning}`);
+  for (const error of result.errors) console.error(`  error: ${error}`);
+  console.log('');
+  process.exit(result.errors.length > 0 ? 1 : 0);
+}
+
+// ── --config-check: every problem in config.json, which files are in use, then exit ──
+// Read-only and never exits on a bad config: that is its whole job. Exit 1 when it
+// found a problem that would stop a run; warnings alone exit 0.
+function modeConfigCheck() {
+  const { checkConfig, formatConfigCheck } = require('./lib/config-check');
+  const result = checkConfig({ env: process.env });
+  for (const line of formatConfigCheck(result)) console.log(line);
+  process.exit(result.ok ? 0 : 1);
+}
+
+// The config for a mode that can do without one: a missing or unreadable config is
+// an exception to catch, not the process.exit loadConfig does.
+function readConfigQuietly() {
+  if (!fs.existsSync(CONFIG_PATH) && !fs.existsSync(CONFIG_ENC_PATH)) {
+    throw Object.assign(new Error('no config'), { code: 'ENOCONFIG' });
+  }
+  return loadConfig();
+}
+
+function askYesNo(question) {
+  const readline = require('readline');
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(/^y(es)?$/i.test(String(answer).trim()));
+    });
+  });
+}
+
+// ── --purge: delete old PII logs, audit reports and screenshots, then exit ───
+// Never touches complaints, state, config or the latest run (lib/retention.js).
+// Lists what it found first; nothing is deleted without --yes or an answer of y.
+async function modePurge() {
+  const { resolvePurgeAge, purgeArtifacts, formatPurgeReport } = require('./lib/retention');
+  const dirs = { logs: PATHS.logs, snapshots: PATHS.snapshots, reports: PATHS.reports };
+
+  let age;
+  try {
+    age = resolvePurgeAge({ olderThan: ARGS.olderThan, force: ARGS.force, loadConfig: readConfigQuietly });
+  } catch (err) {
+    console.error(`Error: ${err.message}`);
+    process.exit(2);
+  }
+  if (age.note) console.log(`\nNote: ${age.note}`);
+
+  const preview = purgeArtifacts({ dirs, olderThanDays: age.days, force: ARGS.force, dryRun: true });
+  console.log('');
+  for (const line of formatPurgeReport(preview, { listFiles: true })) console.log(line);
+  console.log('');
+  if (ARGS.dryRun || preview.deleted.length === 0) process.exit(0);
+
+  if (!ARGS.yes) {
+    if (!process.stdin.isTTY) {
+      console.error('Not deleting: there is no terminal to confirm on. Re-run with --yes to delete these files.');
+      process.exit(2);
+    }
+    const noun = preview.deleted.length === 1 ? 'file' : 'files';
+    if (!(await askYesNo(`Delete these ${preview.deleted.length} ${noun}? [y/N] `))) {
+      console.log('Nothing was deleted.');
+      process.exit(0);
+    }
+  }
+
+  const done = purgeArtifacts({ dirs, olderThanDays: age.days, force: ARGS.force, dryRun: false });
+  for (const line of formatPurgeReport(done)) console.log(line);
+  console.log('');
+  process.exit(done.errors.length > 0 ? 1 : 0);
 }
 
 // -- --know: fire right-to-know (data access) requests to email brokers, exit --
@@ -767,16 +882,29 @@ async function modeKnow({ config, persons, state }) {
 
 // ── Normal run and the browser-backed read-only modes ────────────────────────
 
-async function main({ config, persons, state }) {
+// A real opt-out run leaves a heartbeat (R4); a preview, a verification and the
+// SERP modes do not, so `aidr schedule status` reports when the job last really ran.
+const isOptOutRun = () => !DRY_RUN && !VERIFY && !SERP_SCAN && !SERP_WATCH;
+
+async function main({ config, persons, state, captchaNames }) {
   const guard = acquireRunLock(LOCK_PATH);
+  const heartbeat = isOptOutRun() ? startHeartbeat(defaultHeartbeatPath()) : null;
+  // Registered first, so it runs after the browser and state cleanups on a signal:
+  // an interrupted run says so, instead of reading as a crash later.
+  if (heartbeat) guard.register(() => { heartbeat.finish({ outcome: 'failed' }); });
   try {
-    return await runWithBrowser({ config, persons, state, guard });
+    const outcome = await runWithBrowser({ config, persons, state, guard, captchaNames });
+    if (heartbeat) heartbeat.finish(outcomeFromResults(results));
+    return outcome;
+  } catch (err) {
+    if (heartbeat) heartbeat.finish({ outcome: 'failed' });
+    throw err;
   } finally {
     guard.release();
   }
 }
 
-async function runWithBrowser({ config, persons, state, guard }) {
+async function runWithBrowser({ config, persons, state, guard, captchaNames }) {
   const brokers = require('./brokers');
 
   console.log('\n🔒 auto-identity-remove - starting run');
@@ -808,44 +936,91 @@ async function runWithBrowser({ config, persons, state, guard }) {
       : path.join(os.homedir(), '.cache', 'ms-playwright');
   }
 
-  // Launch persistent browser (reuses profile / saved logins)
-  const profileDir = profileDirOf(config);
-  fs.mkdirSync(profileDir, { recursive: true });
-
   // Headless mode: respect HEADLESS env var, else auto-detect.
   // Default to false (headed) on platforms where a display is likely present.
   // In Docker (no $DISPLAY on linux), default to headless: true so the tool actually runs.
+  // `aidr captchas` is the exception: it exists so a person can see the window.
   const headlessEnv = process.env.HEADLESS;
-  const headless = resolveHeadless();
-  console.log(`🖥  Browser mode: ${headless ? 'headless' : 'headed'}${headlessEnv === undefined && process.platform === 'linux' ? ' (auto-detected)' : ''}${isLowMemory() ? ' [low-memory profile]' : ''}`);
+  const headless = CAPTCHAS ? false : resolveHeadless();
+  console.log(`🖥  Browser mode: ${headless ? 'headless' : 'headed'}${headlessEnv === undefined && process.platform === 'linux' && !CAPTCHAS ? ' (auto-detected)' : ''}${isLowMemory() ? ' [low-memory profile]' : ''} | ${describeProxy(config.browser && config.browser.proxy)}`);
+
+  // CAPTCHAs: decided once, here, from the run's own conditions (R1). The explicit
+  // runner and the generic pass both read the answer, so they cannot disagree.
+  const captcha = resolveCaptchaPlan({ config, headless });
+  brokerRunner.configure({ manual: captcha.manual, headless, isTTY: captcha.isTTY });
+  for (const line of captcha.lines) console.log(line);
 
   // A signal arriving mid-run saves what has been recorded and closes the
   // browser before the lock goes (the shutdown runs these last-registered first).
   guard.register(() => { if (!DRY_RUN) saveState(); });
-  const context = await chromium.launchPersistentContext(profileDir, buildLaunchOptions({ headless }));
-  guard.register(() => context.close().catch(() => {}));
-  tuneContext(context);
-  await context.addInitScript(buildStealthScript());
+
+  // One browser profile and one context PER PERSON (R7): cookies and logins that a
+  // broker learned about person A never reach person B. Contexts are launched when
+  // a person's turn comes and the previous one is closed first, so a small NAS still
+  // runs one Chromium at a time. The launch options are built per launch.
+  const contexts = createPersonContexts({
+    chromium,
+    baseDir: profileDirOf(config),
+    persons,
+    launchOptions: () => buildLaunchOptions({ headless, browser: config.browser }),
+    prepare: async (context) => {
+      tuneContext(context);
+      await context.addInitScript(buildStealthScript());
+    },
+  });
+  guard.register(() => contexts.close());
 
   try {
-    if (VERIFY)     return await runVerifyMode(context, { brokers, persons, state, config });
-    if (SERP_SCAN)  return await runSerpScanMode(context, { brokers, persons });
-    if (SERP_WATCH) return await runSerpWatchMode(context, { brokers, persons, config });
-    return await runSubmissions(context, { brokers, persons, state, config });
+    if (VERIFY)     return await runVerifyMode(contexts, { brokers, persons, state, config });
+    if (SERP_SCAN)  return await runSerpScanMode(contexts, { brokers, persons });
+    if (SERP_WATCH) return await runSerpWatchMode(contexts, { brokers, persons, config });
+    return await runSubmissions(contexts, { brokers, persons, state, config, guard, captchaNames, captcha, headless });
   } finally {
-    await context.close().catch(() => {});
+    await contexts.close();
   }
 }
 
+/**
+ * Whether a person may be asked to solve a CAPTCHA this run, and the lines that say
+ * so. `--captchas` and `--solve-captchas` force it on (headed only: nobody can solve
+ * a CAPTCHA in a window they cannot see, so headless is always off). Without either,
+ * captcha.manual decides: "auto" means a headed browser and an interactive terminal.
+ */
+function resolveCaptchaPlan({ config, headless }) {
+  const isTTY = Boolean(process.stdin.isTTY && process.stdout.isTTY);
+  const hasSolverKey = Boolean(config.capsolver && config.capsolver.apiKey && !isPlaceholderKey(config.capsolver.apiKey));
+  const manual = resolveManualMode({ config, headless, isTTY, hasSolverKey, force: Boolean(CAPTCHAS || SOLVE_CAPTCHAS) });
+  const seconds = manualTimeoutSec(config);
+  const wait = seconds % 60 === 0 ? `${seconds / 60} min` : `${seconds}s`;
+
+  const lines = captchaConfigWarnings(config).map(w => `⚠️  config: ${w}`);
+  if (manual) {
+    lines.push(`🧩 CAPTCHAs: ${hasSolverKey && !NO_CAPSOLVER ? 'CapSolver first, then ' : ''}you solve them in the browser window (up to ${wait} each)`);
+  } else if ((CAPTCHAS || SOLVE_CAPTCHAS) && headless) {
+    lines.push('🧩 CAPTCHAs: --solve-captchas needs a visible browser and this run is headless, so none can be solved by hand');
+  } else if (headless) {
+    lines.push('🧩 CAPTCHAs: no display here, so a CAPTCHA the solver cannot do is listed at the end. Solve them on a desktop machine with: aidr captchas');
+  } else {
+    lines.push(`🧩 CAPTCHAs: solver only (${isTTY ? 'captcha.manual is false' : 'no interactive terminal'}). To solve them yourself afterwards: aidr captchas`);
+  }
+  return { manual, isTTY, lines };
+}
+
 // ── Verify mode: T+7 post-submit verification loop ───────────────────────────
-async function runVerifyMode(context, { brokers, persons, state, config }) {
+async function runVerifyMode(contexts, { brokers, persons, state, config }) {
   const { runVerify } = require('./lib/verify-loop');
   // Each person is searched with THEIR OWN broker list: brokers.js bakes the
   // person's name and city into searchUrl, so a shared list recorded person B as
-  // verified clear from person A's search.
-  const result = await runVerify(context, brokers, persons, { state, config, brokersFor: (person) => brokers.forPerson(person) });
+  // verified clear from person A's search. And from THEIR OWN browser profile:
+  // contextFor hands out one person's context at a time (R7).
+  const result = await runVerify(null, brokers, persons, {
+    state,
+    config,
+    brokersFor: (person) => brokers.forPerson(person),
+    contextFor: (person, index) => contexts.forPerson(index),
+  });
   saveState();
-  await context.close().catch(() => {});
+  await contexts.close();
 
   console.log('\n' + '='.repeat(54));
   console.log('Verification results - ' + new Date().toLocaleString());
@@ -865,12 +1040,14 @@ async function runVerifyMode(context, { brokers, persons, state, config }) {
 }
 
 // ── SERP scan mode: search-engine broker visibility audit ────────────────────
-async function runSerpScanMode(context, { brokers, persons }) {
+async function runSerpScanMode(contexts, { brokers, persons }) {
   const { runSerpScan, describeScanOutcome } = require('./lib/serp-scan');
   console.log('\n🔎 SERP scan - checking broker visibility in search engines');
   console.log('   DDG first, then Bing, then Google (may be blocked).\n');
+  // One scan covers every person's name, from the first person's profile.
+  const context = await contexts.forPerson(0);
   const summary = await runSerpScan(context, persons, brokers, { _skipWrite: DRY_RUN });
-  await context.close().catch(() => {});
+  await contexts.close();
 
   const pad = (s, n) => String(s).padEnd(n);
   console.log('\n' + '='.repeat(62));
@@ -907,7 +1084,7 @@ async function runSerpScanMode(context, { brokers, persons }) {
 }
 
 // -- SERP watch mode: scan + diff vs history + alert on NEW domains ------------
-async function runSerpWatchMode(context, { brokers, persons, config }) {
+async function runSerpWatchMode(contexts, { brokers, persons, config }) {
   const { runSerpWatch, describeWatchOutcome } = require('./lib/serp-watch');
   const { runSerpScan } = require('./lib/serp-scan');
   console.log('\n SERP watch - scanning, then diffing against previous history');
@@ -919,8 +1096,9 @@ async function runSerpWatchMode(context, { brokers, persons, config }) {
     watchOptions._runSerpScan = (ctx, people, list) => runSerpScan(ctx, people, list, { _skipWrite: true });
     watchOptions._dispatchNotify = async () => {};
   }
+  const context = await contexts.forPerson(0);
   const watch = await runSerpWatch(context, persons, brokers, watchOptions);
-  await context.close().catch(() => {});
+  await contexts.close();
 
   console.log('\n' + '='.repeat(62));
   console.log('SERP Watch Results - ' + new Date().toLocaleString());
@@ -940,21 +1118,37 @@ async function runSerpWatchMode(context, { brokers, persons, config }) {
 }
 
 // ── The opt-out run: email opt-outs, explicit forms, noise, generic forms ────
-async function runSubmissions(context, { brokers, persons, state, config }) {
+async function runSubmissions(contexts, { brokers, persons, state, config, guard, captchaNames, captcha, headless }) {
   // Timestamped to the second (B8): two runs on the same day must not overwrite
   // each other, otherwise loadPreviousLog/diffResults can never diff intraday runs.
   const logFile = path.join(LOG_DIR, `run-${timestampForFilename(new Date().toISOString())}.json`);
+  const journalFile = journalPathFor(logFile);
   const stamp = () => new Date().toLocaleTimeString();
 
-  // ── Resolve --retry-failed broker set ──────────────────────────────────────
+  // A filtered, resumed or CAPTCHA-only run covers part of the broker list, so its
+  // log is marked: diffing the next full run against it would report hundreds of
+  // "newly removed" brokers. The same marker goes in the journal.
+  const partial = !!(ONLY_ARG || SKIP_ARG || RETRY_FAILED || RESUME || CAPTCHAS);
+  const runFilter = { only: ONLY_ARG || null, skip: SKIP_ARG || null, retryFailed: !!RETRY_FAILED, resume: !!RESUME, ...(CAPTCHAS ? { captchas: true } : {}) };
+
+  // ── Resolve the --retry-failed / --captchas broker set ─────────────────────
   let retryFailedFromLog;
-  if (RETRY_FAILED) {
-    const log = loadLastLog(LOG_DIR);
+  if (CAPTCHAS) {
+    // Read from the last run before the browser was launched (dispatch).
+    retryFailedFromLog = captchaNames;
+    console.log(`🧩 --captchas: ${retryFailedFromLog.size} broker(s) ended on a CAPTCHA last run`);
+  } else if (RETRY_FAILED) {
+    // exclude: a run in progress already has a journal on disk and must never be
+    // its own retry source.
+    const log = loadLastLog(LOG_DIR, { exclude: logFile });
     if (!log) {
-      console.log('⚠️  --retry-failed: no previous log found in logs/ - running all brokers.');
+      console.log('⚠️  --retry-failed: no previous log found in the log directory - running all brokers.');
     } else {
       retryFailedFromLog = extractFailedBrokers(log);
       console.log(`🔄 --retry-failed: ${retryFailedFromLog.size} broker(s) from last log`);
+      if (log.source === 'journal') {
+        console.log('   That run crashed before it wrote its log, so this list comes from its journal: brokers it never reached are not in it. Use --resume to carry on where it stopped.');
+      }
     }
   }
 
@@ -963,6 +1157,27 @@ async function runSubmissions(context, { brokers, persons, state, config }) {
   // They used to filter only the explicit list, so `--only Spokeo` still sent
   // every opt-out email and ran the whole generic pass (CORE-4).
   const include = makeBrokerPredicate({ only: ONLY_ARG, skip: SKIP_ARG, retryFailedFromLog });
+
+  // --resume: what the checkpoint proves is already done, per person (R2). The
+  // explicit pass and the generic pass of every person come back to where they stopped.
+  const savedCheckpoint = RESUME ? loadCheckpoint() : null;
+  if (RESUME && !savedCheckpoint) console.log('\n--resume: no checkpoint found, running all brokers');
+  const resumePlan = planResume(savedCheckpoint, persons);
+  const planFor = (i) => resumePlan[i] || { skipExplicit: false, explicitResumeKey: null, skipGeneric: false, genericResume: null };
+
+  // The crash-safe journal (R3): every result is appended as it happens, so a kill
+  // or an OOM leaves a log --retry-failed and `aidr captchas` can read. Opened before
+  // anything is logged (the relay failures below are results too) and never in a dry run.
+  let journal = null;
+  if (!DRY_RUN) {
+    mkdirPrivate(LOG_DIR);
+    journal = openJournal(journalFile, { startedAt: results.runAt, mode: 'run', partial, filter: runFilter });
+    setJournal(journal);
+    guard.register(() => {
+      journal.close({ interrupted: true, counts: countResults(results) });
+      setJournal(null);
+    });
+  }
 
   // The email each person submits with, resolved once (masked alias when a relay
   // is configured). A person the relay cannot serve is skipped everywhere below.
@@ -981,6 +1196,11 @@ async function runSubmissions(context, { brokers, persons, state, config }) {
 
   for (const [index, person] of persons.entries()) {
     if (relaySkipped.has(person)) continue;
+
+    if (planFor(index).skipExplicit) {
+      console.log(`\n--resume: the explicit pass for ${personName(person)} is already done, skipping`);
+      continue;
+    }
 
     // Everything logged below is tagged with this person, so a two-person run is
     // not one anonymous list (CFG-13).
@@ -1013,31 +1233,33 @@ async function runSubmissions(context, { brokers, persons, state, config }) {
       .sort((a, b) => (a.priority || 9) - (b.priority || 9));
 
     if (RESUME) {
-      const ckpt = loadCheckpoint();
-      if (ckpt) {
-        // Match via stateKey (B22): the checkpoint stores the composite
-        // "Broker|First Last" key in multi-person mode, so a bare-name compare
-        // would miss and silently re-run everything.
-        const ckptIdx = findResumeIndex(sorted, ckpt, person, persons.length);
+      // Only the person the explicit checkpoint belongs to resumes mid-list; planResume
+      // matched it by the composite "Broker|First Last" key (B22), so a bare-name
+      // compare cannot miss it and silently re-run everything.
+      const resumeKey = planFor(index).explicitResumeKey;
+      if (resumeKey) {
+        const ckptIdx = findResumeIndex(sorted, resumeKey, person, persons.length);
         if (ckptIdx > 0) {
-          console.log(`\n--resume: skipping ${ckptIdx} broker(s) before "${ckpt}"`);
+          console.log(`\n--resume: skipping ${ckptIdx} broker(s) before "${resumeKey}"`);
           sorted = sorted.slice(ckptIdx);
         } else if (ckptIdx === -1) {
-          console.log(`\n--resume: checkpoint broker "${ckpt}" not found in list, running all`);
+          console.log(`\n--resume: checkpoint broker "${resumeKey}" not found in list, running all`);
         }
-      } else {
-        console.log('\n--resume: no checkpoint found, running all brokers');
       }
     }
 
-    if (ONLY_ARG || SKIP_ARG || RETRY_FAILED) {
+    if (ONLY_ARG || SKIP_ARG || RETRY_FAILED || CAPTCHAS) {
       console.log(`🔎 Filter applied - ${sorted.length} broker(s) will run`);
     }
 
     console.log('\n── Explicit broker opt-outs ───────────────────────────────');
-    for (const broker of sorted) {
-      process.stdout.write(`\n[${stamp()}] ${broker.name}… `);
-      await brokerRunner.processBroker(context, broker);
+    // This person's own browser, launched only when there is something to open it for.
+    if (sorted.length > 0) {
+      const context = await contexts.forPerson(index);
+      for (const broker of sorted) {
+        process.stdout.write(`\n[${stamp()}] ${broker.name}… `);
+        await brokerRunner.processBroker(context, broker);
+      }
     }
   }
   setCurrentPerson(null);
@@ -1056,6 +1278,8 @@ async function runSubmissions(context, { brokers, persons, state, config }) {
       console.log('\n⚠️  --pollute: no brokers tagged acceptsBogus: true - nothing to do.');
     } else {
       console.log(`\n── Noise mode - submitting ${POLLUTE_COUNT} bogus record(s) to ${bogBrokers.length} broker(s) ─`);
+      // The browser of the last person served, so the noise needs no extra launch.
+      const context = await contexts.forPerson(persons.length - 1);
       for (let i = 0; i < POLLUTE_COUNT; i++) {
         const fakePerson = generateBogusPerson();
         console.log(`\n   [bogus ${i + 1}/${POLLUTE_COUNT}] ${fakePerson.firstName} ${fakePerson.lastName} (${fakePerson.city}, ${fakePerson.state})`);
@@ -1090,13 +1314,42 @@ async function runSubmissions(context, { brokers, persons, state, config }) {
   // faster run that quietly skips people. Domain-level toggles (cookie /
   // "Do Not Sell") get re-applied per person, which is harmless.
   const { runGenericBrokers } = require('./generic-runner');
+
+  // A CAPTCHA in front of a generic form goes to the same solver, and the same wait
+  // for a person, that the explicit runner uses (R1, R2). `manual` was decided once
+  // for the whole run, and an unsolved one is worded exactly like an explicit one.
+  const timeoutSec = manualTimeoutSec(config);
+  const genericHandleCaptcha = (page, ctx) => handleCaptcha(page, {
+    capsolver: NO_CAPSOLVER ? null : config.capsolver,
+    manual: captcha.manual,
+    onWaiting: (info) => announceCaptchaWait(info, { notify: desktopNotify }),
+    timeoutMs: timeoutSec * 1000,
+    solve: detectAndSolveCaptcha,
+    ...ctx,
+  });
+  const genericCaptchaDetail = ({ outcome, broker }) => captchaFailureDetail({
+    outcome,
+    url: broker && broker.url,
+    timeoutSec,
+    headless,
+    isTTY: captcha.isTTY,
+    config,
+    noSolver: NO_CAPSOLVER,
+  });
+
   const genericTotals = {};
   for (const [index, person] of persons.entries()) {
     if (relaySkipped.has(person)) continue;
+    const resume = planFor(index);
+    if (resume.skipGeneric) {
+      console.log(`\n--resume: the generic pass for ${personName(person)} is already done, skipping`);
+      continue;
+    }
     setCurrentPerson(person);
     if (persons.length > 1) {
       console.log(`\n── Generic brokers for ${personName(person)} ──`);
     }
+    const context = await contexts.forPerson(index);
     const genericResult = await runGenericBrokers(context, explicitHosts, state, logResult, recordSuccess, {
       dryRun: DRY_RUN,
       person,
@@ -1108,6 +1361,11 @@ async function runSubmissions(context, { brokers, persons, state, config }) {
       include,
       // Lets the generic pass drop rows that are the same company as an explicit broker.
       explicitBrokers: brokers,
+      // R2: write a resume point as the pass advances, and pick one back up.
+      saveCheckpoint,
+      resumeFrom: resume.genericResume || undefined,
+      handleCaptcha: genericHandleCaptcha,
+      captchaFailureDetail: genericCaptchaDetail,
     });
     if (genericResult && genericResult.genericStats) {
       for (const [k, v] of Object.entries(genericResult.genericStats)) {
@@ -1122,19 +1380,17 @@ async function runSubmissions(context, { brokers, persons, state, config }) {
   // so a preview never deletes the checkpoint of an interrupted real run).
   clearCheckpoint();
 
-  await context.close().catch(() => {});
+  await contexts.close();
 
-  // Save run log (skipped in dry-run). A filtered or resumed run covers only part
-  // of the broker list, so it is marked: diffing the next full run against it
-  // would report hundreds of "newly removed" brokers.
-  const partial = !!(ONLY_ARG || SKIP_ARG || RETRY_FAILED || RESUME);
-  const logBody = partial
-    ? { ...results, partial: true, filter: { only: ONLY_ARG || null, skip: SKIP_ARG || null, retryFailed: !!RETRY_FAILED, resume: !!RESUME } }
-    : results;
+  // Save run log (skipped in dry-run); `partial` and `runFilter` were fixed at the top.
+  const logBody = partial ? { ...results, partial: true, filter: runFilter } : results;
   if (!DRY_RUN) {
     // The log holds the user's name and the brokers that hold their data.
     mkdirPrivate(LOG_DIR);
     writePrivateFile(logFile, JSON.stringify(logBody, null, 2));
+    // The summary is the record now; the journal is closed with the same counts.
+    journal.close({ counts: countResults(results) });
+    setJournal(null);
   }
 
   // Diff against previous run + write audit markdown (skipped in dry-run)
@@ -1151,12 +1407,24 @@ async function runSubmissions(context, { brokers, persons, state, config }) {
     });
     const auditPath = writeAuditFile(LOG_DIR, auditMd, results.runAt);
     console.log(`📝 Audit: ${auditPath}`);
+
+    // retention.days (R6): drop PII artifacts older than the configured age, but never
+    // this run's own log, journal and audit report. A purge hiccup never fails the run.
+    const retention = applyRetention({
+      config,
+      dirs: { logs: PATHS.logs, snapshots: PATHS.snapshots, reports: PATHS.reports },
+      keep: [logFile, journalFile, auditPath],
+      dryRun: DRY_RUN,
+    });
+    for (const line of retention.lines) console.log(line);
   }
 
   // Manual-required sites: open them when a desktop is there to show them, and
   // never in a dry run. A headless host has no browser to open.
+  // The URL is the first word of the detail: the explicit runner's detail goes on to
+  // say why ("<url> - CAPTCHA not solved ..."), so the whole detail is not a URL.
   const manualUrls = [...results.captchaFailed, ...results.manual]
-    .map(r => r.detail || '')
+    .map(r => (r.detail || '').split(/\s+/)[0])
     .filter(u => u.startsWith('http'));
   if (manualUrls.length > 0) {
     const { open, more } = pickManualUrlsToOpen(manualUrls);
@@ -1170,6 +1438,9 @@ async function runSubmissions(context, { brokers, persons, state, config }) {
     if (more > 0) {
       console.log(`   ${more} more manual site(s) not opened - see the manual entries in ${DRY_RUN ? 'the output above' : logFile}`);
     }
+  }
+  if (results.captchaFailed.length > 0) {
+    console.log(`\n🧩 ${results.captchaFailed.length} broker(s) ended on a CAPTCHA. Solve them now: aidr captchas${headless ? ' (on a desktop machine: this run had no display)' : ''}`);
   }
 
   // Print summary (with the drift section, which needs the state)
@@ -1203,6 +1474,32 @@ async function runSubmissions(context, { brokers, persons, state, config }) {
   desktopNotify('Privacy Watcher', `Done - ${results.succeeded.length} submitted, ${results.pendingConfirm.length} awaiting email confirmation, ${manualCount} need manual action (${totalProcessed} total)`);
 }
 
+// ── aidr captchas: which brokers to go back to ───────────────────────────────
+
+/**
+ * The brokers the last run left on a CAPTCHA, or null when there is nothing to do.
+ *
+ * Read from the newest run log (or its journal, when that run crashed) BEFORE the
+ * lock, the browser or the relay are touched: with nothing to solve there is no
+ * reason to open a window, and with no display there is no way to solve anything,
+ * so both are said plainly and at once.
+ */
+function resolveCaptchaRetry() {
+  const log = loadLastLog(LOG_DIR);
+  const names = log ? captchaBrokersFromLog(log) : new Set();
+  if (names.size === 0) {
+    console.log(log
+      ? '\nNo brokers ended on a CAPTCHA in the last run.\n'
+      : '\nNo previous run found in the log directory, so there is no CAPTCHA to solve.\n');
+    return null;
+  }
+  if (!canOpenBrowser()) {
+    console.error('aidr captchas needs a display to show the CAPTCHAs. Run it on a desktop machine.');
+    process.exit(1);
+  }
+  return names;
+}
+
 // ── Dispatch ──────────────────────────────────────────────────────────────────
 
 async function dispatch() {
@@ -1231,16 +1528,26 @@ async function dispatch() {
   if (REPORT)                          return modeReport();
   if (DOCTOR)                          return modeDoctor();
   if (UPDATE_BROKERS)                  return modeUpdateBrokers();
+  if (CONFIG_CHECK)                    return modeConfigCheck();
+  if (PURGE)                           return modePurge();
+  if (SCHEDULE_STATUS)                 return modeScheduleStatus();
+  if (UNINSTALL_SCHEDULER)             return modeUninstallScheduler();
 
   setDryRun(DRY_RUN); // makes recordSuccess/saveState no-op-on-disk in dry-run
 
   if (INSTALL_SCHEDULER)               return modeInstallScheduler();
 
+  let captchaNames = null;
+  if (CAPTCHAS) {
+    captchaNames = resolveCaptchaRetry();
+    if (captchaNames === null) return;
+  }
+
   const { config, persons } = loadRunnableConfigOrExit();
   const state = loadState();
 
   if (KNOW_MODE)                       return modeKnow({ config, persons, state });
-  return main({ config, persons, state });
+  return main({ config, persons, state, captchaNames });
 }
 
 dispatch().catch(err => {

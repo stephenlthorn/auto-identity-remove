@@ -15,6 +15,14 @@
  * AIDR_FAKE_HANG=init makes addInitScript never resolve: the run stalls right
  * after the browser "launches", which is where a signal test sends SIGTERM.
  *
+ * The OS scheduler is fenced off too. lib/scheduler.js is handed a fake command
+ * runner the moment it loads: `aidr schedule status|uninstall` in a child process
+ * can never reach the real crontab, launchctl, systemctl or schtasks. Every call
+ * is recorded (`scheduler`), and AIDR_FAKE_SCHEDULER names a JSON file mapping
+ * "cmd arg arg" to { status, stdout, stderr } for the answers a test wants; any
+ * command it does not list answers 127 (not installed). The synchronous
+ * child_process calls the INSTALL paths make are refused outright (`scheduler-blocked`).
+ *
  * Not a test file (no .test.js suffix).
  */
 
@@ -107,11 +115,61 @@ function makeContext() {
 const fakePlaywright = {
   chromium: {
     async launchPersistentContext(profileDir, options) {
-      record('launch', { headless: !!(options && options.headless) });
+      // The directory NAME only (person-0-<hash>, utility): paths differ per sandbox.
+      // The proxy is recorded as its server alone, never its credentials.
+      record('launch', {
+        headless: !!(options && options.headless),
+        profile: require('path').basename(String(profileDir)),
+        userAgent: options && options.userAgent,
+        proxy: options && options.proxy ? options.proxy.server : undefined,
+      });
       return makeContext();
     },
   },
 };
+
+// ── The OS scheduler is never reachable ──────────────────────────────────────
+
+const SCHEDULER_COMMANDS = new Set(['crontab', 'launchctl', 'systemctl', 'schtasks']);
+
+function fakeSchedulerRunner() {
+  let answers = {};
+  try {
+    if (process.env.AIDR_FAKE_SCHEDULER) answers = JSON.parse(fs.readFileSync(process.env.AIDR_FAKE_SCHEDULER, 'utf8'));
+  } catch (_) { /* no fixture: every command is "not installed" */ }
+  return (cmd, args, input) => {
+    const argv = Array.isArray(args) ? args : [];
+    record('scheduler', { cmd, args: argv, stdin: typeof input === 'string' && input.length > 0 });
+    const hit = answers[[cmd, ...argv].join(' ')];
+    if (!hit) return { status: 127, stdout: '', stderr: 'command not found (fake)' };
+    return { status: hit.status === undefined ? 0 : hit.status, stdout: hit.stdout || '', stderr: hit.stderr || '' };
+  };
+}
+
+function fenceScheduler(scheduler) {
+  scheduler._setRunner(fakeSchedulerRunner());
+  scheduler._setStdinRunner((cmd, args) => {
+    record('scheduler-blocked', { cmd, via: 'stdin' });
+    return { status: 1, stderr: 'blocked by the test harness' };
+  });
+}
+
+(function blockSchedulerChildProcesses() {
+  const cp = require('child_process');
+  const blocked = (cmd) => SCHEDULER_COMMANDS.has(require('path').basename(String(cmd).split(/\s+/)[0]));
+  for (const name of ['execFileSync', 'spawnSync', 'execSync']) {
+    const original = cp[name];
+    cp[name] = function guarded(cmd, ...rest) {
+      if (blocked(cmd)) {
+        record('scheduler-blocked', { cmd: String(cmd).split(/\s+/)[0], via: name });
+        throw new Error(`the test harness refuses to run ${String(cmd).split(/\s+/)[0]}`);
+      }
+      return original.call(this, cmd, ...rest);
+    };
+  }
+})();
+
+const fenced = new WeakSet();
 
 // A spy on the one boundary a black-box run cannot otherwise observe: what the
 // watcher hands the generic pass. Its queue is empty under `--only <nothing>`, so
@@ -138,6 +196,11 @@ const originalLoad = Module._load;
 Module._load = function patchedLoad(request, parent) {
   if (request === 'playwright') return fakePlaywright;
   const result = originalLoad.apply(this, arguments);
+  // Recognised by what it exports, so a require from any file reaches the same fence.
+  if (result && typeof result._setRunner === 'function' && typeof result.getScheduleStatus === 'function' && !fenced.has(result)) {
+    fenced.add(result);
+    fenceScheduler(result);
+  }
   if (request === './generic-runner' && parent && /[\\/]watcher\.js$/.test(parent.filename)) {
     return spyOnGenericRunner(result);
   }

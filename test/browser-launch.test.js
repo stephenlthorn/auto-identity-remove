@@ -73,14 +73,24 @@ test('resolveHeadless auto-detects headless for a linux box with no DISPLAY', ()
 
 test('every chromium launch site in watcher.js goes through lib/browser', () => {
   const watcher = fs.readFileSync(path.join(__dirname, '..', 'watcher.js'), 'utf8');
+
+  // R7: the main run no longer launches a context itself. createPersonContexts hands
+  // out one context per person, each on its own profile directory, and builds the
+  // launch options per launch. What is left in watcher.js are the three one-shot
+  // modes (complaint PDFs, --confirm-emails, report rendering), which launch on the
+  // utility profile, a directory that belongs to no person.
   const launches = watcher.match(/launchPersistentContext\(/g) || [];
-  assert.ok(launches.length >= 4, `expected at least 4 launch sites, found ${launches.length}`);
+  assert.equal(launches.length, 3, `expected 3 direct launch sites, found ${launches.length}`);
+  assert.equal((watcher.match(/createPersonContexts\(/g) || []).length, 1, 'the main run goes through createPersonContexts');
 
   const optionCalls = watcher.match(/buildLaunchOptions\(/g) || [];
   assert.equal(
     optionCalls.length,
-    launches.length,
-    `all ${launches.length} launchPersistentContext calls must build their options via buildLaunchOptions(); `
+    launches.length + 1,
+    `every direct launch, and the per-person launchOptions, must build their options via buildLaunchOptions(); `
     + `found ${optionCalls.length}. A launch site with hand-rolled options silently loses the container flags.`,
   );
+
+  const utility = watcher.match(/launchPersistentContext\(utilityProfileDir\(/g) || [];
+  assert.equal(utility.length, launches.length, 'a one-shot launch must use the utility profile, never a person\'s directory');
 });
