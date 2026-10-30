@@ -56,6 +56,8 @@ const { CONFIRM_RECHECK_DAYS, loadConfig, readEntry, brokerPart, CONFIG_PATH, CO
 const { withRetry } = require('./lib/retry');
 const { isAllowlisted } = require('./lib/filter');
 const { acceptOptOutDialogs } = require('./lib/browser');
+const { armSubmitWatch } = require('./lib/submit-watch');
+const { redactIdentity } = require('./lib/redact-identity');
 
 // Config is loaded lazily so that modules importing only the pure helpers
 // (classifyNavError, isDeadStatus, loadDeadSet) don't require config.json.
@@ -383,17 +385,24 @@ function snippetOf(text, patterns) {
  *   anything else              -> unverified (never a cooldown)
  * @returns {Promise<{ status: string, detail: string }>}
  */
-async function judgeNewText(page, beforeText, label) {
+async function judgeNewText(page, beforeText, label, redact = (text) => text) {
   const fresh = newTextSince(beforeText, await readBodyText(page));
   const lang = await readPageLang(page);
   if (looksLikeConfirmationRequired(fresh, lang)) {
     const locale = patternsFor(lang);
-    return { status: 'pending_confirm', detail: snippetOf(fresh, [CONFIRM_PATTERN, locale && locale.confirm]) || 'check your email to confirm' };
+    return { status: 'pending_confirm', detail: redact(snippetOf(fresh, [CONFIRM_PATTERN, locale && locale.confirm]) || 'check your email to confirm') };
   }
   const { outcome, snippet } = classifyPostSubmit(fresh, lang);
-  if (outcome === 'success') return { status: 'success', detail: snippet || label };
-  if (outcome === 'failure') return { status: 'error', detail: snippet || 'form submission may have failed' };
+  if (outcome === 'success') return { status: 'success', detail: redact(snippet || label) };
+  if (outcome === 'failure') return { status: 'error', detail: redact(snippet || 'form submission may have failed') };
   return { status: 'unverified', detail: `${label}: no explicit confirmation - re-check next run` };
+}
+
+/** Text that reads as a result of a submission: success wording or "check your email to confirm". */
+function showsResultWording(text, lang) {
+  if (!text) return false;
+  if (looksLikeConfirmationRequired(text, lang)) return true;
+  return classifyPostSubmit(text, lang).outcome === 'success';
 }
 
 // ─── Which form is an opt-out form? (codex #3) ────────────────────────────────
@@ -405,6 +414,11 @@ async function judgeNewText(page, beforeText, label) {
 // look like a newsletter / login / search / contact / checkout form.
 
 const MAX_FORMS = 10;
+
+// More new text than this after a click is a page, not a toast.
+const IN_PLACE_ACK_MAX_CHARS = 160;
+const IN_PLACE_ACK_MAX_LINES = 2;
+const isPageSized = (freshText) => freshText.length > IN_PLACE_ACK_MAX_CHARS || freshText.split('\n').length > IN_PLACE_ACK_MAX_LINES;
 
 // Runs INSIDE the page (via locator.evaluate): it must stay self-contained.
 function describeFormElement(form) {
@@ -711,17 +725,23 @@ const SUBMIT_SELECTORS = [
   'button:has-text("Send Request")',
 ].join(', ');
 
+/** The visible submit control that lives INSIDE `form`, or null. */
+async function findFormSubmit(form) {
+  const btn = form.locator(SUBMIT_SELECTORS).first();
+  try {
+    return (await btn.count()) > 0 && (await btn.isVisible()) ? btn : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 /**
  * Click the submit control that lives INSIDE `form`.
  * @returns {Promise<{ found: boolean, clicked?: boolean, error?: string }>}
  */
 async function clickFormSubmit(form) {
-  const btn = form.locator(SUBMIT_SELECTORS).first();
-  try {
-    if (!((await btn.count()) > 0 && (await btn.isVisible()))) return { found: false };
-  } catch (_) {
-    return { found: false };
-  }
+  const btn = await findFormSubmit(form);
+  if (!btn) return { found: false };
   try {
     await btn.click({ timeout: 5000 });
     return { found: true, clicked: true };
@@ -798,7 +818,7 @@ async function clearCaptcha(handleCaptcha, page, broker, describeFailure) {
     const outcome = await handleCaptcha(page, { broker });
     if (outcome === 'none' || outcome === 'solved') return { cleared: true };
     const why = typeof outcome === 'string' && outcome ? outcome : 'unexpected result';
-    return { cleared: false, detail: captchaDetail(describeFailure, outcome, broker) || `CAPTCHA not solved (${why}) - finish this one by hand` };
+    return { cleared: false, outcome, detail: captchaDetail(describeFailure, outcome, broker) || `CAPTCHA not solved (${why}) - finish this one by hand` };
   } catch (err) {
     return { cleared: false, detail: `CAPTCHA handling failed (${((err && err.message) || 'error').slice(0, 60)}) - finish this one by hand` };
   }
@@ -810,7 +830,7 @@ async function clearCaptcha(handleCaptcha, page, broker, describeFailure) {
  * with a fillable field exists, so the caller can fall through to the next
  * strategy; otherwise a { status, detail } result.
  */
-async function submitOptOutForm(page, { person, submissionEmail, checkUrl, blockedNow, formCtx = {}, label, broker, handleCaptcha, captchaFailureDetail }) {
+async function submitOptOutForm(page, { person, submissionEmail, checkUrl, blockedNow, redactor, formCtx = {}, label, broker, handleCaptcha, captchaFailureDetail }) {
   const found = await describeForms(page);
   if (found.length === 0) return null;
 
@@ -854,10 +874,31 @@ async function submitOptOutForm(page, { person, submissionEmail, checkUrl, block
 
     // Filled first, so a person solving it by hand only has the CAPTCHA left. The
     // baseline below is read after, so a "verified" banner is not the broker's answer.
+    //
+    // The solver's callback or the person may SUBMIT the form during the wait, and a
+    // second click is a second request at the broker (BRK2-3). So before waiting:
+    // what the page says, whether the submit control is there, and a page-side watch
+    // for a click on it or a submit. A CAPTCHA that "went away" because the page was
+    // replaced (BRK2-5) comes back as 'navigated': only result wording that was not
+    // on the page before says the form went out.
+    let sentMeanwhile = false;
+    let beforeWait = '';
     if (captcha) {
+      const control = await findFormSubmit(locator);
+      const watch = await armSubmitWatch(page, control);
+      beforeWait = await readBodyText(page);
       const cleared = await clearCaptcha(handleCaptcha, page, broker, captchaFailureDetail);
-      if (!cleared.cleared) return { status: 'captcha_failed', detail: cleared.detail };
+      if (!cleared.cleared) {
+        if (cleared.outcome === 'navigated' && showsResultWording(newTextSince(beforeWait, await readBodyText(page)), await readPageLang(page))) {
+          return judgeNewText(page, beforeWait, label, redactor);
+        }
+        return { status: 'captcha_failed', detail: cleared.detail };
+      }
+      // Wording that appears in place is NOT taken as the answer here: a solved-CAPTCHA
+      // banner ("Verification complete...") must never read as the broker's.
+      sentMeanwhile = (await watch.observed()) || (control !== null && (await findFormSubmit(locator)) === null);
     }
+    if (sentMeanwhile) return judgeNewText(page, beforeWait, label, redactor);
 
     const before = await readBodyText(page);
     const click = await clickFormSubmit(locator);
@@ -869,7 +910,7 @@ async function submitOptOutForm(page, { person, submissionEmail, checkUrl, block
     // A post the guard refused never reached the broker: not a result to be judged.
     const refusedPost = blockedNow ? await blockedNow() : null;
     if (refusedPost) return refusedPost;
-    return judgeNewText(page, before, label);
+    return judgeNewText(page, before, label, redactor);
   }
 
   if (skipped.length > 0) process.stdout.write(`(skipped ${skipped.length} form(s): ${skipped[0]}) `);
@@ -906,6 +947,11 @@ async function processGenericUrl(page, broker, state, dryRun = false, injectedDe
   const person = opts.person;
   const submissionEmail = opts.submissionEmail || undefined;
   const key = opts.stateKey || broker.name;
+  // codex #8: a broker page may echo what was submitted, and a snippet of it ends up
+  // in the run log and state.json. The details are taken out before it leaves here.
+  let redactFor = person;
+  if (!redactFor) { try { redactFor = activePerson(); } catch (_) { redactFor = null; } }
+  const redactor = (text) => redactIdentity(text, redactFor, [submissionEmail]);
   // Allowlist: the user explicitly wants to stay listed on this host, so never
   // navigate or submit. Returned before any network request.
   let allowCfg = null;
@@ -1030,7 +1076,7 @@ async function processGenericUrl(page, broker, state, dryRun = false, injectedDe
       const movedBad = await guardLanding();
       if (movedBad) return movedBad;
       const submitted = await submitOptOutForm(page, {
-        person, submissionEmail, checkUrl, blockedNow, broker, handleCaptcha: opts.handleCaptcha, captchaFailureDetail: opts.captchaFailureDetail,
+        person, submissionEmail, checkUrl, blockedNow, redactor, broker, handleCaptcha: opts.handleCaptcha, captchaFailureDetail: opts.captchaFailureDetail,
         formCtx: { afterOptOutClick: true, beforeSigs: formsBeforeClick },
         label: 'Do Not Sell clicked, form submitted',
       });
@@ -1038,13 +1084,19 @@ async function processGenericUrl(page, broker, state, dryRun = false, injectedDe
       // No form opened, so nothing was submitted and this branch can never report a
       // removal (BRK2-1). The control usually navigates to a policy page, where every
       // line is "new" and legal boilerplate ("we will respond within 45 days after
-      // your request is received") reads as a success message. A message that shows
-      // up in place, on the same page, may be the preference toggle's own
-      // acknowledgement: that is worth an `unverified` (no cooldown, checked again
-      // next run). Anything else is for a human.
-      const movedOn = (typeof page.url === 'function' ? page.url() : '') !== urlBeforeClick;
-      const shown = movedOn ? null : await judgeNewText(page, dnsBaseline, 'Do Not Sell clicked');
-      if (shown && (shown.status === 'pending_confirm' || shown.status === 'success')) {
+      // your request is received") reads as a success message; a page that was moved
+      // on from is never judged. A message that shows up in place, on the same page,
+      // may be the preference toggle's own answer: "check your email to confirm" is a
+      // pending confirmation (the short retry window, no cooldown), and success
+      // wording is only an `unverified` (no cooldown, checked again next run).
+      // Anything else is for a human.
+      const movedOn = (typeof page.url === 'function' ? page.url() : '') !== urlBeforeClick
+        // ... or the same URL now shows a page's worth of new text (a single-page app
+        // swapping its content): that is a new page, not an acknowledgement.
+        || isPageSized(newTextSince(dnsBaseline, await readBodyText(page)));
+      const shown = movedOn ? null : await judgeNewText(page, dnsBaseline, 'Do Not Sell clicked', redactor);
+      if (shown && shown.status === 'pending_confirm') return shown;
+      if (shown && shown.status === 'success') {
         return { status: 'unverified', detail: 'Do Not Sell clicked and the page acknowledged it, but no request form was submitted - confirm by hand' };
       }
       return { status: 'manual', detail: 'Do Not Sell clicked but nothing was submitted - finish this one by hand' };
@@ -1055,7 +1107,7 @@ async function processGenericUrl(page, broker, state, dryRun = false, injectedDe
     const managed = await handlePrivacyManager(page);
     if (managed) {
       await page.waitForTimeout(1000);
-      return judgeNewText(page, managerBaseline, 'Privacy manager saved');
+      return judgeNewText(page, managerBaseline, 'Privacy manager saved', redactor);
     }
 
     // Strategy 3: fill the opt-out form. Not for rows the feed classified manual
@@ -1064,7 +1116,7 @@ async function processGenericUrl(page, broker, state, dryRun = false, injectedDe
     const methodAllowsForms = broker.method === undefined || broker.method === null || broker.method === 'direct-form';
     if (methodAllowsForms && !isHomepageUrl(broker.url)) {
       const submitted = await submitOptOutForm(page, {
-        person, submissionEmail, checkUrl, blockedNow, broker, handleCaptcha: opts.handleCaptcha, captchaFailureDetail: opts.captchaFailureDetail,
+        person, submissionEmail, checkUrl, blockedNow, redactor, broker, handleCaptcha: opts.handleCaptcha, captchaFailureDetail: opts.captchaFailureDetail,
         formCtx: { afterOptOutClick: false },
         label: 'Form submitted',
       });
@@ -1566,7 +1618,25 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
     return fresh;
   };
 
-  let page = await newWorkingPage();
+  // CLI2-5: when the browser dies under a pass, a page can no longer be opened. The
+  // pass then stops where it is and says so, instead of turning every remaining row
+  // into an error (each one a failure written to state, which feeds the defunct
+  // check against brokers that did nothing wrong). A caller that can launch a new
+  // browser passes opts.reopenContext and the pass carries on in it.
+  let page = null;
+  let browserClosed = false;
+  const recoverPage = async () => {
+    try { page = await newWorkingPage(); return true; } catch (_) { /* fall through to a new browser */ }
+    if (typeof opts.reopenContext === 'function') {
+      try {
+        context = await opts.reopenContext();
+        page = await newWorkingPage();
+        return true;
+      } catch (_) { /* no browser to be had */ }
+    }
+    return false;
+  };
+  if (!(await recoverPage())) browserClosed = true;
 
   const stats = {
     attempted: 0,
@@ -1595,8 +1665,10 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
   const RECYCLE_EVERY = 25; // periodically replace the working page to bound renderer growth
   let processed = 0;
 
+  let reached = 0;
   try {
-    for (let rowIndex = start; rowIndex < queue.length; rowIndex++) {
+    let retriedRow = -1;
+    for (let rowIndex = start; rowIndex < queue.length && !browserClosed; rowIndex++) {
       const broker = queue[rowIndex];
       checkpointRow(rowIndex, broker);
       process.stdout.write(`\n  [${broker.name.slice(0,40)}]… `);
@@ -1607,11 +1679,15 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
       } catch (err) {
         // One broker must never abort the whole run or skip the cleanup below.
         result = { status: 'error', detail: (err && err.message ? err.message.slice(0, 80) : 'error') };
-        // If the working page itself crashed, replace it so the run can continue.
+        // If the working page itself crashed, replace it so the run can continue. The
+        // row that hit the dead page did nothing wrong: it is tried again once on the
+        // new page, and when there is no new page the pass stops instead.
         if (typeof page.isClosed === 'function' && page.isClosed()) {
-          try { page = await newWorkingPage(); } catch (_) {}
+          if (!(await recoverPage())) { browserClosed = true; break; }
+          if (retriedRow !== rowIndex) { retriedRow = rowIndex; rowIndex--; continue; }
         }
       }
+      reached++;
 
       // Rows are named by company, so record which host this one was about:
       // scripts/prune-dead.js can only judge a host it can see in the run log.
@@ -1649,27 +1725,37 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
 
       await prunePopups(); // reap any popups / tabs this broker opened
 
+      // A page that was closed under the row (a CAPTCHA wait that gave up on a page
+      // that stopped answering, a crash) is replaced before the next one.
+      if (typeof page.isClosed === 'function' && page.isClosed()) {
+        if (!(await recoverPage())) { browserClosed = true; break; }
+      }
+
       // Recycle the working page every N brokers to release accumulated
       // renderer / site-isolation processes that survive same-page navigation.
       if (++processed % RECYCLE_EVERY === 0) {
         try { await page.close(); } catch (_) {}
-        page = await newWorkingPage();
+        if (!(await recoverPage())) { browserClosed = true; break; }
       }
 
       try { await page.waitForTimeout(400); } catch (_) {} // polite delay
+    }
+    if (browserClosed) {
+      console.log(`\n⚠️  The browser closed during the generic pass (${queue.length - start - reached} row(s) not run). Nothing was recorded for them; run again with --resume to pick the pass up from there.`);
     }
   } finally {
     // The last row is always written, throttled or not: it is the one a resume
     // would otherwise lose.
     if (pendingCheckpoint) writeCheckpoint(pendingCheckpoint);
-    await page.close().catch(() => {});
+    if (page) await page.close().catch(() => {});
     await prunePopups();
   }
 
   return {
     // The rows that ran (a resumed pass does not count the rows it skipped).
-    count: queue.length - start,
+    count: browserClosed ? reached : queue.length - start,
     resumeSkipped: start,
+    ...(browserClosed ? { browserClosed: true, stoppedAt: start + reached } : {}),
     genericStats: {
       attempted: stats.attempted,
       submitted: stats.submitted,
