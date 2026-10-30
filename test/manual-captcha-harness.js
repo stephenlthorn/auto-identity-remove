@@ -37,6 +37,9 @@ function makeCaptchaPage(spec = {}) {
     evalFailures: spec.evalFailures || 0,
     evaluations: [],
     broughtToFront: 0,
+    // How many fillable controls the page holds (answers readPageShape). A page
+    // that was replaced by an error page has none.
+    controls: spec.controls === undefined ? 1 : spec.controls,
   };
 
   const unsupportedProbe = {
@@ -61,6 +64,7 @@ function makeCaptchaPage(spec = {}) {
       model.evaluations.push(name);
       if (name === 'pageCaptchaType') return model.type;
       if (name === 'readCaptchaState') return { ...model.state };
+      if (name === 'readPageShape') return { controls: model.controls };
       if (Object.prototype.hasOwnProperty.call(unsupportedProbe, name)) {
         return model.unsupported === unsupportedProbe[name];
       }

@@ -234,12 +234,14 @@ test('R1: a navigation that leaves the form in place is just the normal click pa
   assert.equal(t.page.clicks.length, 1, 'the form is still there, so the tool clicks it');
 });
 
-test('R1: a page the person landed on with no confirmation wording is unverified, never success', async () => {
+test('R1: a page the person landed on with no confirmation wording is never success (BRK2-5: the CAPTCHA went away with the page, so it is captcha_failed and `aidr captchas` retries it)', async () => {
   const page = makeBrokerPage({ after: 'Thanks for visiting. Browse our other pages.' });
   const t = setup({ page, script: [personSubmits(4000)] });
   await t.run();
-  assert.equal(t.h.logged.at(-1).status, 'unverified');
+  assert.equal(t.h.logged.at(-1).status, 'captcha_failed');
+  assert.match(t.h.logged.at(-1).detail, /aidr captchas/);
   assert.equal(t.h.recorded.success.length, 0);
+  assert.equal(t.page.clicks.length, 0);
 });
 
 // ── plain brokers are untouched ───────────────────────────────────────────────

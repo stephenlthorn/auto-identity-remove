@@ -38,6 +38,13 @@ const { URL } = require('url');
 
 const MIN_RUNS = 3;
 const MIN_SPAN_DAYS = 14;
+// A run in which MORE than this share of the hosts that were actually tried failed
+// hard is a machine that was offline (or whose resolver was down), not evidence about
+// any one host: it is left out of every host's history. Only judged once a run has at
+// least MIN_HOSTS_FOR_OUTAGE_CHECK hosts, so a small log of a few really dead hosts is
+// not mistaken for an outage.
+const MAX_HARD_SHARE = 0.5;
+const MIN_HOSTS_FOR_OUTAGE_CHECK = 10;
 const DAY_MS = 24 * 3600 * 1000;
 
 // DNS name not resolved, or the page is gone. Not refused/closed connections,
@@ -97,7 +104,8 @@ function runVerdict(entries) {
 /**
  * @param {string} logsDir      - Directory containing run-*.json files
  * @param {string} deadUrlsPath - Path to data/dead-urls.json
- * @returns {{ added: string[], total: number }} Summary of changes made
+ * @returns {{ added: string[], total: number, ignoredRuns: number }} Summary of changes made;
+ *   ignoredRuns counts runs left out as outages (most hosts failed hard)
  */
 function pruneDeadUrls(logsDir, deadUrlsPath) {
   let existing = [];
@@ -120,6 +128,7 @@ function pruneDeadUrls(logsDir, deadUrlsPath) {
 
   // host -> [{ at, verdict }], one item per run
   const history = new Map();
+  let ignoredRuns = 0;
   for (const file of logFiles) {
     let raw;
     let at;
@@ -138,9 +147,17 @@ function pruneDeadUrls(logsDir, deadUrlsPath) {
       if (!byHost.has(host)) byHost.set(host, []);
       byHost.get(host).push(entry);
     }
+    const verdicts = [];
     for (const [host, entries] of byHost) {
       const verdict = runVerdict(entries);
-      if (!verdict) continue;
+      if (verdict) verdicts.push({ host, verdict });
+    }
+    const hardCount = verdicts.filter((v) => v.verdict === 'hard').length;
+    if (verdicts.length >= MIN_HOSTS_FOR_OUTAGE_CHECK && hardCount / verdicts.length > MAX_HARD_SHARE) {
+      ignoredRuns++;
+      continue;
+    }
+    for (const { host, verdict } of verdicts) {
       if (!history.has(host)) history.set(host, []);
       history.get(host).push({ at, verdict });
     }
@@ -162,7 +179,7 @@ function pruneDeadUrls(logsDir, deadUrlsPath) {
     fs.writeFileSync(deadUrlsPath, JSON.stringify({ hosts: merged }, null, 2) + '\n', 'utf8');
   }
 
-  return { added: newlyDead.sort(), total: merged.length };
+  return { added: newlyDead.sort(), total: merged.length, ignoredRuns };
 }
 
 // ── CLI entry point ───────────────────────────────────────────────────────────
@@ -172,7 +189,10 @@ if (require.main === module) {
   const logsDir      = path.join(root, 'logs');
   const deadUrlsPath = path.join(root, 'data', 'dead-urls.json');
 
-  const { added, total } = pruneDeadUrls(logsDir, deadUrlsPath);
+  const { added, total, ignoredRuns } = pruneDeadUrls(logsDir, deadUrlsPath);
+  if (ignoredRuns > 0) {
+    console.log(`prune-dead: ignored ${ignoredRuns} run(s) in which most hosts failed (an outage, not evidence about any host).`);
+  }
 
   if (added.length === 0) {
     console.log(`prune-dead: no new hosts added (${total} already cached).`);

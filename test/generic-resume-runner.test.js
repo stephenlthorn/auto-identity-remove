@@ -75,11 +75,12 @@ test('resolveResumeStart trusts an index whose row still has the key', () => {
   );
 });
 
-test('resolveResumeStart relocates by key when the row at the index changed, and says so', () => {
+test('resolveResumeStart does not trust "everything above the key" once the list moved, and says so (BRK2-9)', () => {
   const queue = [{ name: 'New0' }, { name: 'New1' }, ...rows(5)];
   const { start, note } = gr.resolveResumeStart(queue, { index: 3, key: 'Row3' }, (n) => n);
-  assert.equal(start, 5, 'Row3 now sits at position 5');
+  assert.equal(start, 0, 'a row inserted above the checkpoint must still run: the pass starts over');
   assert.match(note, /moved/i);
+  assert.match(note, /Row3/);
 });
 
 test('resolveResumeStart starts over, with a warning naming the key, when the key is gone', () => {
@@ -97,9 +98,9 @@ test('resolveResumeStart starts over when the checkpoint has no key to verify', 
   }
 });
 
-test('resolveResumeStart finds a key by name when the index is missing or beyond the list', () => {
-  assert.equal(gr.resolveResumeStart(rows(5), { index: null, key: 'Row4' }, (n) => n).start, 4);
-  assert.equal(gr.resolveResumeStart(rows(5), { index: 99, key: 'Row1' }, (n) => n).start, 1);
+test('resolveResumeStart starts over when the index is missing or beyond the list: the position cannot be verified (BRK2-9)', () => {
+  assert.equal(gr.resolveResumeStart(rows(5), { index: null, key: 'Row4' }, (n) => n).start, 0);
+  assert.equal(gr.resolveResumeStart(rows(5), { index: 99, key: 'Row1' }, (n) => n).start, 0);
 });
 
 test('resolveResumeStart with no resume point is a plain start', () => {
@@ -108,9 +109,11 @@ test('resolveResumeStart with no resume point is a plain start', () => {
   }
 });
 
-test('resolveResumeStart picks the first of two rows with the same name (never skips past a duplicate)', () => {
+test('resolveResumeStart with the finished rows keeps the FIRST of two same-named rows as the one in progress (never skips it)', () => {
   const queue = [{ name: 'A' }, { name: 'Dup' }, { name: 'B' }, { name: 'Dup' }];
-  assert.equal(gr.resolveResumeStart(queue, { index: 99, key: 'Dup' }, (n) => n).start, 1);
+  const { start, skip } = gr.resolveResumeStart(queue, { index: 99, key: 'Dup', done: [] }, (n) => n);
+  assert.equal(start, 0);
+  assert.equal(skip.has(1), false);
 });
 
 // ── runGenericBrokers: resumeFrom ────────────────────────────────────────────
@@ -146,11 +149,11 @@ test('a skipped row is never navigated to, logged or recorded', async () => {
   assert.deepEqual(page.gotos, []);
 });
 
-test('when the dataset shifted, resume finds the key by name and tells the operator', async (t) => {
+test('when the dataset shifted, resume starts over rather than skip rows nobody ran (BRK2-9) and tells the operator', async (t) => {
   const lines = captureLog(t);
   const shifted = [{ name: 'Inserted A', url: 'https://a.example/x', source: 'test' }, { name: 'Inserted B', url: 'https://b.example/x', source: 'test' }, ...rows(5)];
   const { seen } = await pass({ brokers: shifted, resumeFrom: { index: 3, key: 'Row3' } });
-  assert.deepEqual(seen, ['Row3', 'Row4']);
+  assert.deepEqual(seen, ['Inserted A', 'Inserted B', 'Row0', 'Row1', 'Row2', 'Row3', 'Row4']);
   assert.ok(lines.some(l => /resum/i.test(l) && /Row3/.test(l)), 'a resume line naming the row is printed');
 });
 
