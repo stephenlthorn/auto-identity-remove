@@ -24,7 +24,7 @@ const ARGS = require('./lib/args').parseWatcherArgsOrExit();
 const { STATE_PATH, CONFIG_PATH, CONFIG_ENC_PATH, RECHECK_DAYS, loadConfig, loadState, saveState, recordSuccess, setDryRun, getPersonsFromConfig, loadCheckpoint, saveCheckpoint, clearCheckpoint, findResumeIndex, planResume, readEntry, validateRunnableConfig } = require('./lib/config');
 const { results, logResult, buildSummary, setDefunctBrokers, setCurrentPerson, setStateForSummary, setJournal } = require('./lib/logger');
 const { findDefunct, DEFUNCT_THRESHOLD } = require('./lib/defunct');
-const { sendText, desktopNotify, openInBrowser, canOpenBrowser, pickManualUrlsToOpen } = require('./lib/notify');
+const { sendText, desktopNotify, openInBrowser, canOpenBrowser, pickManualUrlsToOpen, manualUrlsFromResults } = require('./lib/notify');
 const brokerRunner = require('./lib/broker-runner');
 const { sendOptOutEmails } = require('./lib/email');
 const { smtpTransportOptions } = require('./lib/smtp');
@@ -173,13 +173,16 @@ function loadRunnableConfigOrExit() {
   }
 
   // A malformed browser section (a typo in "proxy", an unsupported proxy scheme)
-  // makes every launch throw, rather than start without the proxy; saying so here
-  // is a refusal before anything is submitted (R7).
-  const problems = [...validateRunnableConfig(config), ...browserConfigProblems(config.browser)];
+  // makes every launch throw rather than start without the proxy (R7). A dry run
+  // cannot preview with a browser that will not start, so unlike the placeholder
+  // problems this one refuses a dry run too.
+  const runnableProblems = validateRunnableConfig(config);
+  const browserProblems = browserConfigProblems(config.browser);
+  const problems = [...runnableProblems, ...browserProblems];
   if (problems.length > 0) {
     console.error('❌ config is not runnable:\n  - ' + problems.join('\n  - '));
     console.error('   Run `node setup.js` or edit config.json, then re-run.');
-    if (!DRY_RUN) process.exit(1);
+    if (!DRY_RUN || browserProblems.length > 0) process.exit(1);
     console.error('   (dry run: continuing so you can preview; nothing is submitted)');
   }
   notifyConfig = config.notify;
@@ -1421,11 +1424,7 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
 
   // Manual-required sites: open them when a desktop is there to show them, and
   // never in a dry run. A headless host has no browser to open.
-  // The URL is the first word of the detail: the explicit runner's detail goes on to
-  // say why ("<url> - CAPTCHA not solved ..."), so the whole detail is not a URL.
-  const manualUrls = [...results.captchaFailed, ...results.manual]
-    .map(r => (r.detail || '').split(/\s+/)[0])
-    .filter(u => u.startsWith('http'));
+  const manualUrls = manualUrlsFromResults([...results.captchaFailed, ...results.manual]);
   if (manualUrls.length > 0) {
     const { open, more } = pickManualUrlsToOpen(manualUrls);
     if (!DRY_RUN && canOpenBrowser()) {

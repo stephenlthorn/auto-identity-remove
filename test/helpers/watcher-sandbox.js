@@ -150,8 +150,9 @@ function readLines(file) {
  *
  * @param {ReturnType<typeof createSandbox>} sandbox
  * @param {string[]} args
- * @param {{ timeoutMs?: number, env?: object, signalWhen?: { match: RegExp, signal: string } }} [opts]
- *   signalWhen sends `signal` to the child once its output matches.
+ * @param {{ timeoutMs?: number, env?: object, signalWhen?: { match: RegExp|((output: string) => boolean), signal: string } }} [opts]
+ *   signalWhen sends `signal` to the child once its output matches (a RegExp, or a
+ *   function of the output so far for a condition a pattern cannot count).
  * @returns {Promise<{ code: number|null, signal: string|null, stdout: string, stderr: string, timedOut: boolean }>}
  */
 function runWatcher(sandbox, args, opts = {}) {
@@ -182,7 +183,9 @@ function runWatcher(sandbox, args, opts = {}) {
 
     const onOutput = (chunk) => {
       if (!signalWhen || signalled) return;
-      if (signalWhen.match.test(stdout + stderr)) {
+      const seen = stdout + stderr;
+      const matched = typeof signalWhen.match === 'function' ? signalWhen.match(seen) : signalWhen.match.test(seen);
+      if (matched) {
         signalled = true;
         // Signal the child itself, as `docker stop` or a scheduler does.
         try { process.kill(child.pid, signalWhen.signal); } catch (_) { /* already gone */ }

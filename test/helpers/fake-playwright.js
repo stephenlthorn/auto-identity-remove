@@ -12,6 +12,8 @@
  *   launch, newPage, goto, addInitScript, close, dns and fetch (both refused), and `generic` (the options the
  *   watcher passes to runGenericBrokers, see spyOnGenericRunner).
  *
+ * AIDR_FAKE_SLOW_MS=<n> makes page.waitForTimeout really wait n ms.
+ *
  * AIDR_FAKE_HANG=init makes addInitScript never resolve: the run stalls right
  * after the browser "launches", which is where a signal test sends SIGTERM.
  *
@@ -66,7 +68,13 @@ function makePage() {
     on() {},
     setDefaultTimeout() {},
     setDefaultNavigationTimeout() {},
-    async waitForTimeout() {},
+    // AIDR_FAKE_SLOW_MS slows every polite delay (the generic pass waits after each
+    // row), so a signal test can land in the middle of a pass that would otherwise
+    // be over in milliseconds.
+    async waitForTimeout() {
+      const slow = Number(process.env.AIDR_FAKE_SLOW_MS);
+      if (slow > 0) await new Promise((resolve) => setTimeout(resolve, slow));
+    },
     // Navigating anywhere is a bug in a test: the run must stay offline.
     async goto(url) {
       record('goto', { url: String(url).replace(/[?#].*$/, '') });
@@ -170,6 +178,25 @@ function fenceScheduler(scheduler) {
 })();
 
 const fenced = new WeakSet();
+
+// lib/browser.js reads the pinned Chromium version from playwright-core's
+// browsers.json to write a regular Chrome user agent for a headless launch. A
+// sandbox has no node_modules, so without this the version is unknown and the
+// launch keeps Playwright's own (HeadlessChrome) agent: the one thing a test of
+// the user agent must be able to see go away. This stands up a minimal stand-in.
+(function fakePlaywrightCore() {
+  const os = require('os');
+  const path = require('path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aidr-fake-core-'));
+  fs.writeFileSync(path.join(dir, 'package.json'), '{"name":"playwright-core","version":"0.0.0"}');
+  fs.writeFileSync(path.join(dir, 'browsers.json'), JSON.stringify({ browsers: [{ name: 'chromium-headless-shell', browserVersion: '148.0.7778.96' }] }));
+  process.on('exit', () => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) { /* best effort */ } });
+  const resolveFilename = Module._resolveFilename;
+  Module._resolveFilename = function patchedResolve(request, ...rest) {
+    if (request === 'playwright-core/package.json') return path.join(dir, 'package.json');
+    return resolveFilename.call(this, request, ...rest);
+  };
+})();
 
 // A spy on the one boundary a black-box run cannot otherwise observe: what the
 // watcher hands the generic pass. Its queue is empty under `--only <nothing>`, so
