@@ -35,9 +35,9 @@ test('a config that does not parse is reported without quoting the file', async 
   assert.ok(!result.hint.includes('quillfeather'), result.hint);
 }));
 
-test('a state file that does not parse is reported without quoting the file', () => withRoot((root) => {
+test('a state file that does not parse is reported without quoting the file', async () => withRoot(async (root) => {
   fs.writeFileSync(path.join(root, 'state.json'), `{ "optOuts": { "Spokeo|Zebediah Quillfeather": ${SECRET_BYTES} } }`);
-  const result = checkState(root);
+  const result = await checkState(root);
   assert.equal(result.ok, false);
   assert.match(result.hint, /failed to parse.*not valid JSON/);
   assert.ok(!result.hint.includes('Quillfeather'), result.hint);
