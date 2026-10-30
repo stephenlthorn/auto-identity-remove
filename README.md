@@ -185,8 +185,13 @@ opt-out page in your browser (up to 10 sites) so you can finish it by hand too.
 CAPTCHAs that show no widget until the page is judged to be a bot (invisible
 reCAPTCHA v3, bot-manager challenges) cannot be waited on; those are reported as
 skipped and `aidr captchas` will not help with them. A run that waits for you holds the
-run lock the whole time, and a lock older than `AIDR_LOCK_MAX_AGE_HOURS` (default 6) is
-treated as abandoned: raise it for a very long manual session.
+run lock the whole time. A running watcher refreshes its lock every few minutes, so
+a long manual session is never taken for an abandoned one.
+
+**Upgrading?** `captcha.manual` defaults to `"auto"`: an interactive `aidr run` with a
+visible browser now waits up to 3 minutes per CAPTCHA that CapSolver cannot do, where
+earlier versions moved straight on. Scheduled runs (no terminal) are unchanged. Set
+`captcha.manual` to `false` to keep the old behaviour.
 
 ---
 
@@ -277,12 +282,14 @@ directory (`aidr-home/logs`), so nothing has to be moved.
 
 **`--init` matters.** Without it node is PID 1, `docker stop` cannot reap the
 Chromium children, and the state lock is left behind, wedging the next run. If a
-run is killed anyway, `aidr-home/state.json.lock` can be left behind; delete it
-once you are sure no run is active. A lock older than 6 hours is treated as stale
-and taken over even if its process id looks alive (a pid recycled after a
-reboot would otherwise hold it forever); if a full multi-person run really takes
-longer, set `AIDR_LOCK_MAX_AGE_HOURS` (for example `12`) so a second run cannot
-take the lock from a live one.
+run is killed anyway, `aidr-home/state.json.lock` can be left behind. A lock that
+nobody has refreshed for 6 hours is treated as stale and taken over even if its
+process id looks alive (a pid recycled after a reboot would otherwise hold it
+forever); a running watcher refreshes its own every 5 minutes, so a full run that
+takes longer than that is safe. A new container has a new hostname, so it cannot check
+the dead one's process id; it takes over a lock whose holder has stopped refreshing
+for 15 minutes, instead of waiting the 6 hours. `AIDR_LOCK_MAX_AGE_HOURS` still sets
+the 6.
 
 **`TZ` matters.** Containers are UTC. Without it a "1st of the month, 9am"
 schedule and every report timestamp land in the wrong hour.
@@ -358,9 +365,13 @@ Slack incoming-webhook, or Discord webhook URL:
 }
 ```
 
-The tool POSTs `{"text": "<summary>"}` after every run. Works on macOS, Linux,
-and Windows - the webhook fires in addition to (not instead of) any platform
-notification that is available.
+The tool POSTs `{"text": "<summary>"}` at the end of every real run, and again if the
+run crashes (`❌ Privacy Watcher crashed: ...`). A run in which every broker ended in
+an error says so (`❌ Privacy Watcher FAILED ...`) and exits `1`. A dry run or a
+preview never sends it. The POST gives up after 10 seconds, so a webhook host that
+does not answer cannot hold up the end of a run. Works on macOS, Linux, and Windows -
+the webhook fires in addition to (not instead of) any platform notification that is
+available.
 
 ---
 
@@ -582,10 +593,26 @@ ignored, which turned a preview into a real run.)
 
 `--only A,B`, `--skip A,B` and `--retry-failed` apply to the whole run: the
 form brokers, the **email** brokers and the 500+ **generic** brokers. Names are
-case-insensitive. `--retry-failed` re-runs what the last run log recorded as an
+case-insensitive. Together they **narrow** each other: a broker runs when it is
+named by `--only`, is in the `--retry-failed` set, and is not named by `--skip`
+(`--skip` always wins, so `--retry-failed --skip A` leaves A out). `--only` and
+`--skip` also apply to `--pollute`, `--know`, `--verify`, `--serp-scan` and
+`--serp-watch`; `--retry-failed` reads a run log that those modes do not use, so it
+is refused with them. `--retry-failed` re-runs what the last run log recorded as an
 error, a CAPTCHA failure, awaiting an email confirmation, or *unconfirmed* (the
 form was sent but the result page could not be read). A filtered or resumed run
 marks its log as partial, so the next full run is not compared against it.
+
+`--dry-run` and `--preview` promise that nothing changes, so they are refused (exit
+`2`) with the modes that never read them and would otherwise run for real:
+`--install-scheduler`, `--uninstall-scheduler`, `--encrypt-config`,
+`--decrypt-config`, `--allow`, `--unallow`, `--freeze-done`, `--freeze-clear` and
+`--update-brokers`. `--allow` and `--unallow` are modes like the rest: combining
+either with another mode (`--list --allow X`) is an error, not a silent no-op.
+
+A relative `AIDR_*` path (`AIDR_HOME`, `AIDR_STATE_PATH`, ...) means relative to the
+directory you ran the command from, whether you start the tool with `run.sh` or with
+`aidr`, so a scheduled run and a manual one read the same files.
 
 **`--resume` carries on where a killed run stopped, in the generic pass too.** The
 run records a checkpoint as it goes: the explicit broker in progress, and, in the
@@ -595,7 +622,10 @@ person's generic pass at the recorded row (and skips the generic passes of peopl
 already done), and clears the checkpoint when the run completes. An old
 checkpoint (a bare broker name) still works. If the checkpointed broker is no
 longer in the list, the pass starts over rather than guess. The checkpoint lives
-beside `state.json`.
+beside `state.json`. A filtered run (`--only`, `--skip`, `--retry-failed`,
+`--captchas`) never writes or clears it, so a killed full run can still be resumed
+after one. A person the masked-email relay could not serve is never counted as
+finished: `--resume` runs their passes even though the checkpoint is further along.
 
 ### The run journal and the heartbeat
 
@@ -609,21 +639,31 @@ dry run writes no journal.
 
 Each real opt-out run also writes `last-run.json` beside `state.json`: when it
 started, when it ended, `ok` / `partial` / `failed` and the counts, numbers only,
-never a name or a broker. A start with no end reads as `running` while it is younger
+never a name or a broker. A filtered run (`--only`, `--skip`, `--retry-failed`,
+`--captchas`) is marked `partial: true` and carries the last full run's record forward
+beside its own, so it can never hide a monthly run that failed: `aidr schedule status`
+and `aidr doctor` report the last **full** run, with the newer filtered one on a line of
+its own. A start with no end reads as `running` while it is younger
 than the lock's maximum age (`AIDR_LOCK_MAX_AGE_HOURS`, default 6) and as `crashed`
 after. `aidr schedule status` and `aidr doctor` read it. A dry run, `--verify` and the
 SERP modes do not write it.
 
 Exit status: `0` finished; `1` could not start (no config, an unedited
-`config.example.json`, a malformed `browser` section, another run holds the lock) or
-finished incomplete (a person skipped because the masked-email relay was down); `2` a
+`config.example.json`, a malformed `browser` section, another run holds the lock, a
+state directory the lock cannot be created in) or finished incomplete (a person
+skipped because the masked-email relay was down) or **failed** (every broker ended in
+an error, so nothing was submitted; some errors beside some progress still exit `0`,
+since an unreachable site is normal); `2` a
 bad command line (including a modifier without its mode, such as `--yes` outside
 `--purge`), or a check that could not reach a verdict (`--breach-check`,
 `--serp-scan`, `--serp-watch` with every search engine unavailable); `130`/`143`
 interrupted by Ctrl-C or `docker stop`, after the browser is closed and state is
 saved. The read-only commands answer for scripts: `aidr schedule status` exits `0`
-for an installed, active job, `1` when none is installed and `2` when one exists but
-will not fire; `aidr config check` exits `1` when it finds a problem that would stop
+for an installed, active job whose last full run did not fail, `1` when none is
+installed, `2` when one exists but will not fire and `3` when it is installed and
+active but its last full run failed or crashed; `aidr schedule install` exits `1`
+and says `NOT installed` when the OS scheduler refused (no cron in the container, a
+crontab write that failed); `aidr config check` exits `1` when it finds a problem that would stop
 a run (warnings alone exit `0`); `aidr purge` exits `2` when it was told nothing
 to confirm with (no terminal and no `--yes`).
 
@@ -731,8 +771,12 @@ aidr schedule uninstall       # remove it
 `last-run.json`, and prints whether the job exists, whether it is active, what it runs,
 which `AIDR_*` paths it carries, and when it last ran and how that ended (`crashed` for a
 start that never reported back). It warns if a passphrase has been written into the job
-definition, and never prints it. Exit status: `0` installed and active, `1` not installed,
-`2` installed but not active. `uninstall` removes only the job this tool installed (a
+definition, and never prints it. Exit status: `0` installed and active (and its last full
+run did not fail), `1` not installed, `2` installed but not active, `3` installed and
+active but the last full run failed or crashed. `last run` is always the last **full**
+run: a filtered run (`--only`, `--retry-failed`, ...) is shown on a `Partial:` line and
+never replaces it. `install` exits `1` and prints `NOT installed` with the reason when the OS
+scheduler refused (the setup wizard says the same and fails). `uninstall` removes only the job this tool installed (a
 crontab keeps every other line) and reports anything it could not remove.
 `aidr doctor` adds the same checks: whether the job is installed and recently run, the
 age and holder of the run lock, and whether an encrypted config has a passphrase source
