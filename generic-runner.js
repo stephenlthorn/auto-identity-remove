@@ -914,6 +914,13 @@ async function processGenericUrl(page, broker, state, dryRun = false, injectedDe
     return { status: 'allowlisted', detail: 'on allowlist - keeping listing, no opt-out submitted' };
   }
 
+  // codex #2: a row whose host does not plausibly belong to the broker it names is
+  // never visited and never filled. The detail leads with words, not the URL: the
+  // watcher opens URLs found at the start of a manual detail in the user's browser.
+  if (broker.untrusted) {
+    return { status: 'manual', detail: `${broker.untrusted}` };
+  }
+
   // WP4: if the entry is in pending-confirmation state, use the shorter 14-day
   // re-check window so the user has a chance to click the confirmation link.
   // Read through the person-aware reader when the caller says how many persons
@@ -1196,6 +1203,102 @@ function buildExplicitIdentity(explicitBrokerHosts, explicitBrokers = []) {
   };
 }
 
+// ─── Does this host belong to this broker? (codex #2) ─────────────────────────
+//
+// A registry row is a company name and a URL, and the generic runner types the
+// person's name, email and address into the first opt-out-looking form on that URL.
+// A poisoned or mistyped row that points at an unrelated public site would
+// therefore hand that PII to a stranger. So a row is only automated when the host
+// plausibly belongs to the broker it names; anything else becomes `manual`
+// (logged with the reason, never navigated to, never filled).
+//
+// A host belongs to the row when its registrable domain (eTLD+1, approximated) is:
+//   1. a domain the row itself lists (the Markup dataset carries `hostname`), or
+//   2. derived from the company name: equal to it, a prefix/abbreviation of it,
+//      starting with its first word, or its initials ("National Consumer Telecom
+//      & Utilities Exchange" -> nctue.com), or
+//   3. a domain the shipped datasets already know as a broker's (their `hostname`
+//      column, the BADBOOL hosts, the explicit list) - the registry may call the
+//      company something else entirely ("Mississippi Tornado Alley LLC" runs
+//      fastpeoplesearch.com).
+// A shared platform (OneTrust, Google Forms, ...) is trusted only by rule 1: any
+// customer can host a form there, so the platform's name vouches for nothing.
+//
+// Rule 2 reads the name and the URL out of the same row, so a registry that is
+// poisoned in both fields can still pass it; rule 3 is what holds against that.
+
+// Words that say what kind of company it is, not which one.
+const GENERIC_NAME_WORDS = new Set(['holdings', 'group', 'international', 'global', 'usa', 'us', 'america', 'americas', 'services', 'solutions']);
+
+function trustTokens(name) {
+  const tokens = companyTokens(name);
+  if (tokens.length > 1 && tokens[0] === 'the') tokens.shift();
+  while (tokens.length > 1 && GENERIC_NAME_WORDS.has(tokens[tokens.length - 1])) tokens.pop();
+  return tokens;
+}
+
+function domainLabel(domain) {
+  return String(domain || '').split('.')[0].replace(/[^a-z0-9]/g, '');
+}
+
+function nameDerivesDomain(name, domain) {
+  const tokens = trustTokens(name);
+  const label = domainLabel(domain);
+  if (tokens.length === 0 || !label) return false;
+  const words = tokens.filter(t => t !== 'and');
+  const squashed = [tokens.join(''), words.join('')];
+  if (squashed.includes(label)) return true;
+  if (label.length >= 4 && squashed.some(s => s.startsWith(label))) return true;
+  if (words[0].length >= 4 && label.startsWith(words[0])) return true;
+  const initials = words.map(t => t[0]).join('');
+  return initials.length >= 3 && initials === label;
+}
+
+function hostOfUrl(url) {
+  try { return bareHost(new URL(url).hostname); } catch (_) { return ''; }
+}
+
+/**
+ * Registrable domains the shipped datasets know as brokers' own, for rule 3.
+ * Shared platforms are left out: see the note above.
+ * @param {Iterable<string>} [extraHosts] hosts of the explicit broker list
+ * @returns {Set<string>}
+ */
+function shippedBrokerDomains(rows, extraHosts = []) {
+  const domains = new Set();
+  const add = (host) => {
+    const domain = registrableDomain(host);
+    if (domain && !SHARED_PLATFORM_DOMAINS.has(domain)) domains.add(domain);
+  };
+  for (const row of rows.markup || []) if (row && row.hostname) add(row.hostname);
+  for (const url of rows.badbool || []) add(hostOfUrl(url));
+  for (const host of extraHosts) add(host);
+  return domains;
+}
+
+/**
+ * @param {{ name?: string, url?: string, optOutUrl?: string, hostname?: string, domain?: string, website?: string, sourceUrl?: string }} row
+ * @param {{ knownDomains?: Set<string> }} [ctx]
+ * @returns {{ ok: true, via: string } | { ok: false, reason: string }}
+ */
+function assessBrokerHost(row, ctx = {}) {
+  const host = hostOfUrl((row && (row.url || row.optOutUrl)) || '');
+  if (!host) return { ok: false, reason: 'the row has no usable host' };
+  const domain = registrableDomain(host);
+
+  for (const listed of [row.hostname, row.domain, row.website, row.sourceUrl]) {
+    if (!listed) continue;
+    const listedHost = /^[a-z][a-z0-9+.-]*:\/\//i.test(String(listed)) ? hostOfUrl(listed) : bareHost(listed);
+    if (listedHost && registrableDomain(listedHost) === domain) return { ok: true, via: 'listed domain' };
+  }
+  const shared = SHARED_PLATFORM_DOMAINS.has(domain);
+  if (!shared && nameDerivesDomain(row.name, domain)) return { ok: true, via: 'company name' };
+  if (!shared && ctx.knownDomains && ctx.knownDomains.has(domain)) return { ok: true, via: 'shipped broker list' };
+
+  const label = String(row.name || '').replace(/\s+/g, ' ').trim().slice(0, 60) || 'unnamed row';
+  return { ok: false, reason: `${host} does not look like the site of "${label}"; not automated, check the registry entry before visiting it` };
+}
+
 // The explicit list, for callers (the watcher today) that only pass hosts.
 // Required lazily and defensively: brokers.js reads config, which must never
 // make the generic pass fail to start.
@@ -1220,32 +1323,38 @@ function loadGenericBrokers(explicitBrokerHosts, extra = {}) {
   const explicit = buildExplicitIdentity(explicitBrokerHosts, extra.explicitBrokers);
   const covered = (name, host) => explicit.coversHost(host) || explicit.coversName(name);
 
+  const markupRows = fs.existsSync(MARKUP_PATH) ? JSON.parse(fs.readFileSync(MARKUP_PATH, 'utf8')) : [];
+  const badbool = fs.existsSync(BADBOOL_PATH) ? JSON.parse(fs.readFileSync(BADBOOL_PATH, 'utf8')) : [];
+  const knownDomains = shippedBrokerDomains({ markup: markupRows, badbool }, explicitBrokerHosts);
+
+  // codex #2: a row whose host does not plausibly belong to the broker it names is
+  // kept (it is still logged and counted) but turned into a manual row that the
+  // runner never navigates to or fills.
+  const withTrust = (broker, row) => {
+    const verdict = assessBrokerHost({ ...row, name: broker.name, url: broker.url }, { knownDomains });
+    return verdict.ok ? broker : { ...broker, method: 'manual', untrusted: verdict.reason };
+  };
+
   // The Markup dataset (494 entries)
-  if (fs.existsSync(MARKUP_PATH)) {
-    const markup = JSON.parse(fs.readFileSync(MARKUP_PATH, 'utf8'));
-    for (const row of markup) {
-      if (!row.urlFinal || !row.urlFinal.startsWith('http')) continue;
-      try {
-        const host = new URL(row.urlFinal).hostname.replace(/^www\./, '');
-        if (seen.has(host) || covered(row.name, host)) continue;
-        seen.add(host);
-        brokers.push({ name: row.name || host, url: row.urlFinal, source: 'markup' });
-      } catch(_) {}
-    }
+  for (const row of markupRows) {
+    if (!row.urlFinal || !row.urlFinal.startsWith('http')) continue;
+    try {
+      const host = new URL(row.urlFinal).hostname.replace(/^www\./, '');
+      if (seen.has(host) || covered(row.name, host)) continue;
+      seen.add(host);
+      brokers.push(withTrust({ name: row.name || host, url: row.urlFinal, source: 'markup' }, row));
+    } catch(_) {}
   }
 
   // BADBOOL extras (27 additional people-search sites)
-  if (fs.existsSync(BADBOOL_PATH)) {
-    const extraRows = JSON.parse(fs.readFileSync(BADBOOL_PATH, 'utf8'));
-    for (const url of extraRows) {
-      if (!url.startsWith('http')) continue;
-      try {
-        const host = new URL(url).hostname.replace(/^www\./, '');
-        if (seen.has(host) || covered(host, host)) continue;
-        seen.add(host);
-        brokers.push({ name: host, url, source: 'badbool' });
-      } catch(_) {}
-    }
+  for (const url of badbool) {
+    if (!url.startsWith('http')) continue;
+    try {
+      const host = new URL(url).hostname.replace(/^www\./, '');
+      if (seen.has(host) || covered(host, host)) continue;
+      seen.add(host);
+      brokers.push(withTrust({ name: host, url, source: 'badbool' }, { hostname: host }));
+    } catch(_) {}
   }
 
   // Live registry feeds (California + Vermont), written by
@@ -1266,7 +1375,7 @@ function loadGenericBrokers(explicitBrokerHosts, extra = {}) {
             const host = new URL(url).hostname.replace(/^www\./, '');
             if (seen.has(host) || covered(row.name, host)) continue;
             seen.add(host);
-            brokers.push({ name: row.name || host, url, source: row.source || 'feed', method: row.method });
+            brokers.push(withTrust({ name: row.name || host, url, source: row.source || 'feed', method: row.method }, row));
           } catch(_) {}
         }
       }
@@ -1568,4 +1677,4 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
   };
 }
 
-module.exports = { runGenericBrokers, resolveResumeStart, CAPTCHA_IN_FORM_SELECTOR, CAPTCHA_ON_PAGE_SELECTOR, loadGenericBrokers, processGenericUrl, classifyNavError, classifyOutcome, isDeadStatus, loadDeadSet, DEAD_URLS_PATH, _setConfig, getFieldMap, fillGenericForm, checkBrokerUrl, isDisallowedAddress, newTextSince, classifyOptOutForm, describeFormElement, isHomepageUrl };
+module.exports = { runGenericBrokers, resolveResumeStart, CAPTCHA_IN_FORM_SELECTOR, CAPTCHA_ON_PAGE_SELECTOR, loadGenericBrokers, processGenericUrl, classifyNavError, classifyOutcome, isDeadStatus, loadDeadSet, DEAD_URLS_PATH, _setConfig, getFieldMap, fillGenericForm, checkBrokerUrl, isDisallowedAddress, newTextSince, classifyOptOutForm, describeFormElement, isHomepageUrl, assessBrokerHost };

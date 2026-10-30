@@ -285,8 +285,8 @@ test('loadGenericBrokers keeps the feed row method so the runner can respect it'
     [MARKUP_PATH]: JSON.stringify([]),
     [BADBOOL_PATH]: JSON.stringify([]),
     [FEEDS_PATH]: JSON.stringify([
-      { name: 'Home Co', optOutUrl: 'https://home-co.example.com/', method: 'manual', source: 'ca' },
-      { name: 'Form Co', optOutUrl: 'https://form-co.example.com/opt-out', method: 'direct-form', source: 'vt' },
+      { name: 'Home Co', optOutUrl: 'https://home-co.com/', method: 'manual', source: 'ca' },
+      { name: 'Form Co', optOutUrl: 'https://form-co.com/opt-out', method: 'direct-form', source: 'vt' },
     ]),
   };
   const fsMock = {
