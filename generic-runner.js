@@ -39,8 +39,6 @@
 const path = require('path');
 const fs   = require('fs');
 const os   = require('os');
-const net  = require('net');
-const dns  = require('dns');
 
 // The three datasets below ship with the app and always load from it. The feeds
 // cache is written by --update-brokers, so it lives in the writable data
@@ -140,84 +138,17 @@ function isDeadStatus(code) {
   return code === 404 || code === 410 || code >= 500;
 }
 
-// ─── Target-URL guard (codex #2) ──────────────────────────────────────────────
+// ─── Target-URL guard (codex #2, BRK2-12) ─────────────────────────────────────
 //
 // Registry and dataset rows are only "URLs that start with http". Left alone, a
 // hostile or broken row (loopback, RFC1918, cloud metadata, a host that redirects
 // to one) gets the browser pointed at an internal service, and the first form on
-// the page gets the user's name, email and address. Every broker URL is checked
-// before navigation and the page's final URL is checked again after it.
+// the page gets the user's name, email and address. lib/url-guard.js holds the
+// address table and the checks (shared with the confirmation-email clicker); this
+// file decides where they apply: before navigation, on every navigation request the
+// page makes (route interception, never a cached verdict) and on every form action.
 
-// Reserved / internal-only names. None of these is ever a public data broker.
-const INTERNAL_HOST_SUFFIXES = ['localhost', 'local', 'internal', 'localdomain', 'home.arpa', 'lan', 'intranet', 'corp'];
-const DNS_LOOKUP_TIMEOUT_MS = 5000;
-// RFC 2606 / 6761 names never resolve to a real broker. With the default resolver
-// they are not worth a DNS query (the navigation fails on its own), which also
-// keeps tests and docs that use them off the network.
-const RESERVED_NAME_SUFFIXES = ['example', 'invalid', 'test', 'example.com', 'example.net', 'example.org'];
-
-function parseIPv4(str) {
-  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(str);
-  if (!m) return null;
-  const octets = m.slice(1).map(Number);
-  return octets.every(n => n <= 255) ? octets : null;
-}
-
-function isBlockedIPv4([a, b]) {
-  return a === 0                              // 0.0.0.0/8 unspecified / "this network"
-    || a === 10                               // 10.0.0.0/8 private
-    || a === 127                              // 127.0.0.0/8 loopback
-    || (a === 100 && b >= 64 && b <= 127)     // 100.64.0.0/10 CGNAT
-    || (a === 169 && b === 254)               // 169.254.0.0/16 link-local (cloud metadata)
-    || (a === 172 && b >= 16 && b <= 31)      // 172.16.0.0/12 private
-    || (a === 192 && b === 168)               // 192.168.0.0/16 private
-    || a >= 224;                              // 224.0.0.0/4 multicast, 240.0.0.0/4 reserved, broadcast
-}
-
-// Expand an IPv6 literal into its 8 16-bit groups, or null when it is not one.
-function parseIPv6(str) {
-  let s = String(str).split('%')[0];
-  if (!net.isIPv6(s)) return null;
-  if (s.includes('.')) {
-    const cut = s.lastIndexOf(':');
-    const v4 = parseIPv4(s.slice(cut + 1));
-    if (!v4) return null;
-    s = `${s.slice(0, cut + 1)}${((v4[0] << 8) | v4[1]).toString(16)}:${((v4[2] << 8) | v4[3]).toString(16)}`;
-  }
-  const groupsOf = (part) => (part === '' ? [] : part.split(':'));
-  let groups;
-  if (s.includes('::')) {
-    const [head, tail] = s.split('::');
-    const h = groupsOf(head);
-    const t = groupsOf(tail);
-    const missing = 8 - h.length - t.length;
-    if (missing < 0) return null;
-    groups = [...h, ...Array(missing).fill('0'), ...t];
-  } else {
-    groups = groupsOf(s);
-  }
-  if (groups.length !== 8) return null;
-  const nums = groups.map(g => parseInt(g, 16));
-  return nums.some(n => Number.isNaN(n)) ? null : nums;
-}
-
-function isBlockedIPv6(g) {
-  const allZero = (from, to) => g.slice(from, to).every(n => n === 0);
-  const v4Of = (hi, lo) => [hi >> 8, hi & 255, lo >> 8, lo & 255];
-  if (allZero(0, 8)) return true;                               // ::  unspecified
-  if (allZero(0, 7) && g[7] === 1) return true;                 // ::1 loopback
-  if ((g[0] & 0xffc0) === 0xfe80) return true;                  // fe80::/10 link-local
-  if ((g[0] & 0xffc0) === 0xfec0) return true;                  // fec0::/10 site-local (deprecated)
-  if ((g[0] & 0xfe00) === 0xfc00) return true;                  // fc00::/7 unique-local
-  if ((g[0] & 0xff00) === 0xff00) return true;                  // ff00::/8 multicast
-  if (g[0] === 0x100 && allZero(1, 4)) return true;             // 100::/64 discard-only
-  // Addresses that carry an IPv4 address: judge them by the IPv4 inside.
-  if (allZero(0, 5) && g[5] === 0xffff) return isBlockedIPv4(v4Of(g[6], g[7]));   // ::ffff:a.b.c.d mapped
-  if (allZero(0, 6)) return isBlockedIPv4(v4Of(g[6], g[7]));                       // ::a.b.c.d compatible
-  if (g[0] === 0x64 && g[1] === 0xff9b && allZero(2, 6)) return isBlockedIPv4(v4Of(g[6], g[7])); // 64:ff9b::/96 NAT64
-  if (g[0] === 0x2002) return isBlockedIPv4(v4Of(g[1], g[2]));                     // 2002::/16 6to4
-  return false;
-}
+const urlGuard = require('./lib/url-guard');
 
 /**
  * True when an address must never be a broker target. Anything that is not
@@ -226,91 +157,21 @@ function isBlockedIPv6(g) {
  * @returns {boolean}
  */
 function isDisallowedAddress(address) {
-  const family = net.isIP(String(address || '').split('%')[0]);
-  if (family === 4) return isBlockedIPv4(parseIPv4(address));
-  if (family === 6) {
-    const groups = parseIPv6(address);
-    return groups ? isBlockedIPv6(groups) : true;
-  }
-  return true;
-}
-
-async function resolveAll(host, lookup, timeoutMs) {
-  let timer;
-  const timedOut = new Promise((_, reject) => {
-    timer = setTimeout(() => reject(new Error('dns lookup timed out')), timeoutMs);
-    if (timer.unref) timer.unref();
-  });
-  try {
-    const found = await Promise.race([lookup(host, { all: true }), timedOut]);
-    return Array.isArray(found) ? found : [found];
-  } finally {
-    clearTimeout(timer);
-  }
+  return urlGuard.isBlockedAddress(address);
 }
 
 /**
  * Decide whether a URL may be navigated to / may be where the page ended up.
- *
- * A failed or timed-out DNS lookup is NOT a rejection: an unresolvable host is
- * just a dead broker, and the browser's own navigation error is what classifies
- * it as 'dead' (ERR_NAME_NOT_RESOLVED). Only a lookup that succeeds and returns a
- * disallowed address blocks the row.
+ * Fails closed: a lookup that errors or times out, a single-label name and a name
+ * that resolves to nothing are all refused. `unresolvable: true` marks the one
+ * definite answer, "no such host", which the caller reports as a dead broker.
  *
  * @param {string} rawUrl
  * @param {{ lookup?: Function, timeoutMs?: number }} [opts] lookup is dns.promises.lookup-shaped
- * @returns {Promise<{ ok: true } | { ok: false, reason: string }>}
+ * @returns {Promise<{ ok: true } | { ok: false, reason: string, unresolvable?: boolean }>}
  */
 async function checkBrokerUrl(rawUrl, opts = {}) {
-  const lookup = opts.lookup || dns.promises.lookup;
-  const timeoutMs = opts.timeoutMs || DNS_LOOKUP_TIMEOUT_MS;
-  let url;
-  try {
-    url = new URL(rawUrl);
-  } catch (_) {
-    return { ok: false, reason: 'unparseable url' };
-  }
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    return { ok: false, reason: `scheme ${url.protocol.replace(/:$/, '')} is not http(s)` };
-  }
-  if (url.username || url.password) return { ok: false, reason: 'url embeds credentials' };
-
-  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
-  if (!host) return { ok: false, reason: 'url has no host' };
-  if (net.isIP(host)) return { ok: false, reason: `ip literal ${host}` };
-  for (const suffix of INTERNAL_HOST_SUFFIXES) {
-    if (host === suffix || host.endsWith(`.${suffix}`)) return { ok: false, reason: `internal host name ${host}` };
-  }
-
-  if (!opts.lookup && RESERVED_NAME_SUFFIXES.some(r => host === r || host.endsWith(`.${r}`))) return { ok: true };
-
-  let addresses;
-  try {
-    addresses = await resolveAll(host, lookup, timeoutMs);
-  } catch (_) {
-    return { ok: true };
-  }
-  for (const entry of addresses) {
-    const address = entry && entry.address;
-    if (isDisallowedAddress(address)) return { ok: false, reason: `${host} resolves to ${address}` };
-  }
-  return { ok: true };
-}
-
-/**
- * A checker that remembers its verdict per host for one broker, so the redirect
- * re-checks (after navigation, after a click) do not repeat the DNS lookup.
- */
-function makeUrlChecker(opts = {}) {
-  const verdicts = new Map();
-  return async (rawUrl) => {
-    let key = rawUrl;
-    try { key = new URL(rawUrl).origin; } catch (_) {}
-    if (verdicts.has(key)) return verdicts.get(key);
-    const verdict = await checkBrokerUrl(rawUrl, opts);
-    verdicts.set(key, verdict);
-    return verdict;
-  };
+  return urlGuard.checkUrl(rawUrl, opts);
 }
 
 // ─── Cookie banner + CCPA pop-up dismisser ────────────────────────────────────
@@ -592,6 +453,12 @@ function describeFormElement(form) {
   let action = '';
   try { action = new URL(attr(form, 'action') || '', document.baseURI).href; } catch (_) { action = attr(form, 'action'); }
 
+  // A submit control can send the form somewhere else: <button formaction="...">
+  // overrides the form's own action. Each one is checked like the action itself.
+  const formActions = controls.map((c) => attr(c, 'formaction')).filter(Boolean).map((v) => {
+    try { return new URL(v, document.baseURI).href; } catch (_) { return v; }
+  });
+
   const fieldNames = fields.map(c => lower(attr(c, 'name') || c.id));
   const shown = !!(form.offsetWidth || form.offsetHeight || form.getClientRects().length)
     && window.getComputedStyle(form).visibility !== 'hidden';
@@ -603,6 +470,7 @@ function describeFormElement(form) {
     heading: heading.slice(0, 200),
     dialogLabel: squash(dialogLabel).slice(0, 200),
     action,
+    formActions,
     id: form.id || '',
     className: typeof form.className === 'string' ? form.className : '',
     name: attr(form, 'name'),
@@ -942,7 +810,7 @@ async function clearCaptcha(handleCaptcha, page, broker, describeFailure) {
  * with a fillable field exists, so the caller can fall through to the next
  * strategy; otherwise a { status, detail } result.
  */
-async function submitOptOutForm(page, { person, submissionEmail, checkUrl, formCtx = {}, label, broker, handleCaptcha, captchaFailureDetail }) {
+async function submitOptOutForm(page, { person, submissionEmail, checkUrl, blockedNow, formCtx = {}, label, broker, handleCaptcha, captchaFailureDetail }) {
   const found = await describeForms(page);
   if (found.length === 0) return null;
 
@@ -962,10 +830,16 @@ async function submitOptOutForm(page, { person, submissionEmail, checkUrl, formC
     });
     if (!verdict.eligible) { skipped.push(verdict.reason); continue; }
 
-    // Never post the person's details to an internal address, whatever the page said.
-    if (checkUrl && desc.action) {
-      const target = await checkUrl(desc.action);
-      if (!target.ok) { skipped.push(`form posts to a blocked address (${target.reason})`); continue; }
+    // Never post the person's details to an internal address, whatever the page said:
+    // not to the form's action, nor to any submit control's own formaction (BRK2-12).
+    if (checkUrl) {
+      let refused = null;
+      for (const action of [desc.action, ...(Array.isArray(desc.formActions) ? desc.formActions : [])]) {
+        if (!action) continue;
+        const target = await checkUrl(action);
+        if (!target.ok) { refused = target; break; }
+      }
+      if (refused) { skipped.push(`form posts to a blocked address (${refused.reason})`); continue; }
     }
 
     // Look before typing: with nothing to clear a CAPTCHA, the person's details are
@@ -992,11 +866,36 @@ async function submitOptOutForm(page, { person, submissionEmail, checkUrl, formC
     if (!click.found) return { status: 'error', detail: 'Form filled but no submit control found - finish this one by hand' };
     if (!click.clicked) return { status: 'error', detail: `Form filled but the submit click failed (${click.error || 'error'})` };
     await page.waitForTimeout(2000);
+    // A post the guard refused never reached the broker: not a result to be judged.
+    const refusedPost = blockedNow ? await blockedNow() : null;
+    if (refusedPost) return refusedPost;
     return judgeNewText(page, before, label);
   }
 
   if (skipped.length > 0) process.stdout.write(`(skipped ${skipped.length} form(s): ${skipped[0]}) `);
   return null;
+}
+
+// One navigation guard per working page (a page is reused for many brokers and
+// replaced every few). The checker it calls is swapped in on every row, so the
+// lookup an injected test passes is the one the guard uses.
+const pageGuards = new WeakMap();
+
+async function guardFor(page, check) {
+  let held = pageGuards.get(page);
+  if (!held) {
+    held = { check, guard: null };
+    try {
+      held.guard = await urlGuard.installNavigationGuard(page, { check: (url) => held.check(url) });
+    } catch (_) {
+      // A page that is already closing: the by-hand checks below still run.
+      held.guard = null;
+    }
+    pageGuards.set(page, held);
+  }
+  held.check = check;
+  if (held.guard) held.guard.reset();
+  return held.guard;
 }
 
 // ─── Process one generic URL ──────────────────────────────────────────────────
@@ -1049,14 +948,35 @@ async function processGenericUrl(page, broker, state, dryRun = false, injectedDe
     return { status: 'dead', detail: 'cached dead-url, skipped' };
   }
 
-  // codex #2: never point the browser at (or type PII into) a disallowed target.
-  const checkUrl = makeUrlChecker({ lookup: opts.dnsLookup });
+  // codex #2 / BRK2-12: never point the browser at (or type PII into) a disallowed
+  // target. Nothing is cached: every check resolves the name again.
+  const checkUrl = (url) => checkBrokerUrl(url, { lookup: opts.dnsLookup });
   const target = await checkUrl(broker.url);
-  if (!target.ok) return { status: 'error', detail: `blocked: ${target.reason}` };
+  if (!target.ok) {
+    // "No such host" is the broker being gone; anything else (a timeout, a private
+    // answer) is a refusal. Either way nothing was navigated to.
+    if (target.unresolvable) return { status: 'dead', detail: 'ERR_NAME_NOT_RESOLVED' };
+    return { status: 'error', detail: `blocked: ${target.reason}` };
+  }
+
+  // Every navigation the page makes (first load, each redirect hop, a link, a form
+  // post) is checked again as it happens, and the address the browser really
+  // connected to is compared too: Chrome resolves names itself, so Node's earlier
+  // answer proves nothing about where the request goes (DNS rebinding).
+  const guard = await guardFor(page, checkUrl);
+  const blockedNow = async () => {
+    if (!guard) return null;
+    await guard.settle();
+    if (guard.blocked.length === 0) return null;
+    try { await page.goto('about:blank'); } catch (_) {}
+    return { status: 'error', detail: `blocked: ${guard.blocked[0].reason}` };
+  };
 
   // Re-check wherever the page actually is: HTTP redirects, meta refresh and JS
   // redirects can all end on a host the registry row never named.
   const guardLanding = async () => {
+    const refused = await blockedNow();
+    if (refused) return refused;
     const landed = typeof page.url === 'function' ? page.url() : '';
     if (!landed || landed === 'about:blank') return null;
     const verdict = await checkUrl(landed);
@@ -1102,7 +1022,7 @@ async function processGenericUrl(page, broker, state, dryRun = false, injectedDe
       const movedBad = await guardLanding();
       if (movedBad) return movedBad;
       const submitted = await submitOptOutForm(page, {
-        person, submissionEmail, checkUrl, broker, handleCaptcha: opts.handleCaptcha, captchaFailureDetail: opts.captchaFailureDetail,
+        person, submissionEmail, checkUrl, blockedNow, broker, handleCaptcha: opts.handleCaptcha, captchaFailureDetail: opts.captchaFailureDetail,
         formCtx: { afterOptOutClick: true, beforeSigs: formsBeforeClick },
         label: 'Do Not Sell clicked, form submitted',
       });
@@ -1129,7 +1049,7 @@ async function processGenericUrl(page, broker, state, dryRun = false, injectedDe
     const methodAllowsForms = broker.method === undefined || broker.method === null || broker.method === 'direct-form';
     if (methodAllowsForms && !isHomepageUrl(broker.url)) {
       const submitted = await submitOptOutForm(page, {
-        person, submissionEmail, checkUrl, broker, handleCaptcha: opts.handleCaptcha, captchaFailureDetail: opts.captchaFailureDetail,
+        person, submissionEmail, checkUrl, blockedNow, broker, handleCaptcha: opts.handleCaptcha, captchaFailureDetail: opts.captchaFailureDetail,
         formCtx: { afterOptOutClick: false },
         label: 'Form submitted',
       });
@@ -1145,6 +1065,9 @@ async function processGenericUrl(page, broker, state, dryRun = false, injectedDe
 
     return { status: 'manual', detail: broker.url };
   } catch (err) {
+    // A navigation the guard aborted surfaces as ERR_BLOCKED_BY_CLIENT: say why.
+    const refused = await blockedNow().catch(() => null);
+    if (refused) return refused;
     const message = err.message || '';
     const deadCode = classifyNavError(message);
     if (deadCode) {

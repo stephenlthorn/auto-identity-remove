@@ -163,9 +163,10 @@ test('checkBrokerUrl accepts a hostname that resolves only to public addresses',
   assert.deepEqual(r, { ok: true });
 });
 
-test('checkBrokerUrl lets an unresolvable host through: navigation will fail and classify it as dead', async () => {
+test('checkBrokerUrl refuses an unresolvable host (BRK2-12) and says it is gone, so the row is reported dead without a navigation', async () => {
   const r = await gr.checkBrokerUrl('https://gone.example.com/optout', { lookup: fakeLookup({}) });
-  assert.equal(r.ok, true);
+  assert.equal(r.ok, false);
+  assert.equal(r.unresolvable, true);
 });
 
 test('checkBrokerUrl rejects unparseable input', async () => {
