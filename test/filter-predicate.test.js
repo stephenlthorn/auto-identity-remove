@@ -69,17 +69,31 @@ test('makeBrokerPredicate: an empty retry set includes nothing (nothing failed)'
   assert.equal(include('Spokeo'), false);
 });
 
-test('makeBrokerPredicate: only wins over retry-failed, retry-failed wins over skip', () => {
-  assert.equal(
-    makeBrokerPredicate({ only: 'A', retryFailedFromLog: new Set(['B']) })('B'),
-    false,
-    'only outranks retry-failed',
-  );
-  assert.equal(
-    makeBrokerPredicate({ retryFailedFromLog: new Set(['B']), skip: 'B' })('B'),
-    true,
-    'retry-failed outranks skip (same precedence as applyFilter)',
-  );
+test('makeBrokerPredicate: --only and --retry-failed narrow each other, they do not outrank each other (CLI2-2)', () => {
+  // A broker has to be both named by --only and in the retry set. It used to be
+  // "only wins", which dropped --retry-failed silently.
+  const include = makeBrokerPredicate({ only: 'A,B', retryFailedFromLog: new Set(['B', 'C']) });
+  assert.equal(include('B'), true, 'named and failed');
+  assert.equal(include('A'), false, 'named but did not fail');
+  assert.equal(include('C'), false, 'failed but not named');
+  assert.equal(makeBrokerPredicate({ only: 'A', retryFailedFromLog: new Set(['B']) })('B'), false);
+});
+
+test('makeBrokerPredicate: --skip always removes, whatever else selects (CLI2-2)', () => {
+  // The rule used to be "retry-failed outranks skip" and "only outranks skip",
+  // so `--retry-failed --skip A` re-ran A, the broker the user asked to leave out.
+  assert.equal(makeBrokerPredicate({ retryFailedFromLog: new Set(['A']), skip: 'A' })('A'), false);
+  assert.equal(makeBrokerPredicate({ retryFailedFromLog: new Set(['A', 'B']), skip: 'A' })('B'), true, 'the rest of the retry set still runs');
+  assert.equal(makeBrokerPredicate({ only: 'A,B', skip: 'a' })('A'), false, 'case-insensitive, like every other name');
+  assert.equal(makeBrokerPredicate({ only: 'A,B', skip: 'a' })('B'), true);
+  assert.equal(makeBrokerPredicate({ only: 'A', retryFailedFromLog: new Set(['A']), skip: 'A' })('A'), false);
+});
+
+test('makeBrokerPredicate: --skip with nothing else selecting is unchanged', () => {
+  const include = makeBrokerPredicate({ skip: 'A, b' });
+  assert.equal(include('A'), false);
+  assert.equal(include('B'), false);
+  assert.equal(include('C'), true);
 });
 
 test('makeBrokerPredicate: a --only list that parses to nothing includes nothing', () => {

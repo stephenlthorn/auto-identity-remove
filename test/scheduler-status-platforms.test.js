@@ -85,7 +85,10 @@ describe('getScheduleStatus on macOS (launchd)', () => {
   it('reports no job when there is no plist, without asking launchctl anything', () => {
     const runner = fakeRunner({});
     const result = status({ platform: 'macos', runner });
-    assert.deepEqual({ ...result, lastRun: undefined, location: undefined }, { ...NOT_INSTALLED, lastRun: undefined, location: undefined });
+    assert.deepEqual(
+      { ...result, lastRun: undefined, lastPartialRun: undefined, location: undefined },
+      { ...NOT_INSTALLED, lastRun: undefined, lastPartialRun: undefined, location: undefined },
+    );
     assert.equal(runner.calls.length, 0);
   });
 

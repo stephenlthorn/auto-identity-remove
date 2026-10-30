@@ -133,11 +133,14 @@ test('cleanups run once even if the signal arrives repeatedly; the second signal
   const proc = fakeProcess();
   let runs = 0;
   let release;
-  const sd = installShutdownHandlers({ proc, log: fakeLog(), timeoutMs: 5000 });
+  // A second press a moment later (not the same Ctrl-C delivered twice: CLI2-7).
+  let clock = 0;
+  const sd = installShutdownHandlers({ proc, log: fakeLog(), timeoutMs: 5000, now: () => clock });
   sd.register(() => { runs += 1; return new Promise(r => { release = r; }); });
 
   proc.emit('SIGINT');
   assert.equal(proc.exits.length, 0);
+  clock = 5000;
   proc.emit('SIGINT');
   assert.deepEqual(proc.exits, [130], 'second Ctrl-C must not wait for a stuck cleanup');
   assert.equal(runs, 1, 'cleanups must not run twice');

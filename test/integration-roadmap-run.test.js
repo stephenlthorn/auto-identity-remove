@@ -97,11 +97,11 @@ test('a dry run, a preview and --verify leave neither a journal nor a heartbeat'
   });
 });
 
-test('a run that errored is a partial heartbeat, not an ok one', async () => {
+test('a run that errored is a failed heartbeat, not an ok one, and exits 1 (CLI2-3)', async () => {
   // The fake browser refuses every navigation, so every explicit form errors.
   await inSandbox({}, async (sandbox) => {
     const r = await runWatcher(sandbox, ['--only', 'Spokeo']);
-    assert.equal(r.code, 0, r.stderr);
+    assert.equal(r.code, 1, r.stderr);
     const beat = heartbeatOf(sandbox);
     assert.equal(beat.outcome, 'failed', 'nothing but errors happened');
     assert.ok(beat.counts.errors >= 1);
@@ -176,7 +176,8 @@ test('--resume after a SIGTERM mid-generic skips the finished explicit passes an
     assert.ok(checkpoint.index > 0, `the checkpoint is part-way through the pass (index ${checkpoint.index})`);
 
     const second = await runWatcher(sandbox, ['--resume'], { timeoutMs: 90000 });
-    assert.equal(second.code, 0, second.stderr);
+    // Every row errors against the fake browser, so the run is a failed one and exits 1 (CLI2-3).
+    assert.equal(second.code, 1, second.stderr);
     assert.match(second.stdout, /--resume: the explicit pass for Ada Lovelace is already done, skipping/);
     assert.match(second.stdout, /--resume: the explicit pass for Alan Turing is already done, skipping/);
     assert.match(second.stdout, new RegExp(`--resume: skipping ${checkpoint.index} generic broker\\(s\\) already covered`));

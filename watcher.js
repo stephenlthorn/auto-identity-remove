@@ -21,10 +21,10 @@ const os   = require('os');
 // that sends the user's name, address and phone to ~540 sites (CORE-6).
 const ARGS = require('./lib/args').parseWatcherArgsOrExit();
 
-const { STATE_PATH, CONFIG_PATH, CONFIG_ENC_PATH, RECHECK_DAYS, loadConfig, loadState, saveState, recordSuccess, setDryRun, getPersonsFromConfig, loadCheckpoint, saveCheckpoint, clearCheckpoint, findResumeIndex, planResume, readEntry, validateRunnableConfig } = require('./lib/config');
+const { STATE_PATH, CONFIG_PATH, CONFIG_ENC_PATH, RECHECK_DAYS, loadConfig, loadState, resetState, saveState, recordSuccess, setDryRun, getPersonsFromConfig, loadCheckpoint, saveCheckpoint, clearCheckpoint, findResumeIndex, planResume, readEntry, validateRunnableConfig } = require('./lib/config');
 const { results, logResult, buildSummary, setDefunctBrokers, setCurrentPerson, setStateForSummary, setJournal } = require('./lib/logger');
 const { findDefunct, DEFUNCT_THRESHOLD } = require('./lib/defunct');
-const { sendText, desktopNotify, openInBrowser, canOpenBrowser, pickManualUrlsToOpen, manualUrlsFromResults } = require('./lib/notify');
+const { sendText, desktopNotify, sendWebhook, dispatchNotify, openInBrowser, canOpenBrowser, pickManualUrlsToOpen, manualUrlsFromResults } = require('./lib/notify');
 const brokerRunner = require('./lib/broker-runner');
 const { sendOptOutEmails } = require('./lib/email');
 const { smtpTransportOptions } = require('./lib/smtp');
@@ -44,6 +44,7 @@ const { openJournal, journalPathFor, countResults } = require('./lib/journal');
 const { startHeartbeat, defaultHeartbeatPath, outcomeFromResults } = require('./lib/heartbeat');
 const { applyRetention } = require('./lib/retention');
 const { isPlaceholderKey, detectAndSolveCaptcha } = require('./lib/captcha');
+const { RELAY_BROKER, relaySkippedNames, guardResumePlan } = require('./lib/resume-guard');
 const { handleCaptcha, resolveManualMode, manualTimeoutSec, captchaFailureDetail, announceCaptchaWait, captchaBrokersFromLog, captchaConfigWarnings } = require('./lib/manual-captcha');
 
 const PREVIEW           = ARGS.preview;
@@ -127,6 +128,51 @@ function tuneContext(context) {
   context.setDefaultNavigationTimeout(NAVIGATION_TIMEOUT_MS);
 }
 
+/**
+ * An error message that is safe to put in the run log: any URL is cut down to its
+ * host (a Playwright message can carry the page it was loading, and these URLs hold
+ * a person's name and city).
+ */
+function safeMessage(err) {
+  const raw = err && err.message ? err.message : String(err);
+  return raw.replace(/https?:\/\/[^\s'")]+/gi, (url) => { try { return new URL(url).hostname; } catch (_) { return 'url'; } })
+    .replace(/\s+/g, ' ').trim().slice(0, 140);
+}
+
+// How many launches in a row may fail before the run stops asking for a browser.
+const MAX_BROWSER_LAUNCH_FAILURES = 3;
+
+/**
+ * The live browser context for a person, asked for again every time it is needed.
+ *
+ * The context used to be fetched once per pass, so a Chromium that died in the
+ * middle (an out-of-memory kill, a window closed under a headed run) made every
+ * later newPage() throw and aborted the whole run (CLI2-5). contexts.forPerson hands
+ * back the live one and relaunches a context that has closed, so asking before each
+ * broker heals the run. A browser that will not start again is not tried forever:
+ * after MAX_BROWSER_LAUNCH_FAILURES failures in a row it throws at once, instead of
+ * costing a launch timeout per broker.
+ *
+ * @param {{ forPerson: (index: number) => Promise<object> }} contexts
+ * @returns {(index: number) => Promise<object>}
+ */
+function makeContextProvider(contexts, { maxFailures = MAX_BROWSER_LAUNCH_FAILURES } = {}) {
+  let failures = 0;
+  return async function contextFor(index) {
+    if (failures >= maxFailures) {
+      throw new Error(`the browser failed to start ${failures} times in a row, so it is not being restarted again this run`);
+    }
+    try {
+      const context = await contexts.forPerson(index);
+      failures = 0;
+      return context;
+    } catch (err) {
+      failures++;
+      throw err;
+    }
+  };
+}
+
 const profileDirOf = (config) =>
   (config.profileDir || '~/.config/auto-identity-remove').replace(/^~(?=\/|$)/, os.homedir());
 
@@ -140,14 +186,24 @@ const profileDirOf = (config) =>
  */
 function acquireRunLock(lockPath) {
   try {
-    lock.acquire(lockPath);
+    lock.acquire(lockPath, { refreshMs: lock.refreshIntervalMs() });
   } catch (err) {
-    const pidMatch = err.message.match(/pid (\d+)/);
-    console.error(`Another instance is running, pid=${pidMatch ? pidMatch[1] : '?'}. Exiting.`);
+    // Only a LockError is "another instance"; a read-only state directory is not
+    // (CLI2-9). Both exit 1, with the true reason.
+    console.error(lock.describeAcquireFailure(err, lockPath).message);
     process.exit(1);
   }
-  const shutdown = installShutdownHandlers({ onShutdown: () => lock.release(lockPath) });
+  // state.json was read when this process started, before the lock. A run that
+  // finished in between has saved a newer one, and working from (then saving over)
+  // the old copy would resubmit what that run did and drop its entries. In place,
+  // so every reference to the state stays valid.
+  resetState();
+  // A lock older than the max age (default 6 h) is treated as stale whoever holds
+  // it, so a live run keeps re-stamping its own: a full run can outlast that.
+  const stopRefresh = lock.startRefresh(lockPath);
+  const shutdown = installShutdownHandlers({ onShutdown: () => { stopRefresh(); lock.release(lockPath); } });
   shutdown.release = () => {
+    stopRefresh();
     shutdown.uninstall();
     lock.release(lockPath);
   };
@@ -734,6 +790,14 @@ function modeInstallScheduler() {
   const logDir     = PATHS.logs;
   const platform   = getPlatform();
   const result     = installScheduleForPlatform({ platform, scriptPath, logDir });
+  // The OS scheduler may have refused (a crontab write that failed, a launchctl
+  // load that did not take, no cron in a container). Saying "installed" then left
+  // the user with a monthly job that never runs and no way to know (CLI2-4).
+  if (!result.ok) {
+    console.error(`\nScheduler NOT installed (${result.method}): nothing will run the monthly job.`);
+    console.error(`  ${result.detail}\n`);
+    process.exit(1);
+  }
   console.log(`\nScheduler installed via ${result.method}:`);
   console.log(`  ${result.detail}\n`);
   console.log('  Check it any time with: aidr schedule status\n');
@@ -742,13 +806,16 @@ function modeInstallScheduler() {
 
 // ── --schedule-status: is the monthly job installed, and how did its last run end? ──
 // Read-only: it asks the OS scheduler and reads last-run.json, nothing else. Exit
-// status is for scripts: 0 installed and active, 1 not installed, 2 installed but
-// not active (a job that exists and will not fire is worse than one that is absent).
+// status is for scripts: 0 installed, active and the last full run did not fail,
+// 1 not installed, 2 installed but not active (a job that exists and will not fire
+// is worse than one that is absent), 3 installed and active but the last full run
+// failed or crashed (a monthly job that breaks every time reads as healthy otherwise).
 function modeScheduleStatus() {
   const { getScheduleStatus, formatScheduleStatus } = require('./lib/scheduler');
   const status = getScheduleStatus({ scriptPath: path.join(__dirname, 'run.sh') });
   console.log(ARGS.json ? JSON.stringify(status, null, 2) : '\n' + formatScheduleStatus(status) + '\n');
-  process.exit(!status.installed ? 1 : status.active === false ? 2 : 0);
+  const lastRunBroken = Boolean(status.lastRun) && ['failed', 'crashed'].includes(status.lastRun.outcome);
+  process.exit(!status.installed ? 1 : status.active === false ? 2 : lastRunBroken ? 3 : 0);
 }
 
 // ── --uninstall-scheduler: remove the monthly job (only the one this tool installed) ──
@@ -845,7 +912,10 @@ async function modeKnow({ config, persons, state }) {
   try {
     console.log('\nRight-to-know - requesting disclosure of held data from email brokers');
     if (DRY_RUN) console.log('DRY RUN - previews only, nothing sent, no state saved.');
-    const emailBrokerCount = brokers.filter(b => b.method === 'email').length;
+    // --only / --skip narrow who is asked, like they narrow a run (CLI2-8).
+    const include = modeInclude();
+    const selected = brokers.filter(b => include(b.name));
+    const emailBrokerCount = selected.filter(b => b.method === 'email').length;
     console.log(`${emailBrokerCount} email broker(s) x ${persons.length} person(s)\n`);
 
     // The same masked address the opt-outs use, so the broker's reply reaches the
@@ -860,7 +930,7 @@ async function modeKnow({ config, persons, state }) {
       console.error('   Every request carries an email, and the relay fails closed. Fix the relay and re-run (relay.failOpen: true sends the real email instead).\n');
       exitCode = 1;
     } else {
-      const result = await sendKnowRequests(brokers, config, {
+      const result = await sendKnowRequests(selected, config, {
         dryRun: DRY_RUN,
         submissionEmailFor: (person) => emails.get(person),
       });
@@ -889,16 +959,35 @@ async function modeKnow({ config, persons, state }) {
 // SERP modes do not, so `aidr schedule status` reports when the job last really ran.
 const isOptOutRun = () => !DRY_RUN && !VERIFY && !SERP_SCAN && !SERP_WATCH;
 
+// A FILTERED run covers part of the broker list: --only, --skip, --retry-failed,
+// --captchas. It must not write or clear the resume checkpoint of an interrupted full
+// run, and its heartbeat must not stand in for the monthly run's (CLI2-10). --resume
+// is deliberately not one: it finishes the interrupted full run.
+const FILTERED = !!(ONLY_ARG || SKIP_ARG || RETRY_FAILED || CAPTCHAS);
+
+// The include test for the modes that act on the broker list but are not the opt-out
+// pass: --verify, --serp-scan, --serp-watch, --know and --pollute. They honour --only
+// and --skip like the run does; --retry-failed reads a run log none of them has, and
+// lib/args.js refuses it with them (CLI2-8).
+const modeInclude = () => makeBrokerPredicate({ only: ONLY_ARG, skip: SKIP_ARG });
+
 async function main({ config, persons, state, captchaNames }) {
   const guard = acquireRunLock(LOCK_PATH);
-  const heartbeat = isOptOutRun() ? startHeartbeat(defaultHeartbeatPath()) : null;
+  const heartbeat = isOptOutRun() ? startHeartbeat(defaultHeartbeatPath(), { partial: FILTERED }) : null;
   // Registered first, so it runs after the browser and state cleanups on a signal:
   // an interrupted run says so, instead of reading as a crash later.
   if (heartbeat) guard.register(() => { heartbeat.finish({ outcome: 'failed' }); });
   try {
-    const outcome = await runWithBrowser({ config, persons, state, guard, captchaNames });
-    if (heartbeat) heartbeat.finish(outcomeFromResults(results));
-    return outcome;
+    const end = await runWithBrowser({ config, persons, state, guard, captchaNames });
+    if (heartbeat) {
+      const final = end || outcomeFromResults(results);
+      heartbeat.finish(final);
+      // A run in which every broker errored is a failed run: exit 0 told cron,
+      // launchd and `docker run` that it worked (CLI2-3). Some errors beside some
+      // progress stay exit 0, since an unreachable site is normal.
+      if (final.outcome === 'failed') process.exitCode = 1;
+    }
+    return end;
   } catch (err) {
     if (heartbeat) heartbeat.finish({ outcome: 'failed' });
     throw err;
@@ -918,7 +1007,7 @@ async function runWithBrowser({ config, persons, state, guard, captchaNames }) {
   console.log(`📅 ${new Date().toLocaleString()}`);
   console.log(`📋 ${brokers.length} explicit brokers + 500+ generic | re-check window: ${RECHECK_DAYS} days\n`);
 
-  brokerRunner.configure({ dryRun: DRY_RUN, preview: PREVIEW, person: persons[0], personIndex: 0, capsolver: config.capsolver, noCapsolver: NO_CAPSOLVER, snapshot: SNAPSHOT, personCount: persons.length, config });
+  brokerRunner.configure({ dryRun: DRY_RUN, preview: PREVIEW, person: persons[0], personIndex: 0, capsolver: config.capsolver, noCapsolver: NO_CAPSOLVER, snapshot: SNAPSHOT, personCount: persons.length, config, partial: FILTERED });
 
   // Detect brokers that have been consistently unreachable across recent runs.
   // Defunct brokers still run - the warning is informational so the user can
@@ -1021,10 +1110,12 @@ async function runVerifyMode(contexts, { brokers, persons, state, config }) {
   // person's name and city into searchUrl, so a shared list recorded person B as
   // verified clear from person A's search. And from THEIR OWN browser profile:
   // contextFor hands out one person's context at a time (R7).
-  const result = await runVerify(null, brokers, persons, {
+  // --only / --skip narrow what is re-checked (CLI2-8).
+  const include = modeInclude();
+  const result = await runVerify(null, brokers.filter(b => include(b.name)), persons, {
     state,
     config,
-    brokersFor: (person) => brokers.forPerson(person),
+    brokersFor: (person) => brokers.forPerson(person).filter(b => include(b.name)),
     contextFor: (person, index) => contexts.forPerson(index),
   });
   saveState();
@@ -1054,7 +1145,8 @@ async function runSerpScanMode(contexts, { brokers, persons }) {
   console.log('   DDG first, then Bing, then Google (may be blocked).\n');
   // One scan covers every person's name, from the first person's profile.
   const context = await contexts.forPerson(0);
-  const summary = await runSerpScan(context, persons, brokers, { _skipWrite: DRY_RUN });
+  const include = modeInclude();
+  const summary = await runSerpScan(context, persons, brokers.filter(b => include(b.name)), { _skipWrite: DRY_RUN });
   await contexts.close();
 
   const pad = (s, n) => String(s).padEnd(n);
@@ -1105,7 +1197,8 @@ async function runSerpWatchMode(contexts, { brokers, persons, config }) {
     watchOptions._dispatchNotify = async () => {};
   }
   const context = await contexts.forPerson(0);
-  const watch = await runSerpWatch(context, persons, brokers, watchOptions);
+  const include = modeInclude();
+  const watch = await runSerpWatch(context, persons, brokers.filter(b => include(b.name)), watchOptions);
   await contexts.close();
 
   console.log('\n' + '='.repeat(62));
@@ -1170,7 +1263,14 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
   // explicit pass and the generic pass of every person come back to where they stopped.
   const savedCheckpoint = RESUME ? loadCheckpoint() : null;
   if (RESUME && !savedCheckpoint) console.log('\n--resume: no checkpoint found, running all brokers');
-  const resumePlan = planResume(savedCheckpoint, persons);
+  // planResume infers from a generic-phase checkpoint that every explicit pass ended,
+  // which is false for a person the interrupted run skipped because the relay was
+  // down. Take back every skip it made for someone the run's own record names.
+  const resumePlan = guardResumePlan(
+    planResume(savedCheckpoint, persons),
+    persons,
+    savedCheckpoint ? relaySkippedNames(LOG_DIR, { exclude: logFile }) : new Set(),
+  );
   const planFor = (i) => resumePlan[i] || { skipExplicit: false, explicitResumeKey: null, skipGeneric: false, genericResume: null };
 
   // The crash-safe journal (R3): every result is appended as it happens, so a kill
@@ -1194,13 +1294,15 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
   for (const { person, message } of unavailable) {
     setCurrentPerson(person);
     logResult(
-      'Masked-email relay',
+      RELAY_BROKER,
       'error',
       `unavailable (${message}); nothing was submitted for ${personName(person)}. Re-run once it works (a plain run: --retry-failed will not revisit them), or set relay.failOpen: true to send the real email`
     );
   }
   setCurrentPerson(null);
   if (relaySkipped.size > 0) process.exitCode = 1;
+
+  const contextFor = makeContextProvider(contexts);
 
   for (const [index, person] of persons.entries()) {
     if (relaySkipped.has(person)) continue;
@@ -1221,7 +1323,7 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
     }
 
     const submissionEmail = submissionEmails.get(person);
-    brokerRunner.configure({ dryRun: DRY_RUN, preview: PREVIEW, person, personIndex: index, capsolver: config.capsolver, noCapsolver: NO_CAPSOLVER, snapshot: SNAPSHOT, personCount: persons.length, config, submissionEmail });
+    brokerRunner.configure({ dryRun: DRY_RUN, preview: PREVIEW, person, personIndex: index, capsolver: config.capsolver, noCapsolver: NO_CAPSOLVER, snapshot: SNAPSHOT, personCount: persons.length, config, submissionEmail, partial: FILTERED });
 
     // Rebuild the broker list for THIS person. brokers.js interpolates names,
     // city, state, zip and email into searchUrl and formFields, so reusing the
@@ -1262,11 +1364,16 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
 
     console.log('\n── Explicit broker opt-outs ───────────────────────────────');
     // This person's own browser, launched only when there is something to open it for.
-    if (sorted.length > 0) {
-      const context = await contexts.forPerson(index);
-      for (const broker of sorted) {
-        process.stdout.write(`\n[${stamp()}] ${broker.name}… `);
+    // Asked for again before EVERY broker: a Chromium that died mid-pass is relaunched
+    // here instead of failing every later newPage() (CLI2-5), and a broker whose
+    // browser cannot be had is an error of its own, not the end of the run.
+    for (const broker of sorted) {
+      process.stdout.write(`\n[${stamp()}] ${broker.name}… `);
+      try {
+        const context = await contextFor(index);
         await brokerRunner.processBroker(context, broker);
+      } catch (err) {
+        logResult(broker.name, 'error', `browser unavailable (${safeMessage(err)}); this broker was not tried`);
       }
     }
   }
@@ -1280,20 +1387,29 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
   // (POLLUTE_COUNT === 0). See README for ToS warning.
   if (POLLUTE_COUNT > 0) {
     const { generateBogusPerson } = require('./lib/noise');
-    const bogBrokers = brokers.filter(b => b.acceptsBogus === true);
+    // The run's own include test: --only / --skip narrow the noise like everything else
+    // (it used to go to every acceptsBogus broker whatever --only said: CLI2-8).
+    const bogBrokers = brokers.filter(b => b.acceptsBogus === true && include(b.name));
 
     if (bogBrokers.length === 0) {
-      console.log('\n⚠️  --pollute: no brokers tagged acceptsBogus: true - nothing to do.');
+      console.log(`\n⚠️  --pollute: no brokers tagged acceptsBogus: true${ONLY_ARG || SKIP_ARG || RETRY_FAILED ? ' that match the filter' : ''} - nothing to do.`);
     } else {
       console.log(`\n── Noise mode - submitting ${POLLUTE_COUNT} bogus record(s) to ${bogBrokers.length} broker(s) ─`);
       // The browser of the last person served, so the noise needs no extra launch.
-      const context = await contexts.forPerson(persons.length - 1);
-      for (let i = 0; i < POLLUTE_COUNT; i++) {
+      // Asked for again per broker, like the real pass: a dead Chromium is relaunched.
+      noise: for (let i = 0; i < POLLUTE_COUNT; i++) {
         const fakePerson = generateBogusPerson();
         console.log(`\n   [bogus ${i + 1}/${POLLUTE_COUNT}] ${fakePerson.firstName} ${fakePerson.lastName} (${fakePerson.city}, ${fakePerson.state})`);
         for (const broker of bogBrokers) {
           process.stdout.write(`     ${broker.name}… `);
-          await brokerRunner.processBrokerWithPerson(context, broker, fakePerson, { noState: true });
+          try {
+            const context = await contextFor(persons.length - 1);
+            await brokerRunner.processBrokerWithPerson(context, broker, fakePerson, { noState: true });
+          } catch (err) {
+            // Noise is optional: no browser means no more of it, not a failed run.
+            console.log(`browser unavailable (${safeMessage(err)}); stopping noise mode`);
+            break noise;
+          }
         }
       }
     }
@@ -1357,7 +1473,15 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
     if (persons.length > 1) {
       console.log(`\n── Generic brokers for ${personName(person)} ──`);
     }
-    const context = await contexts.forPerson(index);
+    // The pass starts with this person's live browser; getContext (below) lets it ask
+    // again when that browser dies part-way through the ~490 rows.
+    let context;
+    try {
+      context = await contextFor(index);
+    } catch (err) {
+      logResult('Generic brokers', 'error', `browser unavailable (${safeMessage(err)}); the generic pass for ${personName(person)} was not run`);
+      continue;
+    }
     const genericResult = await runGenericBrokers(context, explicitHosts, state, logResult, recordSuccess, {
       dryRun: DRY_RUN,
       person,
@@ -1369,11 +1493,14 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
       include,
       // Lets the generic pass drop rows that are the same company as an explicit broker.
       explicitBrokers: brokers,
-      // R2: write a resume point as the pass advances, and pick one back up.
-      saveCheckpoint,
+      // R2: write a resume point as the pass advances, and pick one back up. A filtered
+      // run writes none: its rows are not the interrupted full run's, and a checkpoint
+      // of its own would replace the one a killed full run is waiting on (CLI2-10).
+      ...(FILTERED ? {} : { saveCheckpoint }),
       resumeFrom: resume.genericResume || undefined,
       handleCaptcha: genericHandleCaptcha,
       captchaFailureDetail: genericCaptchaDetail,
+      getContext: () => contextFor(index),
     });
     if (genericResult && genericResult.genericStats) {
       for (const [k, v] of Object.entries(genericResult.genericStats)) {
@@ -1385,8 +1512,9 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
   results.genericStats = genericTotals;
 
   // Clear checkpoint now that the run completed successfully (a no-op in dry-run,
-  // so a preview never deletes the checkpoint of an interrupted real run).
-  clearCheckpoint();
+  // so a preview never deletes the checkpoint of an interrupted real run). A filtered
+  // run leaves it: the checkpoint belongs to a full run that may still be resumed.
+  if (!FILTERED) clearCheckpoint();
 
   await contexts.close();
 
@@ -1456,16 +1584,21 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
   console.log(DRY_RUN ? '\n📄 Log: not written (dry run)' : `\n📄 Log: ${logFile}`);
   console.log(DRY_RUN ? '💾 State: not saved (dry run)\n' : `💾 State: ${STATE_PATH}\n`);
 
-  // A dry run or preview must not text anyone or raise a desktop notification.
-  if (DRY_RUN) return;
+  // A dry run or preview must not text anyone, raise a desktop notification or
+  // POST the webhook.
+  if (DRY_RUN) return null;
 
   // "Submitted" is not "removed": a form that was accepted may still need an
   // email click, and brokers re-list people. The wording says what happened.
+  const end = outcomeFromResults(results);
+  const failed = end.outcome === 'failed';
   const manualCount = results.captchaFailed.length + results.manual.length;
   const totalProcessed = results.succeeded.length + results.pendingConfirm.length + results.unverified.length
     + results.skipped.length + results.notFound.length + manualCount + results.errors.length + results.dead.length;
   const short = [
-    `🔒 Privacy Watcher (${new Date().toLocaleDateString()}):`,
+    failed
+      ? `❌ Privacy Watcher FAILED (${new Date().toLocaleDateString()}): every broker ended in an error, so nothing was submitted.`
+      : `🔒 Privacy Watcher (${new Date().toLocaleDateString()}):`,
     `✅ Submitted: ${results.succeeded.length}`,
     `📧 Awaiting email confirm: ${results.pendingConfirm.length}`,
     `❓ Unconfirmed: ${results.unverified.length}`,
@@ -1475,7 +1608,13 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
     `📊 Total: ${totalProcessed} brokers checked`,
   ].join('\n');
   sendText(short, config.notify);
-  desktopNotify('Privacy Watcher', `Done - ${results.succeeded.length} submitted, ${results.pendingConfirm.length} awaiting email confirmation, ${manualCount} need manual action (${totalProcessed} total)`);
+  desktopNotify('Privacy Watcher', failed
+    ? `Failed - every broker errored (${results.errors.length} errors, ${totalProcessed} total). Nothing was submitted.`
+    : `Done - ${results.succeeded.length} submitted, ${results.pendingConfirm.length} awaiting email confirmation, ${manualCount} need manual action (${totalProcessed} total)`);
+  // notify.webhook is documented as POSTed after every run; only serp-watch ever
+  // sent it (CLI2-3). Awaited, with its own deadline (lib/notify.js).
+  if (config.notify && config.notify.webhook) await sendWebhook(config.notify.webhook, short);
+  return end;
 }
 
 // ── aidr captchas: which brokers to go back to ───────────────────────────────
@@ -1507,15 +1646,17 @@ function resolveCaptchaRetry() {
 // ── Dispatch ──────────────────────────────────────────────────────────────────
 
 async function dispatch() {
+  // The pair gets its own, plainer wording; resolveMode would refuse it as well.
+  if (ARGS.allow !== null && ARGS.unallow !== null) {
+    console.error('Error: --allow and --unallow cannot be combined. Use one at a time.');
+    process.exit(2);
+  }
+
   // Combining modes is ambiguous (--list --score would silently run only one).
   // Checked before any mode runs; exit 2 like any other bad command line.
   const { conflict } = resolveMode({ ...ARGS, freeze: FREEZE_MODE });
   if (conflict) {
     console.error(`Error: ${conflict}`);
-    process.exit(2);
-  }
-  if (ARGS.allow !== null && ARGS.unallow !== null) {
-    console.error('Error: --allow and --unallow cannot be combined. Use one at a time.');
     process.exit(2);
   }
 
@@ -1554,9 +1695,15 @@ async function dispatch() {
   return main({ config, persons, state, captchaNames });
 }
 
-dispatch().catch(err => {
+dispatch().catch(async err => {
   console.error('\nFatal:', err && err.message ? err.message : err);
-  // A crash text is a real notification: never from a dry run or preview.
-  if (!DRY_RUN && notifyConfig) sendText(`❌ Privacy Watcher crashed: ${String(err && err.message).slice(0, 100)}`, notifyConfig);
+  // A crash is a real notification, on every channel the user set up (iMessage, a
+  // desktop toast, notify.webhook): never from a dry run or preview. dispatchNotify
+  // never throws, and its webhook POST has a deadline, so this cannot hang the exit.
+  if (!DRY_RUN && notifyConfig) {
+    try {
+      await dispatchNotify(`❌ Privacy Watcher crashed: ${String(err && err.message).slice(0, 100)}`, { notify: notifyConfig });
+    } catch (_) { /* a notification that fails must not mask the crash */ }
+  }
   process.exit(1);
 });
