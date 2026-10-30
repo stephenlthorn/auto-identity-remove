@@ -98,3 +98,30 @@ test('absurd kdf parameters are refused before any memory is allocated', () => {
     assert.throws(() => secrets.decryptConfig({ ...env, kdf: bad }, PASS), /kdf/i, JSON.stringify(bad));
   }
 });
+
+// -- CFG2-9: an envelope with explicit scrypt parameters is version 2 --------------
+//
+// Code from before CFG-14 only knows v:1 and decrypts it with N=2^14. Handing it
+// an N=2^17 envelope labelled v:1 made it derive the wrong key and report "wrong
+// passphrase or tampered data" for a passphrase that is right. Labelling the new
+// format v:2 makes that code say "unsupported envelope version", which is true
+// and tells the user to upgrade.
+
+test('new envelopes are version 2, so v1-only readers refuse them by version', () => {
+  const env = secrets.encryptConfig(PLAIN, PASS);
+  assert.equal(env.v, 2);
+  assert.notEqual(env.v, 1, 'a reader that only accepts v:1 must not try to decrypt this');
+  assert.equal(secrets.isEncryptedEnvelope(env), true);
+});
+
+test('a v1 envelope that already carries explicit parameters (written by the previous release) still decrypts', () => {
+  const env = secrets.encryptConfig(PLAIN, PASS);
+  assert.deepEqual(secrets.decryptConfig({ ...env, v: 1 }, PASS), PLAIN);
+  assert.equal(secrets.isEncryptedEnvelope({ ...env, v: 1 }), true);
+});
+
+test('the legacy v1 fixture is read unchanged and a future version is still refused', () => {
+  assert.deepEqual(secrets.decryptConfig(LEGACY_ENVELOPE, LEGACY_PASSPHRASE), LEGACY_PLAIN);
+  assert.throws(() => secrets.decryptConfig({ ...LEGACY_ENVELOPE, v: 3 }, LEGACY_PASSPHRASE), /unsupported envelope version 3/);
+  assert.equal(secrets.isEncryptedEnvelope({ ...LEGACY_ENVELOPE, v: 3 }), false);
+});

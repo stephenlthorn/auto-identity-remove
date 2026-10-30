@@ -40,7 +40,8 @@ test('round-trip: decryptConfig(encryptConfig(x)) deep-equals x', () => {
 
 test('envelope has the documented v/salt/iv/tag/ciphertext fields as hex strings', () => {
   const env = secrets.encryptConfig(PLAIN, PASS);
-  assert.equal(env.v, 1);
+  // v:2 = scrypt parameters recorded in the envelope (CFG2-9); v:1 is what older code reads.
+  assert.equal(env.v, 2);
   for (const k of ['salt', 'iv', 'tag', 'ciphertext']) {
     assert.equal(typeof env[k], 'string', `${k} should be a string`);
     assert.match(env[k], /^[0-9a-f]+$/, `${k} should be lowercase hex`);
