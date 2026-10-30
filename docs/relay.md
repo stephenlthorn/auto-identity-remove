@@ -50,6 +50,22 @@ explicitly:
 With `failOpen` set to `true` (the JSON boolean, not a string) a failed alias
 creation falls back to your real email and prints a loud warning.
 
+### The sender address must not be yours
+
+The alias replaces your address in form fields, in the email body and in
+`Reply-To`. It cannot replace the address the email is actually sent **from**:
+the From header and the SMTP envelope come from `email.smtp.from` (or, when that
+is blank, from the login `email.smtp.user`). If either of those is one of your
+real addresses, every email broker still receives it, which is exactly what the
+relay was set up to prevent.
+
+So `email.smtp.from` must be a dedicated sending address (a mailbox or alias
+that is not one of the addresses in `config.person.email`). With a relay set and
+a real address as the sender, the run refuses the email opt-outs (one error per
+broker) unless `relay.failOpen` is `true`, in which case it sends with a warning.
+`aidr config check` and `aidr doctor` name the problem before a run does, without
+printing the address.
+
 ### Dry runs and previews
 
 `--dry-run` and `--preview` never create an alias (they do not save state, so
