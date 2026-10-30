@@ -184,7 +184,9 @@ would silently fight the first. A run that ends on a CAPTCHA opens the broker's
 opt-out page in your browser (up to 10 sites) so you can finish it by hand too.
 CAPTCHAs that show no widget until the page is judged to be a bot (invisible
 reCAPTCHA v3, bot-manager challenges) cannot be waited on; those are reported as
-skipped and `aidr captchas` will not help with them.
+skipped and `aidr captchas` will not help with them. A run that waits for you holds the
+run lock the whole time, and a lock older than `AIDR_LOCK_MAX_AGE_HOURS` (default 6) is
+treated as abandoned: raise it for a very long manual session.
 
 ---
 

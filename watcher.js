@@ -951,7 +951,11 @@ async function runWithBrowser({ config, persons, state, guard, captchaNames }) {
   // runner and the generic pass both read the answer, so they cannot disagree.
   const captcha = resolveCaptchaPlan({ config, headless });
   brokerRunner.configure({ manual: captcha.manual, headless, isTTY: captcha.isTTY });
-  for (const line of captcha.lines) console.log(line);
+  // A mistyped setting is worth knowing about in any run; who would solve a CAPTCHA
+  // only matters to a run that submits (a dry run never waits, and --verify and the
+  // SERP modes have no forms).
+  for (const line of captcha.warnings) console.log(line);
+  if (isOptOutRun()) console.log(captcha.modeLine);
 
   // A signal arriving mid-run saves what has been recorded and closes the
   // browser before the lock goes (the shutdown runs these last-registered first).
@@ -996,17 +1000,18 @@ function resolveCaptchaPlan({ config, headless }) {
   const seconds = manualTimeoutSec(config);
   const wait = seconds % 60 === 0 ? `${seconds / 60} min` : `${seconds}s`;
 
-  const lines = captchaConfigWarnings(config).map(w => `⚠️  config: ${w}`);
+  const warnings = captchaConfigWarnings(config).map(w => `⚠️  config: ${w}`);
+  let modeLine;
   if (manual) {
-    lines.push(`🧩 CAPTCHAs: ${hasSolverKey && !NO_CAPSOLVER ? 'CapSolver first, then ' : ''}you solve them in the browser window (up to ${wait} each)`);
+    modeLine = `🧩 CAPTCHAs: ${hasSolverKey && !NO_CAPSOLVER ? 'CapSolver first, then ' : ''}you solve them in the browser window (up to ${wait} each)`;
   } else if ((CAPTCHAS || SOLVE_CAPTCHAS) && headless) {
-    lines.push('🧩 CAPTCHAs: --solve-captchas needs a visible browser and this run is headless, so none can be solved by hand');
+    modeLine = '🧩 CAPTCHAs: --solve-captchas needs a visible browser and this run is headless, so none can be solved by hand';
   } else if (headless) {
-    lines.push('🧩 CAPTCHAs: no display here, so a CAPTCHA the solver cannot do is listed at the end. Solve them on a desktop machine with: aidr captchas');
+    modeLine = '🧩 CAPTCHAs: no display here, so a CAPTCHA the solver cannot do is listed at the end. Solve them on a desktop machine with: aidr captchas';
   } else {
-    lines.push(`🧩 CAPTCHAs: solver only (${isTTY ? 'captcha.manual is false' : 'no interactive terminal'}). To solve them yourself afterwards: aidr captchas`);
+    modeLine = `🧩 CAPTCHAs: solver only (${isTTY ? 'captcha.manual is false' : 'no interactive terminal'}). To solve them yourself afterwards: aidr captchas`;
   }
-  return { manual, isTTY, lines };
+  return { manual, isTTY, warnings, modeLine };
 }
 
 // ── Verify mode: T+7 post-submit verification loop ───────────────────────────

@@ -352,6 +352,20 @@ test('a mistyped captcha setting is a warning at the start of the run, and the r
   });
 });
 
+test('a dry run and --verify say nothing about who solves CAPTCHAs, but a mistyped setting still warns', async () => {
+  const config = runnableConfig({ captcha: { manual: 'sometimes' } });
+  await inSandbox({ config, state: freshSpokeo }, async (sandbox) => {
+    const dry = await runWatcher(sandbox, ['--only', 'Spokeo', '--dry-run']);
+    assert.equal(dry.code, 0, dry.stderr);
+    assert.doesNotMatch(dry.stdout, /🧩 CAPTCHAs:/, 'a dry run never waits for anyone');
+    assert.match(dry.stdout, /config: captcha\.manual must be/);
+
+    const verify = await runWatcher(sandbox, ['--verify']);
+    assert.equal(verify.code, 0, verify.stderr);
+    assert.doesNotMatch(verify.stdout, /🧩 CAPTCHAs:/);
+  });
+});
+
 // ── R6: retention at the end of a run ────────────────────────────────────────
 
 test('retention.days purges old PII files at the end of a real run, and never this run\'s own', async () => {
