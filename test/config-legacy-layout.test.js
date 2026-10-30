@@ -152,3 +152,37 @@ test('doctor: a genuinely fresh install is still just fresh', async () => {
   assert.match(r.hint, /fresh install/);
   fs.rmSync(l.base, { recursive: true, force: true });
 });
+
+// ---- aidr config check ------------------------------------------------------------
+
+const { checkConfig } = require('../lib/config-check');
+
+test('config check: a config left at the app directory is named, with where it must go', () => {
+  const l = layout({ legacyConfig: true, legacyState: true });
+  const r = checkConfig({ env: { AIDR_HOME: l.home }, root: l.app });
+  assert.equal(r.ok, false);
+  const text = r.problems.join('\n');
+  assert.ok(text.includes(path.join(l.app, 'config.json')), text);
+  assert.ok(text.includes(path.join(l.home, 'config.json')), text);
+  assert.match(text, /AIDR_HOME/);
+  fs.rmSync(l.base, { recursive: true, force: true });
+});
+
+test('config check: state left behind while the config is in the home is a warning about re-submission', () => {
+  const l = layout({ legacyState: true });
+  fs.writeFileSync(path.join(l.home, 'config.json'), JSON.stringify({
+    person: { firstName: 'Ann', lastName: 'Probe', email: 'ann@example.test', zip: '12345' },
+  }), { mode: 0o600 });
+  const r = checkConfig({ env: { AIDR_HOME: l.home }, root: l.app });
+  const text = r.warnings.join('\n');
+  assert.ok(text.includes(path.join(l.app, 'state.json')), text);
+  assert.match(text, /re-?submit/i);
+  fs.rmSync(l.base, { recursive: true, force: true });
+});
+
+test('config check: nothing extra for an ordinary install', () => {
+  const l = layout({ homeConfig: true, homeState: true });
+  const r = checkConfig({ env: { AIDR_HOME: l.home }, root: l.app });
+  assert.equal(r.warnings.filter((w) => /old location|AIDR_HOME/.test(w)).length, 0, r.warnings.join('\n'));
+  fs.rmSync(l.base, { recursive: true, force: true });
+});
