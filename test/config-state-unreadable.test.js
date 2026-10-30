@@ -158,3 +158,16 @@ test('a missing or empty state file is not a problem (fresh install)', () => {
   assert.ok(JSON.parse(fs.readFileSync(f.target, 'utf8')).optOuts.Radaris);
   cleanup(f);
 });
+
+test('a state path whose parent is a regular file holds no state: it is missing, not unreadable', () => {
+  // ENOTDIR says the file cannot exist, so there is no history to protect. Calling it
+  // "unreadable" sent the person to chown a file that is not there and hid the real
+  // error, which the run lock reports plainly (test/lock-failure-message.test.js).
+  const f = fixture();
+  const blocker = path.join(f.dir, 'blocker');
+  fs.writeFileSync(blocker, 'not a directory');
+  const under = path.join(blocker, 'state.json');
+  assert.equal(cfg.stateProblem(under), null);
+  assert.equal(cfg.readStateFileSafe(under), null);
+  cleanup(f);
+});
