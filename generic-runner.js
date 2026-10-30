@@ -16,7 +16,9 @@
  *         categories and save
  *      c. an opt-out / deletion / privacy-request <form> -> fill it and click ITS
  *         submit control. Never a newsletter / login / search / contact / checkout
- *         form, never for a row classified manual or pointing at a bare homepage
+ *         form, never for a row classified manual or pointing at a bare homepage.
+ *         A CAPTCHA in front of the form goes to opts.handleCaptcha first; if it is
+ *         not cleared (or there is no handler) the row is captcha_failed, unsent
  *      d. a DSAR / privacy-request link -> hand it to the user
  *   4. If nothing automatable -> manual list
  *
@@ -25,7 +27,11 @@
  * error text -> error, confirmation-email wording -> pending_confirm, anything
  * else -> unverified (no 90-day cooldown).
  *
- * Returns: { count, genericStats }
+ * Returns: { count, genericStats, resumeSkipped }
+ *
+ * --resume: opts.resumeFrom { index, key } skips the rows already done, and
+ * opts.saveCheckpoint(record) is called as the loop advances so a kill leaves a
+ * resume point (see resolveResumeStart and lib/config.js planResume).
  */
 
 'use strict';
@@ -48,7 +54,7 @@ const DEAD_URLS_PATH  = path.join(__dirname, 'data', 'dead-urls.json');
 const { looksLikeConfirmationRequired, PATTERN: CONFIRM_PATTERN } = require('./lib/confirm');
 const { classifyPostSubmit } = require('./lib/success');
 const { patternsFor, langOf } = require('./lib/locale-patterns');
-const { CONFIRM_RECHECK_DAYS, loadConfig, readEntry, CONFIG_PATH, CONFIG_ENC_PATH } = require('./lib/config');
+const { CONFIRM_RECHECK_DAYS, loadConfig, readEntry, brokerPart, CONFIG_PATH, CONFIG_ENC_PATH } = require('./lib/config');
 const { withRetry } = require('./lib/retry');
 const { isAllowlisted } = require('./lib/filter');
 const { acceptOptOutDialogs } = require('./lib/browser');
@@ -857,13 +863,70 @@ async function clickFormSubmit(form) {
   }
 }
 
+// ─── CAPTCHA in front of a form (R2, the generic side of R1's contract) ───────
+//
+// A CAPTCHA the runner does not clear makes the broker reject the submit, and a
+// run that guesses at the outcome has nothing to base it on. So the form is
+// checked before it is sent; opts.handleCaptcha (lib/manual-captcha.js, via the
+// watcher) clears it, and without one the broker is reported captcha_failed.
+
+// Inside the form: a challenge frame, its container, or the hidden response field
+// the widget writes its token to. Any of them means the submit needs a token.
+const CAPTCHA_IN_FORM_SELECTOR = [
+  'iframe[src*="recaptcha"]', 'iframe[src*="hcaptcha"]', 'iframe[src*="challenges.cloudflare.com"]',
+  '.g-recaptcha', '.h-captcha', '.cf-turnstile', '[data-sitekey]',
+  'textarea[name="g-recaptcha-response"]', 'textarea[name="h-captcha-response"]', 'input[name="cf-turnstile-response"]',
+].join(', ');
+
+// Beside the form: only a widget loose on the page (not inside some OTHER form) and
+// a visible one. The reCAPTCHA v3 badge, an invisible v2 button and a newsletter
+// form's own widget are on the page without guarding this form, and treating them as
+// a CAPTCHA would block a form that can be sent.
+const CAPTCHA_ON_PAGE_SELECTOR = [
+  'iframe[src*="recaptcha"]:not([src*="size=invisible"])', 'iframe[src*="hcaptcha"]', 'iframe[src*="challenges.cloudflare.com"]',
+  '.g-recaptcha:not(button):not(input):not([data-size="invisible"])', '.h-captcha:not([data-size="invisible"])', '.cf-turnstile',
+].map(sel => `${sel}:not(form *)`).join(', ');
+
+/**
+ * Does the form about to be submitted have a CAPTCHA widget? A detector that
+ * throws (a closing page) answers no: today's behaviour, and the post-submit check
+ * still judges the result.
+ */
+async function hasCaptchaWidget(page, form) {
+  try {
+    if ((await form.locator(CAPTCHA_IN_FORM_SELECTOR).count()) > 0) return true;
+  } catch (_) {}
+  try {
+    const loose = page.locator(CAPTCHA_ON_PAGE_SELECTOR).first();
+    if ((await loose.count()) > 0 && (await loose.isVisible())) return true;
+  } catch (_) {}
+  return false;
+}
+
+/**
+ * Run the CAPTCHA handler. Only 'none' (nothing to solve) and 'solved' clear the
+ * form; every other answer, an unknown one and a throw included, does not: a form
+ * submitted into an unsolved CAPTCHA is how a run ends up guessing.
+ * @returns {Promise<{ cleared: boolean, detail?: string }>}
+ */
+async function clearCaptcha(handleCaptcha, page, broker) {
+  try {
+    const outcome = await handleCaptcha(page, { broker });
+    if (outcome === 'none' || outcome === 'solved') return { cleared: true };
+    const why = typeof outcome === 'string' && outcome ? outcome : 'unexpected result';
+    return { cleared: false, detail: `CAPTCHA not solved (${why}) - finish this one by hand` };
+  } catch (err) {
+    return { cleared: false, detail: `CAPTCHA handling failed (${((err && err.message) || 'error').slice(0, 60)}) - finish this one by hand` };
+  }
+}
+
 /**
  * Find the opt-out form on the page, fill it, click ITS submit control, and judge
  * the outcome from the text that appeared. Returns null when no eligible form
  * with a fillable field exists, so the caller can fall through to the next
  * strategy; otherwise a { status, detail } result.
  */
-async function submitOptOutForm(page, { person, submissionEmail, checkUrl, formCtx = {}, label }) {
+async function submitOptOutForm(page, { person, submissionEmail, checkUrl, formCtx = {}, label, broker, handleCaptcha }) {
   const found = await describeForms(page);
   if (found.length === 0) return null;
 
@@ -889,8 +952,22 @@ async function submitOptOutForm(page, { person, submissionEmail, checkUrl, formC
       if (!target.ok) { skipped.push(`form posts to a blocked address (${target.reason})`); continue; }
     }
 
+    // Look before typing: with nothing to clear a CAPTCHA, the person's details are
+    // not typed into a form that cannot be sent.
+    const captcha = await hasCaptchaWidget(page, locator);
+    if (captcha && typeof handleCaptcha !== 'function') {
+      return { status: 'captcha_failed', detail: 'CAPTCHA on the opt-out form and this run cannot solve it - finish this one by hand' };
+    }
+
     const filled = await fillGenericForm(page, person, { submissionEmail, scope: locator });
     if (!filled) { skipped.push('no fillable field'); continue; }
+
+    // Filled first, so a person solving it by hand only has the CAPTCHA left. The
+    // baseline below is read after, so a "verified" banner is not the broker's answer.
+    if (captcha) {
+      const cleared = await clearCaptcha(handleCaptcha, page, broker);
+      if (!cleared.cleared) return { status: 'captcha_failed', detail: cleared.detail };
+    }
 
     const before = await readBodyText(page);
     const click = await clickFormSubmit(locator);
@@ -1009,7 +1086,7 @@ async function processGenericUrl(page, broker, state, dryRun = false, injectedDe
       const movedBad = await guardLanding();
       if (movedBad) return movedBad;
       const submitted = await submitOptOutForm(page, {
-        person, submissionEmail, checkUrl,
+        person, submissionEmail, checkUrl, broker, handleCaptcha: opts.handleCaptcha,
         formCtx: { afterOptOutClick: true, beforeSigs: formsBeforeClick },
         label: 'Do Not Sell clicked, form submitted',
       });
@@ -1036,7 +1113,7 @@ async function processGenericUrl(page, broker, state, dryRun = false, injectedDe
     const methodAllowsForms = broker.method === undefined || broker.method === null || broker.method === 'direct-form';
     if (methodAllowsForms && !isHomepageUrl(broker.url)) {
       const submitted = await submitOptOutForm(page, {
-        person, submissionEmail, checkUrl,
+        person, submissionEmail, checkUrl, broker, handleCaptcha: opts.handleCaptcha,
         formCtx: { afterOptOutClick: false },
         label: 'Form submitted',
       });
@@ -1268,6 +1345,7 @@ function loadGenericBrokers(explicitBrokerHosts, extra = {}) {
  * Outcome buckets (WP5):
  *   submitted        - form found and submitted (success / pending_confirm)
  *   unverified       - submitted but not confirmed; never a success, no cooldown
+ *   captcha_failed   - a CAPTCHA stood in front of the form and was not cleared; nothing sent
  *   no_form_found    - page loaded but nothing automatable (manual / dead)
  *   error            - exception during processing
  *   dry-run-skipped  - submit deferred because dryRun=true
@@ -1285,6 +1363,8 @@ function classifyOutcome(status, detail) {
       return 'error';
     case 'unverified':
       return 'unverified';
+    case 'captcha_failed':
+      return 'captcha_failed';
     case 'allowlisted':
       return 'allowlisted';
     case 'skipped':
@@ -1304,6 +1384,51 @@ function hostOfBroker(broker) {
   } catch (_) {
     return undefined;
   }
+}
+
+// ─── Resume ───────────────────────────────────────────────────────────────────
+
+// The generic pass checkpoints at most this often. Rows that need no network
+// (cached-dead hosts, recently-done skips) fly past in microseconds, and an
+// fsync'd rename per row would be ~490 disk writes for nothing.
+const CHECKPOINT_MIN_INTERVAL_MS = 1000;
+
+/**
+ * Where in `queue` a resumed pass should start.
+ *
+ * The checkpoint holds { index, key }. The index is only a hint: the dataset (the
+ * Markup list, BADBOOL, the registry feeds) can change between an interrupted run
+ * and its --resume, and the --only/--skip filters change what is in `queue`. So the
+ * row at `index` must still carry `key`, else `key` is looked up by name. A key that
+ * cannot be found means we cannot tell what was already done, and the only safe
+ * answer is to start over: skipping on an unverified index could leave brokers
+ * that were never submitted looking handled.
+ *
+ * Two rows can share a name; the FIRST is taken, so a duplicate never makes a
+ * resume skip further than the interrupted run got.
+ *
+ * @param {Array<{ name: string }>} queue  the rows that will run, in order
+ * @param {{ index?: number|null, key?: string }|null|undefined} resumeFrom
+ * @param {(brokerName: string) => string} keyFor  broker name -> state key
+ * @returns {{ start: number, note: string|null }}  note is a line for the operator, or null
+ */
+function resolveResumeStart(queue, resumeFrom, keyFor) {
+  if (!resumeFrom) return { start: 0, note: null };
+  const { index, key } = resumeFrom;
+  if (typeof key !== 'string' || key === '') {
+    return { start: 0, note: '--resume: the generic checkpoint names no broker to verify, starting the generic pass over' };
+  }
+  const label = brokerPart(key);
+  const atIndex = Number.isInteger(index) && index >= 0 && index < queue.length && keyFor(queue[index].name) === key;
+  if (atIndex) return { start: index, note: null };
+  const found = queue.findIndex(b => keyFor(b.name) === key);
+  if (found === -1) {
+    return { start: 0, note: `--resume: checkpoint broker "${label}" is not in the generic list any more, starting the generic pass over` };
+  }
+  const note = Number.isInteger(index)
+    ? `--resume: "${label}" moved in the generic list (row ${index + 1} -> ${found + 1}); continuing there`
+    : `--resume: continuing the generic pass at "${label}" (row ${found + 1})`;
+  return { start: found, note };
 }
 
 async function runGenericBrokers(context, explicitBrokerHosts, state, logResult, recordSuccess, opts = {}) {
@@ -1338,6 +1463,41 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
 
   console.log(`\n── Generic brokers (${queue.length} from Markup CSV + BADBOOL)${dryRun ? ' [DRY RUN]' : ''} ──`);
 
+  // --resume: pick the pass back up where an interrupted run left it (R2).
+  const { start, note: resumeNote } = resolveResumeStart(queue, opts.resumeFrom, keyFor);
+  if (resumeNote) console.log(resumeNote);
+  else if (start > 0) console.log(`--resume: skipping ${start} generic broker(s) already covered`);
+
+  // Checkpoint the pass as it advances so a kill leaves a resume point. The record
+  // is written BEFORE its broker runs, so it never points past an unprocessed row:
+  // a kill costs at most one repeat of the in-progress broker. `opts.saveCheckpoint`
+  // is injected (like recordSuccess), so callers that do not pass it write nothing;
+  // a preview never writes, and a failed write must not abort a 490-broker pass.
+  const checkpointClock = typeof opts.now === 'function' ? opts.now : Date.now;
+  let lastCheckpointAt = -Infinity;
+  let pendingCheckpoint = null;
+  let checkpointWarned = false;
+  const writeCheckpoint = (record) => {
+    pendingCheckpoint = null;
+    try {
+      opts.saveCheckpoint(record);
+    } catch (err) {
+      if (checkpointWarned) return;
+      checkpointWarned = true;
+      console.log(`⚠️  Could not write the --resume checkpoint (${((err && err.message) || 'error').slice(0, 120)}); if this run is interrupted, --resume will start the generic pass over`);
+    }
+  };
+  const checkpointRow = (index, broker) => {
+    if (dryRun || typeof opts.saveCheckpoint !== 'function') return;
+    const record = { phase: 'generic', personIndex: opts.personIndex === undefined ? 0 : opts.personIndex, key: keyFor(broker.name), index };
+    const at = checkpointClock();
+    // A clock that stepped backwards (NTP) must not mute checkpoints until it catches up.
+    const sinceLast = at - lastCheckpointAt;
+    if (sinceLast >= 0 && sinceLast < CHECKPOINT_MIN_INTERVAL_MS) { pendingCheckpoint = record; return; }
+    lastCheckpointAt = at;
+    writeCheckpoint(record);
+  };
+
   // BRK-12: Playwright's default wait is 30 s per action, so one hidden toggle or
   // missing control stalled a broker for half a minute. Navigations keep their
   // own explicit (longer) timeout in processGenericUrl.
@@ -1357,6 +1517,7 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
     submitted: 0,
     no_form_found: 0,
     unverified: 0,
+    captcha_failed: 0,
     error: 0,
     'dry-run-skipped': 0,
     'skipped-recent': 0,
@@ -1379,12 +1540,14 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
   let processed = 0;
 
   try {
-    for (const broker of queue) {
+    for (let rowIndex = start; rowIndex < queue.length; rowIndex++) {
+      const broker = queue[rowIndex];
+      checkpointRow(rowIndex, broker);
       process.stdout.write(`\n  [${broker.name.slice(0,40)}]… `);
 
       let result;
       try {
-        result = await processFn(page, broker, state, dryRun, opts.injectedDeadSet, { person, personCount, personIndex: opts.personIndex, stateKey: keyFor(broker.name), submissionEmail: opts.submissionEmail || undefined, dnsLookup: opts.dnsLookup });
+        result = await processFn(page, broker, state, dryRun, opts.injectedDeadSet, { person, personCount, personIndex: opts.personIndex, stateKey: keyFor(broker.name), submissionEmail: opts.submissionEmail || undefined, dnsLookup: opts.dnsLookup, handleCaptcha: opts.handleCaptcha });
       } catch (err) {
         // One broker must never abort the whole run or skip the cleanup below.
         result = { status: 'error', detail: (err && err.message ? err.message.slice(0, 80) : 'error') };
@@ -1415,11 +1578,14 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
       } else if (result.status === 'pending_confirm') {
         const { recordPendingConfirmation } = require('./lib/config');
         recordPendingConfirmation(recordKey, result.detail || '');
-      } else if (result.status === 'error' || result.status === 'dead') {
+      } else if (result.status === 'error' || result.status === 'dead' || result.status === 'captcha_failed') {
         const { recordFailure } = require('./lib/config');
         // B24: record the real status so defunct/drift can tell a gone site
         // ('dead') from a transient error, rather than collapsing both to 'error'.
-        recordFailure(recordKey, result.status === 'dead' ? 'dead' : 'error');
+        // A CAPTCHA failure keeps its own kind, as the explicit runner records it:
+        // the site is up and the CAPTCHA is the problem, so it must not count
+        // toward "defunct".
+        recordFailure(recordKey, result.status);
       }
 
       await prunePopups(); // reap any popups / tabs this broker opened
@@ -1434,17 +1600,23 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
       try { await page.waitForTimeout(400); } catch (_) {} // polite delay
     }
   } finally {
+    // The last row is always written, throttled or not: it is the one a resume
+    // would otherwise lose.
+    if (pendingCheckpoint) writeCheckpoint(pendingCheckpoint);
     await page.close().catch(() => {});
     await prunePopups();
   }
 
   return {
-    count: queue.length,
+    // The rows that ran (a resumed pass does not count the rows it skipped).
+    count: queue.length - start,
+    resumeSkipped: start,
     genericStats: {
       attempted: stats.attempted,
       submitted: stats.submitted,
       no_form_found: stats.no_form_found,
       unverified: stats.unverified,
+      captcha_failed: stats.captcha_failed,
       error: stats.error,
       'dry-run-skipped': stats['dry-run-skipped'],
       'skipped-recent': stats['skipped-recent'],
@@ -1454,4 +1626,4 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
   };
 }
 
-module.exports = { runGenericBrokers, loadGenericBrokers, processGenericUrl, classifyNavError, classifyOutcome, isDeadStatus, loadDeadSet, DEAD_URLS_PATH, _setConfig, getFieldMap, fillGenericForm, checkBrokerUrl, isDisallowedAddress, newTextSince, classifyOptOutForm, describeFormElement, isHomepageUrl };
+module.exports = { runGenericBrokers, resolveResumeStart, CAPTCHA_IN_FORM_SELECTOR, CAPTCHA_ON_PAGE_SELECTOR, loadGenericBrokers, processGenericUrl, classifyNavError, classifyOutcome, isDeadStatus, loadDeadSet, DEAD_URLS_PATH, _setConfig, getFieldMap, fillGenericForm, checkBrokerUrl, isDisallowedAddress, newTextSince, classifyOptOutForm, describeFormElement, isHomepageUrl };
