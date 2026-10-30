@@ -168,3 +168,41 @@ test('CLI2-10: a full run still writes it', async () => {
   await t.run({ ...BROKER, captchaLikely: false });
   assert.deepEqual(t.h.recorded.checkpoints, ['CaptchaSite']);
 });
+
+// ── codex #8 ──────────────────────────────────────────────────────────────────
+
+test('codex #8: a success snippet that echoes the person\'s details is redacted in the log line', async () => {
+  const page = makeBrokerPage({
+    before: 'Opt out of this site',
+    after: 'Opt out of this site\nThanks Test User, your opt-out request has been received for test.user@example.com in zip 78701.',
+  });
+  const t = setup({ page, script: [humanSolves(1000)] });
+  await t.run({ ...BROKER, captchaLikely: false });
+  const last = t.h.logged.at(-1);
+  assert.equal(last.status, 'success');
+  for (const secret of ['test.user@example.com', 'Test User', '78701']) assert.ok(!last.detail.includes(secret), `${secret} leaked: ${last.detail}`);
+  assert.match(last.detail, /opt-out request has been received/);
+});
+
+test('codex #8: the snippet that is recorded for a pending confirmation is redacted too', async () => {
+  const page = makeBrokerPage({
+    before: 'Opt out of this site',
+    after: 'Opt out of this site\nWe sent a confirmation email to test.user@example.com. Check your email to confirm your request.',
+  });
+  const t = setup({ page });
+  await t.run({ ...BROKER, captchaLikely: false });
+  assert.equal(t.h.logged.at(-1).status, 'pending_confirm', JSON.stringify(t.h.logged));
+  assert.ok(!t.h.logged.at(-1).detail.includes('test.user@example.com'));
+  assert.equal(t.h.recorded.pending.length, 1);
+  assert.ok(!String(t.h.recorded.pending[0].snippet).includes('test.user@example.com'), 'state.json must not keep the email');
+});
+
+test('codex #8: the relay alias the broker was shown is redacted as well', async () => {
+  const page = makeBrokerPage({
+    before: 'Opt out of this site',
+    after: 'Opt out of this site\nYour opt-out request has been received. We wrote to hide.q1@relay.example.',
+  });
+  const t = setup({ page, runnerConfig: { submissionEmail: 'hide.q1@relay.example' } });
+  await t.run({ ...BROKER, captchaLikely: false });
+  assert.ok(!t.h.logged.at(-1).detail.includes('hide.q1@relay.example'), t.h.logged.at(-1).detail);
+});
