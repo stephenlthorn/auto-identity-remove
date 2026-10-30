@@ -163,7 +163,7 @@ test('--know does not re-send a request that is still inside its response window
 
 // ── --confirm-emails ──────────────────────────────────────────────────────────
 
-test('--confirm-emails on an empty directory launches the browser, finds nothing, and releases the lock', async () => {
+test('--confirm-emails on an empty directory launches no browser, finds nothing, and releases the lock', async () => {
   await inSandbox({}, async (sandbox) => {
     const dir = path.join(sandbox.dir, 'confirms');
     fs.mkdirSync(dir);
@@ -171,7 +171,8 @@ test('--confirm-emails on an empty directory launches the browser, finds nothing
     assert.equal(r.code, 0, r.stderr);
     assert.match(r.stdout, /Processing confirmation emails from: .*confirms/);
     assert.match(r.stdout, /Done: 0 confirmed, 0 unmatched, 0 failed \(0 \.eml files\)/);
-    assert.deepEqual(sandbox.fakeEvents().map(e => e.event), ['launch', 'close']);
+    // Every click gets a browser of its own (BRK2-11), so with no link there is no launch.
+    assert.deepEqual(sandbox.fakeEvents().map(e => e.event), []);
     assert.equal(fs.existsSync(sandbox.lock), false);
   });
 });

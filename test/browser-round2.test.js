@@ -142,3 +142,39 @@ test('the proxy password is scrubbed from the stack of a launch error, not only 
     return true;
   });
 });
+
+test('BRK2-11: close() shuts every context still open and removes its profile, even one still being prepared', async () => {
+  const base = tmpBase();
+  const launches = [];
+  const chromium = {
+    launchPersistentContext: async (dir) => {
+      const context = { dir, closed: false, close: async function close() { this.closed = true; } };
+      launches.push(context);
+      return context;
+    },
+  };
+  let releasePrepare;
+  const opener = browser.createThrowawayContexts({
+    chromium,
+    baseDir: base,
+    launchOptions: () => ({}),
+    prepare: () => new Promise((resolve) => { releasePrepare = resolve; }),
+  });
+
+  const opening = opener.open().catch(() => {});
+  while (!releasePrepare) await new Promise((resolve) => setImmediate(resolve)); // prepare is running: launched, not yet handed out
+  await opener.close();
+  assert.equal(launches[0].closed, true, 'a shutdown that lands mid-prepare closes the browser');
+  assert.equal(fs.existsSync(launches[0].dir), false, 'and removes its profile');
+  releasePrepare();
+  await opening;
+
+  const finished = await (async () => {
+    const quick = browser.createThrowawayContexts({ chromium, baseDir: base, launchOptions: () => ({}) });
+    const handle = await quick.open();
+    await handle.close();
+    await quick.close();
+    return handle.context.closed;
+  })();
+  assert.equal(finished, true, 'close() after an ordinary open/close is a no-op, not an error');
+});

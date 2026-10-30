@@ -35,7 +35,7 @@ const { editAllowlist } = require('./lib/allowlist-edit');
 const { diffResults, loadPreviousLog } = require('./lib/diff');
 const { renderAuditMarkdown, writeAuditFile, timestampForFilename } = require('./lib/audit');
 const { buildStealthScript } = require('./lib/stealth');
-const { buildLaunchOptions, resolveHeadless, isLowMemory, createPersonContexts, utilityProfileDir, browserConfigProblems, describeProxy } = require('./lib/browser');
+const { buildLaunchOptions, resolveHeadless, isLowMemory, createPersonContexts, createThrowawayContexts, utilityProfileDir, browserConfigProblems, describeProxy } = require('./lib/browser');
 const { installShutdownHandlers } = require('./lib/shutdown');
 const { writePrivateFile, mkdirPrivate } = require('./lib/private-fs');
 const { resolveMode } = require('./lib/mode-dispatch');
@@ -659,20 +659,32 @@ async function modeConfirmEmails() {
 
   try {
     console.log(`\nProcessing confirmation emails from: ${confirmEmailsDir}`);
-    // Confirmation links are broker sites, so the configured proxy and user agent apply;
-    // the profile is the utility one, not any person's (R7).
-    const context = await chromiumForConfirm.launchPersistentContext(utilityProfileDir(profileDirOf(config)), buildLaunchOptions({ headless: true, browser: config.browser }));
-    guard.register(() => context.close().catch(() => {}));
-    tuneContext(context);
+    // Confirmation links are broker sites, so the configured proxy and user agent apply.
+    // Every link is opened in a browser profile of its own that is deleted afterwards
+    // (BRK2-11): in one shared profile each click inherited the cookies of the click
+    // before it, another person's included, which links people to each other at a
+    // broker. Nothing is launched until there is a link to open.
+    const clicks = createThrowawayContexts({
+      chromium: chromiumForConfirm,
+      baseDir: profileDirOf(config),
+      launchOptions: () => buildLaunchOptions({ headless: true, browser: config.browser }),
+      prepare: async (context) => {
+        tuneContext(context);
+        await context.addInitScript(buildStealthScript());
+      },
+    });
+    // A signal mid-click closes the browser that click is using and removes its profile.
+    guard.register(() => clicks.close());
 
     try {
       // persons + relayAliases let a confirmation be matched to the right person
       // (including mail delivered to their masked alias) instead of the first.
-      const result = await processConfirmationEmails(context, brokers, {
+      const result = await processConfirmationEmails(null, brokers, {
         dir: confirmEmailsDir,
         dryRun: DRY_RUN,
         persons,
         relayAliases: loadState().relayAliases,
+        openContext: clicks.open,
       });
 
       // A confirmation is matched to a person (entry.person is the person object),
@@ -693,7 +705,7 @@ async function modeConfirmEmails() {
       if (DRY_RUN) console.log('DRY RUN - no link was opened and no state was changed.');
       console.log('');
     } finally {
-      await context.close().catch(() => {});
+      await clicks.close();
     }
   } finally {
     guard.release();
