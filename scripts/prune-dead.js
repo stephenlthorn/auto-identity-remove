@@ -36,23 +36,19 @@ const fs   = require('fs');
 const path = require('path');
 const { URL } = require('url');
 
+// A run in which most of the hosts that were actually tried failed hard is a machine
+// that was offline (or whose resolver was down), not evidence about any one host: it
+// is left out of every host's history. The thresholds are shared with the run
+// heartbeat (lib/outage.js), which refuses to call such a run ok.
+const { CACHED_SKIP, isOutage } = require('../lib/outage');
+
 const MIN_RUNS = 3;
 const MIN_SPAN_DAYS = 14;
-// A run in which MORE than this share of the hosts that were actually tried failed
-// hard is a machine that was offline (or whose resolver was down), not evidence about
-// any one host: it is left out of every host's history. Only judged once a run has at
-// least MIN_HOSTS_FOR_OUTAGE_CHECK hosts, so a small log of a few really dead hosts is
-// not mistaken for an outage.
-const MAX_HARD_SHARE = 0.5;
-const MIN_HOSTS_FOR_OUTAGE_CHECK = 10;
 const DAY_MS = 24 * 3600 * 1000;
 
 // DNS name not resolved, or the page is gone. Not refused/closed connections,
 // timeouts or 5xx: those are what an outage looks like.
 const HARD_FAILURE = /ERR_NAME_NOT_RESOLVED|ENOTFOUND|\bHTTP (404|410)\b/;
-// The generic runner short-circuits hosts already in dead-urls.json; that entry
-// is a cache hit, not a new observation.
-const CACHED_SKIP = /cached dead-url/i;
 const BARE_HOSTNAME = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i;
 
 /** Normalised hostname for an entry, or null when it does not identify one. */
@@ -153,7 +149,7 @@ function pruneDeadUrls(logsDir, deadUrlsPath) {
       if (verdict) verdicts.push({ host, verdict });
     }
     const hardCount = verdicts.filter((v) => v.verdict === 'hard').length;
-    if (verdicts.length >= MIN_HOSTS_FOR_OUTAGE_CHECK && hardCount / verdicts.length > MAX_HARD_SHARE) {
+    if (isOutage({ hard: hardCount, tried: verdicts.length })) {
       ignoredRuns++;
       continue;
     }
