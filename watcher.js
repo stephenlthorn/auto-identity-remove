@@ -554,18 +554,11 @@ async function modeBreachCheck() {
 //    response window (CCPA 45d / GDPR 30d) and write text + PDF to logs/. ─────
 async function modeComplaints() {
   const brokers = require('./brokers');
-  const { findOverdue, findOverdueKnowRequests, formatOverdueKnowNote, buildComplaintsForBroker, writeComplaintFiles } = require('./lib/complaint');
+  const { findOverdue, findOverdueKnowRequests, formatOverdueKnowNote, complainantFor, buildComplaintsForBroker, writeComplaintFiles } = require('./lib/complaint');
 
   const { config, persons } = loadConfigOrExit();
   const state   = loadState();
   const brokerMap = new Map(brokers.map(b => [b.name, b]));
-  // Resolve the complaint's complainant back to the person named in the
-  // composite state key (B2); fall back to the first person for bare keys.
-  const personByName = new Map(
-    persons
-      .filter(p => p && (p.firstName || p.lastName))
-      .map(p => [`${p.firstName || ''} ${p.lastName || ''}`.trim(), p])
-  );
 
   // An unanswered right-to-know request is not a deletion complaint (the tool
   // cannot see whether the broker replied), so it is reported, never filed.
@@ -578,14 +571,28 @@ async function modeComplaints() {
     process.exit(0);
   }
 
+  // The complainant is the person the composite state key names (B2). A row that
+  // names nobody configured is skipped, never filed under the first person: the
+  // complaint carries the signer's name, address, email and phone (CFG2-6).
+  const complainants = overdueList.map(overdue => ({ overdue, person: complainantFor(overdue, persons) }));
+  const unmatched = complainants.filter(c => !c.person);
+  if (unmatched.length > 0) {
+    console.log(`\nSkipped ${unmatched.length} overdue broker(s) whose person is not in your config (a complaint is signed by the person it is about):`);
+    for (const { overdue } of unmatched) console.log(`  - ${overdue.broker}${overdue.person ? ` (${overdue.person})` : ''}`);
+  }
+  const matched = complainants.filter(c => c.person);
+  if (matched.length === 0) {
+    console.log('\nNo complaint was written.\n');
+    process.exit(0);
+  }
+
   const outDir = PATHS.complaints;
   const pad = (s, n) => String(s).padEnd(n);
   console.log('\n' + pad('Broker', 32) + pad('Regime', 8) + pad('Days overdue', 14) + 'Requested');
   console.log('-'.repeat(78));
 
-  const entries = overdueList.map(overdue => {
+  const entries = matched.map(({ overdue, person }) => {
     const broker = brokerMap.get(overdue.broker) || { name: overdue.broker };
-    const person = (overdue.person && personByName.get(overdue.person)) || persons[0];
     console.log(
       pad(overdue.broker, 32) +
       pad(overdue.regime, 8) +
