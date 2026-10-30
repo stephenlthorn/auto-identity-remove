@@ -127,6 +127,51 @@ function tuneContext(context) {
   context.setDefaultNavigationTimeout(NAVIGATION_TIMEOUT_MS);
 }
 
+/**
+ * An error message that is safe to put in the run log: any URL is cut down to its
+ * host (a Playwright message can carry the page it was loading, and these URLs hold
+ * a person's name and city).
+ */
+function safeMessage(err) {
+  const raw = err && err.message ? err.message : String(err);
+  return raw.replace(/https?:\/\/[^\s'")]+/gi, (url) => { try { return new URL(url).hostname; } catch (_) { return 'url'; } })
+    .replace(/\s+/g, ' ').trim().slice(0, 140);
+}
+
+// How many launches in a row may fail before the run stops asking for a browser.
+const MAX_BROWSER_LAUNCH_FAILURES = 3;
+
+/**
+ * The live browser context for a person, asked for again every time it is needed.
+ *
+ * The context used to be fetched once per pass, so a Chromium that died in the
+ * middle (an out-of-memory kill, a window closed under a headed run) made every
+ * later newPage() throw and aborted the whole run (CLI2-5). contexts.forPerson hands
+ * back the live one and relaunches a context that has closed, so asking before each
+ * broker heals the run. A browser that will not start again is not tried forever:
+ * after MAX_BROWSER_LAUNCH_FAILURES failures in a row it throws at once, instead of
+ * costing a launch timeout per broker.
+ *
+ * @param {{ forPerson: (index: number) => Promise<object> }} contexts
+ * @returns {(index: number) => Promise<object>}
+ */
+function makeContextProvider(contexts, { maxFailures = MAX_BROWSER_LAUNCH_FAILURES } = {}) {
+  let failures = 0;
+  return async function contextFor(index) {
+    if (failures >= maxFailures) {
+      throw new Error(`the browser failed to start ${failures} times in a row, so it is not being restarted again this run`);
+    }
+    try {
+      const context = await contexts.forPerson(index);
+      failures = 0;
+      return context;
+    } catch (err) {
+      failures++;
+      throw err;
+    }
+  };
+}
+
 const profileDirOf = (config) =>
   (config.profileDir || '~/.config/auto-identity-remove').replace(/^~(?=\/|$)/, os.homedir());
 
@@ -1220,6 +1265,8 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
   setCurrentPerson(null);
   if (relaySkipped.size > 0) process.exitCode = 1;
 
+  const contextFor = makeContextProvider(contexts);
+
   for (const [index, person] of persons.entries()) {
     if (relaySkipped.has(person)) continue;
 
@@ -1280,11 +1327,16 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
 
     console.log('\n── Explicit broker opt-outs ───────────────────────────────');
     // This person's own browser, launched only when there is something to open it for.
-    if (sorted.length > 0) {
-      const context = await contexts.forPerson(index);
-      for (const broker of sorted) {
-        process.stdout.write(`\n[${stamp()}] ${broker.name}… `);
+    // Asked for again before EVERY broker: a Chromium that died mid-pass is relaunched
+    // here instead of failing every later newPage() (CLI2-5), and a broker whose
+    // browser cannot be had is an error of its own, not the end of the run.
+    for (const broker of sorted) {
+      process.stdout.write(`\n[${stamp()}] ${broker.name}… `);
+      try {
+        const context = await contextFor(index);
         await brokerRunner.processBroker(context, broker);
+      } catch (err) {
+        logResult(broker.name, 'error', `browser unavailable (${safeMessage(err)}); this broker was not tried`);
       }
     }
   }
@@ -1305,13 +1357,20 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
     } else {
       console.log(`\n── Noise mode - submitting ${POLLUTE_COUNT} bogus record(s) to ${bogBrokers.length} broker(s) ─`);
       // The browser of the last person served, so the noise needs no extra launch.
-      const context = await contexts.forPerson(persons.length - 1);
-      for (let i = 0; i < POLLUTE_COUNT; i++) {
+      // Asked for again per broker, like the real pass: a dead Chromium is relaunched.
+      noise: for (let i = 0; i < POLLUTE_COUNT; i++) {
         const fakePerson = generateBogusPerson();
         console.log(`\n   [bogus ${i + 1}/${POLLUTE_COUNT}] ${fakePerson.firstName} ${fakePerson.lastName} (${fakePerson.city}, ${fakePerson.state})`);
         for (const broker of bogBrokers) {
           process.stdout.write(`     ${broker.name}… `);
-          await brokerRunner.processBrokerWithPerson(context, broker, fakePerson, { noState: true });
+          try {
+            const context = await contextFor(persons.length - 1);
+            await brokerRunner.processBrokerWithPerson(context, broker, fakePerson, { noState: true });
+          } catch (err) {
+            // Noise is optional: no browser means no more of it, not a failed run.
+            console.log(`browser unavailable (${safeMessage(err)}); stopping noise mode`);
+            break noise;
+          }
         }
       }
     }
@@ -1375,7 +1434,15 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
     if (persons.length > 1) {
       console.log(`\n── Generic brokers for ${personName(person)} ──`);
     }
-    const context = await contexts.forPerson(index);
+    // The pass starts with this person's live browser; getContext (below) lets it ask
+    // again when that browser dies part-way through the ~490 rows.
+    let context;
+    try {
+      context = await contextFor(index);
+    } catch (err) {
+      logResult('Generic brokers', 'error', `browser unavailable (${safeMessage(err)}); the generic pass for ${personName(person)} was not run`);
+      continue;
+    }
     const genericResult = await runGenericBrokers(context, explicitHosts, state, logResult, recordSuccess, {
       dryRun: DRY_RUN,
       person,
@@ -1392,6 +1459,7 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
       resumeFrom: resume.genericResume || undefined,
       handleCaptcha: genericHandleCaptcha,
       captchaFailureDetail: genericCaptchaDetail,
+      getContext: () => contextFor(index),
     });
     if (genericResult && genericResult.genericStats) {
       for (const [k, v] of Object.entries(genericResult.genericStats)) {

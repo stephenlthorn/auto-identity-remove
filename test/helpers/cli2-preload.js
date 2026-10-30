@@ -11,6 +11,9 @@
  *                                  does when Chromium is killed or its window closed) and
  *                                  that newPage() rejects, as does every later one. A
  *                                  relaunch gets a fresh context with a fresh count.
+ *   AIDR_TEST_RELAUNCH_FAILS=1     with AIDR_TEST_CLOSE_AFTER: every launch after the first one
+ *                                  throws (Chromium will not start again), recorded as
+ *                                  `launch-failed`.
  *   AIDR_TEST_JOURNAL_THROWS=1     openJournal() throws: a crash in the middle of a real
  *                                  run, which lands in the Fatal handler.
  *   AIDR_TEST_GENERIC_THROWS=1     runGenericBrokers() throws: a crash that a dry run reaches too.
@@ -48,7 +51,13 @@ function killAfter(chromium, limit) {
   closingWrapped.add(chromium);
   const launch = chromium.launchPersistentContext.bind(chromium);
   let generation = 0;
+  let attempts = 0;
   chromium.launchPersistentContext = async (dir, options) => {
+    attempts++;
+    if (attempts > 1 && process.env.AIDR_TEST_RELAUNCH_FAILS) {
+      record('launch-failed', { attempt: attempts });
+      throw new Error('Failed to launch chromium (injected by the test)');
+    }
     const context = await launch(dir, options);
     const id = ++generation;
     const closeHandlers = [];
