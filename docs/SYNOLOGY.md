@@ -64,7 +64,20 @@ for this.
 
 ### 1. Put the project somewhere on a volume
 
-SSH in (Control Panel → Terminal & SNMP → Enable SSH):
+SSH in (Control Panel → Terminal & SNMP → Enable SSH) and download the latest release:
+
+```bash
+cd /volume1/docker
+curl -L -O https://github.com/stephenlthorn/auto-identity-remove/releases/latest/download/auto-identity-remove.tar.gz
+tar xzf auto-identity-remove.tar.gz
+cd auto-identity-remove
+```
+
+To update later, repeat the `curl` and `tar` lines from `/volume1/docker` (your `aidr-home`
+is not in the archive, so it stays) and rebuild the image (step 4).
+
+Prefer git, to track `main`? Use this instead of the download. It is the alternative for
+contributors, and needs `git` on the NAS:
 
 ```bash
 cd /volume1/docker

@@ -44,9 +44,9 @@ npx playwright install chromium
 ## Quick Start
 
 ```bash
-# 1. Clone the repo
-git clone https://github.com/stephenlthorn/auto-identity-remove.git
-cd auto-identity-remove
+# 1. Download the latest release and unpack it
+curl -L -O https://github.com/stephenlthorn/auto-identity-remove/releases/latest/download/auto-identity-remove.tar.gz
+tar xzf auto-identity-remove.tar.gz && cd auto-identity-remove
 
 # 2. One-command install (checks Node, installs deps + the Chromium browser)
 bash install.sh
@@ -64,6 +64,43 @@ node bin/aidr.js run
 > Tip: run `npm link` (or `npm i -g .`) so you can type `aidr` directly instead
 > of `node bin/aidr.js`. There is no `./node_modules/.bin/aidr` - npm only
 > creates `.bin` shims for *dependencies*, never for the package's own `bin`.
+
+**Check the download first (optional).** Each release carries a checksum file. Fetch it
+next to the archive, before the `tar` line in step 1, and verify:
+
+```bash
+curl -L -O https://github.com/stephenlthorn/auto-identity-remove/releases/latest/download/auto-identity-remove.tar.gz.sha256
+shasum -a 256 -c auto-identity-remove.tar.gz.sha256     # Linux: sha256sum -c auto-identity-remove.tar.gz.sha256
+```
+
+It prints `auto-identity-remove.tar.gz: OK`. That catches a corrupted or truncated
+download. The checksum is published next to the archive, so it does not prove who
+published it.
+
+**Prefer git? (for contributors, or to track `main`).** A clone follows `main`, which can
+be ahead of the latest release. Use it instead of step 1, then carry on from step 2:
+
+```bash
+git clone https://github.com/stephenlthorn/auto-identity-remove.git
+cd auto-identity-remove
+```
+
+### Updating
+
+- **Release install.** Download the new release and unpack it over the old folder: run
+  the same `tar xzf auto-identity-remove.tar.gz` in the folder that contains
+  `auto-identity-remove/`. Your `config.json`, `state.json` and `logs/` are not in the
+  archive, so they stay where they are (with `AIDR_HOME` set they live elsewhere
+  anyway). Then re-run `bash install.sh` to pick up new dependencies. Files a newer
+  release removed are not deleted, and `data/dead-urls.json` (which
+  `scripts/prune-dead.js` can add to) is replaced by the release's copy. For a clean
+  tree, unpack into a new folder and copy `config.json` and `state.json` across.
+- **Git install.** `git pull && bash install.sh`.
+- **Docker or Synology.** Update the folder as above, then rebuild the image:
+  `docker build -t auto-identity-remove .` (compose: `docker compose build`).
+
+Check what is installed with `node bin/aidr.js --version`. What changed between releases is in
+[CHANGELOG.md](CHANGELOG.md).
 
 ### The `aidr` command
 
@@ -1006,6 +1043,25 @@ npm run review:cross-model        # review the current diff with a non-Anthropic
 ```
 
 [i8]: https://github.com/stephenlthorn/auto-identity-remove/issues/8
+
+---
+
+## Releasing
+
+A release is cut by bumping `version` in `package.json` (as `X.Y.Z`) on `main`, with a
+matching `## X.Y.Z - <date>` section in [CHANGELOG.md](CHANGELOG.md), which becomes the
+release notes. The workflow in `.github/workflows/release.yml` then runs
+the tests, builds `auto-identity-remove.tar.gz` and its `.sha256` with
+`scripts/release-archive.sh`, and creates the `vX.Y.Z` release with both attached. A
+version that already has a release or tag is left alone, and a missing CHANGELOG section
+fails the run.
+
+GitHub counts downloads only for files attached to a release, so the numbers are on the
+release assets (`assets[].download_count`):
+
+```bash
+gh api repos/stephenlthorn/auto-identity-remove/releases --jq '.[] | {tag: .tag_name, assets: [.assets[] | {name, download_count}]}'
+```
 
 ---
 
