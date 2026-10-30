@@ -67,7 +67,9 @@ for (const { name, parser } of PARSERS) {
   });
 
   test(`[${name}] every boolean flag watcher.js knows is accepted on its own`, () => {
-    for (const spec of FLAG_SPECS.filter(s => s.kind === 'boolean')) {
+    // A modifier that declares `requires` is only valid next to its mode
+    // (test/args-roadmap.test.js covers those).
+    for (const spec of FLAG_SPECS.filter(s => s.kind === 'boolean' && !s.requires)) {
       const a = parse([spec.flag], parser);
       assert.equal(a[spec.key], true, `${spec.flag} should set ${spec.key}`);
     }
