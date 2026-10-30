@@ -1093,6 +1093,19 @@ the tests, builds `auto-identity-remove.tar.gz` and its `.sha256` with
 version that already has a release or tag is left alone, and a missing CHANGELOG section
 fails the run.
 
+The same run then publishes the container image, `ghcr.io/stephenlthorn/auto-identity-remove`
+for `linux/amd64` and `linux/arm64`, tagged `X.Y.Z` and `latest`. The `image` job builds from
+the `vX.Y.Z` tag and pushes nothing until Chromium has launched in the built image. If it
+fails, the release is already out: start the workflow by hand from `main` (Actions, Release,
+Run workflow), which rebuilds the image for the release that exists and does nothing else.
+
+**Once, after the first image is published:** GitHub creates a new package private, and a
+linked repository's permissions are inherited but its visibility is not. Until the package
+is public, `docker pull` fails with `denied` or `403` for everyone but you. Open the package
+(`https://github.com/stephenlthorn/auto-identity-remove/pkgs/container/auto-identity-remove`),
+Package settings, Danger Zone, Change visibility, Public. It cannot be made private again.
+The package page then shows the pull count for the image.
+
 GitHub counts downloads only for files attached to a release, so the numbers are on the
 release assets (`assets[].download_count`):
 

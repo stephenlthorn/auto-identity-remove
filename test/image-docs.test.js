@@ -175,3 +175,30 @@ test('the Dockerfile header points at the prebuilt image', () => {
 
   assert.match(header, new RegExp(IMAGE.replace(/[./]/g, '\\$&')));
 });
+test('the README Releasing section says the same run publishes the image, how to rebuild it, and the one-time public step', () => {
+  const releasing = section(readme, '## Releasing', '## License');
+
+  assert.match(releasing, new RegExp(IMAGE.replace(/[./]/g, '\\$&')));
+  assert.match(releasing, /`image` job/);
+  assert.match(releasing, /Run workflow/, 'a failed image job is rebuilt by starting the workflow by hand');
+  assert.match(releasing, /Change visibility/i, 'GHCR creates a new package private; a NAS cannot pull it until it is made public');
+  assert.match(releasing, /cannot be made private again|cannot make it private again|cannot be undone/i);
+});
+
+// ---------------------------------------------------------------------------
+// CHANGELOG
+// ---------------------------------------------------------------------------
+
+test('the 2.0.1 changelog section says an image is published with every release, and why', () => {
+  const changelog = read('CHANGELOG.md');
+  const m = changelog.match(/^## 2\.0\.1 - 2026-10-30$/m);
+
+  assert.ok(m, 'CHANGELOG.md needs "## 2.0.1 - 2026-10-30"');
+  const body = changelog.slice(m.index + m[0].length).split(/^## /m)[0];
+  assert.match(body, /ghcr\.io\/stephenlthorn\/auto-identity-remove/);
+  assert.match(body, /multi-arch|amd64/i);
+  assert.match(body, /#8\b/);
+  assert.match(body, /Synology/);
+  assert.match(body, /docs?\b/i, 'and the documentation changes');
+});
+

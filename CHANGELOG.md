@@ -2,6 +2,19 @@
 
 A release is cut by bumping `version` in `package.json` on main. The section here for that version becomes the release notes, so every version needs one.
 
+## 2.0.1 - 2026-10-30
+
+A prebuilt Docker image, so a NAS no longer has to build one. The tool itself is the same as 2.0.0.
+
+### New
+
+- **A prebuilt multi-arch image on GitHub Container Registry with every release** ([#8](https://github.com/stephenlthorn/auto-identity-remove/issues/8)): `ghcr.io/stephenlthorn/auto-identity-remove`, for `linux/amd64` and `linux/arm64`, tagged with the version and `latest`. The release workflow builds it from the release tag and launches Chromium in it before it publishes anything. A Synology DS720+ now pulls it, instead of downloading the source and building a 940 MB Playwright image on a Celeron.
+
+### Docs and compose
+
+- `docs/SYNOLOGY.md` and the README's Docker section lead with the prebuilt image: `docker pull`, then a plain `docker run`. The DSM Task Scheduler line is a plain `docker run --rm ...` that needs no compose file and no source on the NAS. Building from source is a short alternative.
+- `docker-compose.yml` pulls the image by default, and `AIDR_VERSION` pins a release. If you ran `docker compose run` from a checkout and relied on it building the image, build it with `docker compose -f docker-compose.yml -f docker-compose.build.yml build`.
+
 ## 2.0.0 - 2026-10-30
 
 A full audit, fix and roadmap pass, written test-first. It is a major version because some behaviour changes for existing installs: read **Upgrading from 1.x** before you update.

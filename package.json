@@ -1,6 +1,6 @@
 {
   "name": "auto-identity-remove",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Automated data broker opt-out runner - removes your personal info from 30+ people-search and data broker sites on a monthly schedule",
   "main": "watcher.js",
   "bin": {
