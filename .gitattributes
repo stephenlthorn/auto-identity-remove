@@ -1,0 +1,7 @@
+# What `git archive` leaves out. scripts/release-archive.sh builds the release
+# tarball with it, and a user installing from that tarball has no use for the
+# suite or the CI definitions. Everything else tracked (install.sh, the lockfiles,
+# .dockerignore, docs/) ships: install.sh runs `npm ci`, and a Docker build from
+# the unpacked folder reads .dockerignore.
+test/ export-ignore
+.github/ export-ignore
