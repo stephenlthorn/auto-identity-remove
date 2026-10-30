@@ -12,6 +12,11 @@
  *   launch, newPage, goto, addInitScript, close, dns and fetch (both refused), and `generic` (the options the
  *   watcher passes to runGenericBrokers, see spyOnGenericRunner).
  *
+ * AIDR_FAKE_DNS_CODE=<code> is the error code every refused lookup carries (default
+ * ENOTFOUND, "no such host": the generic pass reports that row as dead, not as an
+ * error). A test that needs the whole pass to FAIL, as it does on a machine with no
+ * resolver, sets EAI_AGAIN: the address is unknown, so the row is refused and errors.
+ *
  * AIDR_FAKE_SLOW_MS=<n> makes page.waitForTimeout really wait n ms.
  *
  * AIDR_FAKE_HANG=init makes addInitScript never resolve: the run stalls right
@@ -48,7 +53,8 @@ function refuseNetwork() {
   const dns = require('dns');
   const offline = (host) => {
     record('dns', { host: String(host) });
-    return Object.assign(new Error(`getaddrinfo ENOTFOUND ${host}`), { code: 'ENOTFOUND' });
+    const code = process.env.AIDR_FAKE_DNS_CODE || 'ENOTFOUND';
+    return Object.assign(new Error(`getaddrinfo ${code} ${host}`), { code });
   };
   dns.promises.lookup = async (host) => { throw offline(host); };
   dns.lookup = (host, options, callback) => {

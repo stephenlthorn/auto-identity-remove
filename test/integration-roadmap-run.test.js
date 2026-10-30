@@ -175,8 +175,9 @@ test('--resume after a SIGTERM mid-generic skips the finished explicit passes an
     assert.equal(checkpoint.personIndex, 0);
     assert.ok(checkpoint.index > 0, `the checkpoint is part-way through the pass (index ${checkpoint.index})`);
 
-    const second = await runWatcher(sandbox, ['--resume'], { timeoutMs: 90000 });
-    // Every row errors against the fake browser, so the run is a failed one and exits 1 (CLI2-3).
+    // EAI_AGAIN: no resolver at all, so every row errors (the default ENOTFOUND would report each
+    // host as dead, which is not an error) and the run is a failed one that exits 1 (CLI2-3).
+    const second = await runWatcher(sandbox, ['--resume'], { env: { AIDR_FAKE_DNS_CODE: 'EAI_AGAIN' }, timeoutMs: 90000 });
     assert.equal(second.code, 1, second.stderr);
     assert.match(second.stdout, /--resume: the explicit pass for Ada Lovelace is already done, skipping/);
     assert.match(second.stdout, /--resume: the explicit pass for Alan Turing is already done, skipping/);
@@ -235,7 +236,7 @@ test('one person means one launch per pass, on a profile that is that person\'s'
   });
 });
 
-test('--report, --confirm-emails and --complaints launch on the utility profile, not a person\'s', async () => {
+test('--report launches on the utility profile, and --confirm-emails launches nothing for an empty inbox, never a person\'s', async () => {
   await inSandbox({}, async (sandbox) => {
     const report = await runWatcher(sandbox, ['--report']);
     assert.equal(report.code, 0, report.stderr);
@@ -244,7 +245,9 @@ test('--report, --confirm-emails and --complaints launch on the utility profile,
     const confirm = await runWatcher(sandbox, ['--confirm-emails', empty]);
     assert.equal(confirm.code, 0, confirm.stderr);
 
-    assert.deepEqual(launches(sandbox).map(e => e.profile), ['utility', 'utility']);
+    // Each confirmation link gets a throwaway profile of its own (BRK2-11), so an inbox
+    // with no link launches no browser at all (test/watcher-confirm-clicks.test.js).
+    assert.deepEqual(launches(sandbox).map(e => e.profile), ['utility']);
     const base = path.join(sandbox.home, '.config', 'auto-identity-remove');
     assert.ok(fs.existsSync(path.join(base, 'utility')));
     assert.deepEqual(fs.readdirSync(base).filter(n => n.startsWith('person-')), [], 'nothing was left in a person\'s directory');
