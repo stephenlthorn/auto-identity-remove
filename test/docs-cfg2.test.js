@@ -27,7 +27,7 @@ test('README: the Docker section explains the single-file recipe is ignored and 
 test('README: encrypting never empties a file it cannot delete, and says what to do instead', () => {
   const readme = read('README.md');
   assert.match(readme, /If `config\.json` cannot be deleted/);
-  assert.match(readme, /never emptied/i);
+  assert.match(readme, /never\s+emptied/i);
 });
 
 test('README: the fingerprint no longer lists the phone number', () => {
