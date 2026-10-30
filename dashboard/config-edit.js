@@ -20,6 +20,9 @@ const SECRET_PATHS = [
   ['relay', 'apiKey'],
   ['email', 'smtp', 'pass'],
   ['notify', 'webhook'],
+  // R7: a proxy's credentials are as private as any API key; the server is not.
+  ['browser', 'proxy', 'username'],
+  ['browser', 'proxy', 'password'],
 ];
 
 // Keys that must never be merged from client input - assigning them can corrupt

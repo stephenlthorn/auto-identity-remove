@@ -6,6 +6,10 @@
 # ./run.sh --only Spokeo mean what they say (they used to be dropped, which made
 # a "dry run" a REAL run).
 #
+# AIDR_HOME, AIDR_CONFIG_PATH, AIDR_CONFIG_ENC_PATH, AIDR_STATE_PATH, AIDR_LOG_DIR and
+# AIDR_DATA_DIR relocate the runtime files (see lib/paths.js); relative values are
+# anchored where this script was launched.
+#
 # An encrypted config (config.json.enc) needs AIDR_PASSPHRASE or
 # AIDR_PASSPHRASE_FILE (a file whose first line is the passphrase). The
 # scheduler installer passes AIDR_PASSPHRASE_FILE to scheduled jobs; it never
@@ -22,7 +26,7 @@ absolute() {
     *)  printf '%s/%s' "$START_DIR" "$1" ;;
   esac
 }
-for var in AIDR_CONFIG_PATH AIDR_CONFIG_ENC_PATH AIDR_PASSPHRASE_FILE; do
+for var in AIDR_HOME AIDR_CONFIG_PATH AIDR_CONFIG_ENC_PATH AIDR_STATE_PATH AIDR_LOG_DIR AIDR_DATA_DIR AIDR_PASSPHRASE_FILE; do
   value="${!var:-}"
   if [ -n "$value" ]; then
     export "$var=$(absolute "$value")"
@@ -31,7 +35,9 @@ done
 
 cd "$(dirname "$0")"
 
-CONFIG_PLAIN="${AIDR_CONFIG_PATH:-config.json}"
+# AIDR_HOME is where every runtime file lives when it is set (lib/paths.js); a
+# specific variable still wins over it. With neither, the project directory.
+CONFIG_PLAIN="${AIDR_CONFIG_PATH:-${AIDR_HOME:+$AIDR_HOME/}config.json}"
 CONFIG_ENC="${AIDR_CONFIG_ENC_PATH:-${CONFIG_PLAIN}.enc}"
 
 # Encryption removes config.json and leaves config.json.enc, so either file is
