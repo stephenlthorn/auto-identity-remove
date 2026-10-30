@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # install.sh - one-command setup for auto-identity-remove.
 #
-# Run once after cloning:   bash install.sh
+# Run once after unpacking a release (or cloning the repo):   bash install.sh
 #
 # Checks Node, installs dependencies, installs the Playwright Chromium browser,
 # and prints what to do next. No personal data is touched here.
