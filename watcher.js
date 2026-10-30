@@ -1620,10 +1620,6 @@ async function dispatch() {
     console.error(`Error: ${conflict}`);
     process.exit(2);
   }
-  if (ARGS.allow !== null && ARGS.unallow !== null) {
-    console.error('Error: --allow and --unallow cannot be combined. Use one at a time.');
-    process.exit(2);
-  }
 
   if (FREEZE_MODE)                     return modeFreeze();
   if (ENCRYPT_CONFIG || DECRYPT_CONFIG) return modeEncryption();
