@@ -734,6 +734,14 @@ function modeInstallScheduler() {
   const logDir     = PATHS.logs;
   const platform   = getPlatform();
   const result     = installScheduleForPlatform({ platform, scriptPath, logDir });
+  // The OS scheduler may have refused (a crontab write that failed, a launchctl
+  // load that did not take, no cron in a container). Saying "installed" then left
+  // the user with a monthly job that never runs and no way to know (CLI2-4).
+  if (!result.ok) {
+    console.error(`\nScheduler NOT installed (${result.method}): nothing will run the monthly job.`);
+    console.error(`  ${result.detail}\n`);
+    process.exit(1);
+  }
   console.log(`\nScheduler installed via ${result.method}:`);
   console.log(`  ${result.detail}\n`);
   console.log('  Check it any time with: aidr schedule status\n');

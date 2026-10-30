@@ -380,10 +380,42 @@ function scheduleJobOptions(env = process.env) {
   return { scriptPath: path.join(__dirname, 'run.sh'), logDir: resolvePaths(env).logs };
 }
 
+/**
+ * How setup reports an installSchedule() result. The installer answers `ok: false`
+ * when the OS scheduler refused; that must read as a failure, never as the green
+ * line a success gets, and it fails setup (a result with no verdict is not trusted).
+ *
+ * @param {{ ok?: boolean, method?: string, detail?: string }|undefined} result
+ * @returns {{ failed: boolean, text: string }}
+ */
+function describeScheduleResult(result) {
+  const r = result || {};
+  if (r.ok === true) return { failed: false, text: `✅ [${r.method}] ${r.detail}` };
+  const why = r.detail || 'the scheduler gave no reason';
+  return {
+    failed: true,
+    text: `❌ Monthly schedule NOT installed [${r.method || 'unknown'}]: nothing will run it.\n   ${why}`,
+  };
+}
+
+/**
+ * The "Monthly Schedule" step: ask, install, say what happened.
+ * @returns {Promise<{ asked: boolean, failed: boolean }>}
+ */
+async function runScheduleStep({ confirm }) {
+  console.log('── Monthly Schedule ────────────────────────────────────────');
+  const doSchedule = await confirm('Schedule to run automatically on the 1st of every month at 9am?');
+  if (!doSchedule) return { asked: true, failed: false };
+  const shown = describeScheduleResult(installSchedule(scheduleJobOptions()));
+  console.log(`${shown.text}\n`);
+  return { asked: true, failed: shown.failed };
+}
+
 module.exports = {
   regionPrompts, formatPhone, maybeEncryptConfig, readExistingConfig,
   buildConfig, answerDefaults, saveConfig, scheduleJobOptions,
   readSecret, createPrompter, askNewPassphrase,
+  describeScheduleResult, runScheduleStep,
 };
 
 // ─── Main setup ───────────────────────────────────────────────────────────────
@@ -568,17 +600,19 @@ async function main() {
   }
 
   // ── Cross-platform scheduling ─────────────────────────────────────────────
-  console.log('── Monthly Schedule ────────────────────────────────────────');
-  const doSchedule = await confirm('Schedule to run automatically on the 1st of every month at 9am?');
-  if (doSchedule) {
-    const result = installSchedule(scheduleJobOptions());
-    console.log(`✅ [${result.method}] ${result.detail}\n`);
-  }
+  const schedule = await runScheduleStep({ confirm });
 
   close();
 
   console.log('─'.repeat(54));
-  console.log('✅ Setup complete!\n');
+  if (schedule.failed) {
+    // Exit non-zero too: a script running setup must not read this as a clean finish.
+    process.exitCode = 1;
+    console.log('⚠️  Setup finished, but the monthly schedule is NOT installed (see above).');
+    console.log('   Fix that, then run: aidr schedule install\n');
+  } else {
+    console.log('✅ Setup complete!\n');
+  }
   console.log('  Run now:      node watcher.js');
   console.log('  Manual run:   ./run.sh');
   console.log('  Check state:  cat state.json\n');
