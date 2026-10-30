@@ -114,16 +114,15 @@ test('B2: bare (single-person) key still works and has no person suffix', () => 
   assert.equal(out[0].regime, 'generic');
 });
 
-test('B2: composite key with no matching person falls back to the generic regime', () => {
+test('B2: composite key with no matching person is skipped, not signed over someone else (CFG2-6)', () => {
   const state = {
     optOuts: {
       'Acme|Unknown Person': { lastSuccess: daysBefore(50), verifiedStillListedAt: daysBefore(1) },
     },
   };
-  const out = findOverdue(state, { now: NOW, persons: [US_PERSON] });
-  assert.equal(out[0].broker, 'Acme');
-  assert.equal(out[0].person, 'Unknown Person');
-  assert.equal(out[0].regime, 'generic');
+  // It used to come back with regime 'generic' and the watcher then fell back to
+  // persons[0] as the complainant. No configured person owns it: no complaint.
+  assert.deepEqual(findOverdue(state, { now: NOW, persons: [US_PERSON] }), []);
 });
 
 test('B2: without persons supplied, a bare name still works (45-day window, generic)', () => {
