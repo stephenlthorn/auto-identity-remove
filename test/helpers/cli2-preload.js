@@ -26,6 +26,8 @@
  *   AIDR_TEST_SPY=1                records, as `configure` and `generic-opts`, what the watcher hands the
  *                                  explicit runner (the `partial` option) and the generic runner (whether
  *                                  it was given saveCheckpoint / getContext).
+ *                                  Also, as `serp-brokers`, the broker names handed to runSerpScan and
+ *                                  runSerpWatch.
  *   AIDR_TEST_FETCH_BODY=1         every fetch records its URL (query stripped) and body
  *                                  as `fetch-body`, then still fails as the fake network does.
  *
@@ -140,9 +142,21 @@ function stateOnLock(lock) {
   };
 }
 
+function spyOnSerp(mod, fn, brokerIndex, label) {
+  if (spied.has(mod)) return;
+  spied.add(mod);
+  const real = mod[fn];
+  mod[fn] = function spied(...args) {
+    record('serp-brokers', { via: label, names: (args[brokerIndex] || []).map(b => b.name) });
+    return real.apply(this, args);
+  };
+}
+
 const originalLoad = Module._load;
 Module._load = function patchedLoad(request) {
   const result = originalLoad.apply(this, arguments);
+  if (process.env.AIDR_TEST_SPY && request === './lib/serp-scan') spyOnSerp(result, 'runSerpScan', 2, 'scan');
+  if (process.env.AIDR_TEST_SPY && request === './lib/serp-watch') spyOnSerp(result, 'runSerpWatch', 2, 'watch');
   if (process.env.AIDR_TEST_STATE_ON_LOCK && request === './lib/lock') stateOnLock(result);
   if (request === 'playwright' && Number(process.env.AIDR_TEST_SLOW_CLOSE) > 0) slowClose(result.chromium, Number(process.env.AIDR_TEST_SLOW_CLOSE));
   if (process.env.AIDR_TEST_SPY && request === './lib/broker-runner') spyOnBrokerRunner(result);

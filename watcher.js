@@ -911,7 +911,10 @@ async function modeKnow({ config, persons, state }) {
   try {
     console.log('\nRight-to-know - requesting disclosure of held data from email brokers');
     if (DRY_RUN) console.log('DRY RUN - previews only, nothing sent, no state saved.');
-    const emailBrokerCount = brokers.filter(b => b.method === 'email').length;
+    // --only / --skip narrow who is asked, like they narrow a run (CLI2-8).
+    const include = modeInclude();
+    const selected = brokers.filter(b => include(b.name));
+    const emailBrokerCount = selected.filter(b => b.method === 'email').length;
     console.log(`${emailBrokerCount} email broker(s) x ${persons.length} person(s)\n`);
 
     // The same masked address the opt-outs use, so the broker's reply reaches the
@@ -926,7 +929,7 @@ async function modeKnow({ config, persons, state }) {
       console.error('   Every request carries an email, and the relay fails closed. Fix the relay and re-run (relay.failOpen: true sends the real email instead).\n');
       exitCode = 1;
     } else {
-      const result = await sendKnowRequests(brokers, config, {
+      const result = await sendKnowRequests(selected, config, {
         dryRun: DRY_RUN,
         submissionEmailFor: (person) => emails.get(person),
       });
@@ -960,6 +963,12 @@ const isOptOutRun = () => !DRY_RUN && !VERIFY && !SERP_SCAN && !SERP_WATCH;
 // run, and its heartbeat must not stand in for the monthly run's (CLI2-10). --resume
 // is deliberately not one: it finishes the interrupted full run.
 const FILTERED = !!(ONLY_ARG || SKIP_ARG || RETRY_FAILED || CAPTCHAS);
+
+// The include test for the modes that act on the broker list but are not the opt-out
+// pass: --verify, --serp-scan, --serp-watch, --know and --pollute. They honour --only
+// and --skip like the run does; --retry-failed reads a run log none of them has, and
+// lib/args.js refuses it with them (CLI2-8).
+const modeInclude = () => makeBrokerPredicate({ only: ONLY_ARG, skip: SKIP_ARG });
 
 async function main({ config, persons, state, captchaNames }) {
   const guard = acquireRunLock(LOCK_PATH);
@@ -1100,10 +1109,12 @@ async function runVerifyMode(contexts, { brokers, persons, state, config }) {
   // person's name and city into searchUrl, so a shared list recorded person B as
   // verified clear from person A's search. And from THEIR OWN browser profile:
   // contextFor hands out one person's context at a time (R7).
-  const result = await runVerify(null, brokers, persons, {
+  // --only / --skip narrow what is re-checked (CLI2-8).
+  const include = modeInclude();
+  const result = await runVerify(null, brokers.filter(b => include(b.name)), persons, {
     state,
     config,
-    brokersFor: (person) => brokers.forPerson(person),
+    brokersFor: (person) => brokers.forPerson(person).filter(b => include(b.name)),
     contextFor: (person, index) => contexts.forPerson(index),
   });
   saveState();
@@ -1133,7 +1144,8 @@ async function runSerpScanMode(contexts, { brokers, persons }) {
   console.log('   DDG first, then Bing, then Google (may be blocked).\n');
   // One scan covers every person's name, from the first person's profile.
   const context = await contexts.forPerson(0);
-  const summary = await runSerpScan(context, persons, brokers, { _skipWrite: DRY_RUN });
+  const include = modeInclude();
+  const summary = await runSerpScan(context, persons, brokers.filter(b => include(b.name)), { _skipWrite: DRY_RUN });
   await contexts.close();
 
   const pad = (s, n) => String(s).padEnd(n);
@@ -1184,7 +1196,8 @@ async function runSerpWatchMode(contexts, { brokers, persons, config }) {
     watchOptions._dispatchNotify = async () => {};
   }
   const context = await contexts.forPerson(0);
-  const watch = await runSerpWatch(context, persons, brokers, watchOptions);
+  const include = modeInclude();
+  const watch = await runSerpWatch(context, persons, brokers.filter(b => include(b.name)), watchOptions);
   await contexts.close();
 
   console.log('\n' + '='.repeat(62));
@@ -1366,10 +1379,12 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
   // (POLLUTE_COUNT === 0). See README for ToS warning.
   if (POLLUTE_COUNT > 0) {
     const { generateBogusPerson } = require('./lib/noise');
-    const bogBrokers = brokers.filter(b => b.acceptsBogus === true);
+    // The run's own include test: --only / --skip narrow the noise like everything else
+    // (it used to go to every acceptsBogus broker whatever --only said: CLI2-8).
+    const bogBrokers = brokers.filter(b => b.acceptsBogus === true && include(b.name));
 
     if (bogBrokers.length === 0) {
-      console.log('\n⚠️  --pollute: no brokers tagged acceptsBogus: true - nothing to do.');
+      console.log(`\n⚠️  --pollute: no brokers tagged acceptsBogus: true${ONLY_ARG || SKIP_ARG || RETRY_FAILED ? ' that match the filter' : ''} - nothing to do.`);
     } else {
       console.log(`\n── Noise mode - submitting ${POLLUTE_COUNT} bogus record(s) to ${bogBrokers.length} broker(s) ─`);
       // The browser of the last person served, so the noise needs no extra launch.
