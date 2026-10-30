@@ -945,9 +945,15 @@ async function modeKnow({ config, persons, state }) {
 // SERP modes do not, so `aidr schedule status` reports when the job last really ran.
 const isOptOutRun = () => !DRY_RUN && !VERIFY && !SERP_SCAN && !SERP_WATCH;
 
+// A FILTERED run covers part of the broker list: --only, --skip, --retry-failed,
+// --captchas. It must not write or clear the resume checkpoint of an interrupted full
+// run, and its heartbeat must not stand in for the monthly run's (CLI2-10). --resume
+// is deliberately not one: it finishes the interrupted full run.
+const FILTERED = !!(ONLY_ARG || SKIP_ARG || RETRY_FAILED || CAPTCHAS);
+
 async function main({ config, persons, state, captchaNames }) {
   const guard = acquireRunLock(LOCK_PATH);
-  const heartbeat = isOptOutRun() ? startHeartbeat(defaultHeartbeatPath()) : null;
+  const heartbeat = isOptOutRun() ? startHeartbeat(defaultHeartbeatPath(), { partial: FILTERED }) : null;
   // Registered first, so it runs after the browser and state cleanups on a signal:
   // an interrupted run says so, instead of reading as a crash later.
   if (heartbeat) guard.register(() => { heartbeat.finish({ outcome: 'failed' }); });
@@ -981,7 +987,7 @@ async function runWithBrowser({ config, persons, state, guard, captchaNames }) {
   console.log(`📅 ${new Date().toLocaleString()}`);
   console.log(`📋 ${brokers.length} explicit brokers + 500+ generic | re-check window: ${RECHECK_DAYS} days\n`);
 
-  brokerRunner.configure({ dryRun: DRY_RUN, preview: PREVIEW, person: persons[0], personIndex: 0, capsolver: config.capsolver, noCapsolver: NO_CAPSOLVER, snapshot: SNAPSHOT, personCount: persons.length, config });
+  brokerRunner.configure({ dryRun: DRY_RUN, preview: PREVIEW, person: persons[0], personIndex: 0, capsolver: config.capsolver, noCapsolver: NO_CAPSOLVER, snapshot: SNAPSHOT, personCount: persons.length, config, partial: FILTERED });
 
   // Detect brokers that have been consistently unreachable across recent runs.
   // Defunct brokers still run - the warning is informational so the user can
@@ -1286,7 +1292,7 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
     }
 
     const submissionEmail = submissionEmails.get(person);
-    brokerRunner.configure({ dryRun: DRY_RUN, preview: PREVIEW, person, personIndex: index, capsolver: config.capsolver, noCapsolver: NO_CAPSOLVER, snapshot: SNAPSHOT, personCount: persons.length, config, submissionEmail });
+    brokerRunner.configure({ dryRun: DRY_RUN, preview: PREVIEW, person, personIndex: index, capsolver: config.capsolver, noCapsolver: NO_CAPSOLVER, snapshot: SNAPSHOT, personCount: persons.length, config, submissionEmail, partial: FILTERED });
 
     // Rebuild the broker list for THIS person. brokers.js interpolates names,
     // city, state, zip and email into searchUrl and formFields, so reusing the
@@ -1454,8 +1460,10 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
       include,
       // Lets the generic pass drop rows that are the same company as an explicit broker.
       explicitBrokers: brokers,
-      // R2: write a resume point as the pass advances, and pick one back up.
-      saveCheckpoint,
+      // R2: write a resume point as the pass advances, and pick one back up. A filtered
+      // run writes none: its rows are not the interrupted full run's, and a checkpoint
+      // of its own would replace the one a killed full run is waiting on (CLI2-10).
+      ...(FILTERED ? {} : { saveCheckpoint }),
       resumeFrom: resume.genericResume || undefined,
       handleCaptcha: genericHandleCaptcha,
       captchaFailureDetail: genericCaptchaDetail,
@@ -1471,8 +1479,9 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
   results.genericStats = genericTotals;
 
   // Clear checkpoint now that the run completed successfully (a no-op in dry-run,
-  // so a preview never deletes the checkpoint of an interrupted real run).
-  clearCheckpoint();
+  // so a preview never deletes the checkpoint of an interrupted real run). A filtered
+  // run leaves it: the checkpoint belongs to a full run that may still be resumed.
+  if (!FILTERED) clearCheckpoint();
 
   await contexts.close();
 

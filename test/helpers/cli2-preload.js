@@ -17,6 +17,9 @@
  *   AIDR_TEST_JOURNAL_THROWS=1     openJournal() throws: a crash in the middle of a real
  *                                  run, which lands in the Fatal handler.
  *   AIDR_TEST_GENERIC_THROWS=1     runGenericBrokers() throws: a crash that a dry run reaches too.
+ *   AIDR_TEST_SPY=1                records, as `configure` and `generic-opts`, what the watcher hands the
+ *                                  explicit runner (the `partial` option) and the generic runner (whether
+ *                                  it was given saveCheckpoint / getContext).
  *   AIDR_TEST_FETCH_BODY=1         every fetch records its URL (query stripped) and body
  *                                  as `fetch-body`, then still fails as the fake network does.
  *
@@ -79,9 +82,37 @@ function killAfter(chromium, limit) {
   };
 }
 
+const spied = new WeakSet();
+
+function spyOnBrokerRunner(runner) {
+  if (spied.has(runner)) return;
+  spied.add(runner);
+  const configure = runner.configure;
+  runner.configure = function spiedConfigure(o) {
+    if (o && 'partial' in o) record('configure', { partial: o.partial });
+    return configure.apply(this, arguments);
+  };
+}
+
+function spyOnGeneric(generic) {
+  const real = generic.runGenericBrokers;
+  return {
+    ...generic,
+    async runGenericBrokers(context, hosts, state, log, success, opts = {}) {
+      record('generic-opts', {
+        hasSaveCheckpoint: typeof opts.saveCheckpoint === 'function',
+        hasGetContext: typeof opts.getContext === 'function',
+      });
+      return real.apply(this, arguments);
+    },
+  };
+}
+
 const originalLoad = Module._load;
 Module._load = function patchedLoad(request) {
   const result = originalLoad.apply(this, arguments);
+  if (process.env.AIDR_TEST_SPY && request === './lib/broker-runner') spyOnBrokerRunner(result);
+  if (process.env.AIDR_TEST_SPY && request === './generic-runner' && !process.env.AIDR_TEST_GENERIC_THROWS) return spyOnGeneric(result);
   if (request === 'playwright' && Number(process.env.AIDR_TEST_CLOSE_AFTER) >= 0 && process.env.AIDR_TEST_CLOSE_AFTER !== undefined && process.env.AIDR_TEST_CLOSE_AFTER !== '') {
     killAfter(result.chromium, Number(process.env.AIDR_TEST_CLOSE_AFTER));
   }
