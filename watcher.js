@@ -21,7 +21,7 @@ const os   = require('os');
 // that sends the user's name, address and phone to ~540 sites (CORE-6).
 const ARGS = require('./lib/args').parseWatcherArgsOrExit();
 
-const { STATE_PATH, CONFIG_PATH, CONFIG_ENC_PATH, RECHECK_DAYS, loadConfig, loadState, resetState, saveState, recordSuccess, setDryRun, getPersonsFromConfig, loadCheckpoint, saveCheckpoint, clearCheckpoint, findResumeIndex, planResume, readEntry, validateRunnableConfig } = require('./lib/config');
+const { STATE_PATH, CONFIG_PATH, CONFIG_ENC_PATH, RECHECK_DAYS, loadConfig, loadState, resetState, saveState, recordSuccess, setDryRun, getPersonsFromConfig, loadCheckpoint, saveCheckpoint, clearCheckpoint, findResumeIndex, planResume, readEntry, validateRunnableConfig, stateProblem } = require('./lib/config');
 const { results, logResult, buildSummary, setDefunctBrokers, setCurrentPerson, setStateForSummary, setJournal } = require('./lib/logger');
 const { findDefunct, DEFUNCT_THRESHOLD } = require('./lib/defunct');
 const { sendText, desktopNotify, sendWebhook, dispatchNotify, openInBrowser, canOpenBrowser, pickManualUrlsToOpen, manualUrlsFromResults } = require('./lib/notify');
@@ -35,7 +35,7 @@ const { editAllowlist } = require('./lib/allowlist-edit');
 const { diffResults, loadPreviousLog } = require('./lib/diff');
 const { renderAuditMarkdown, writeAuditFile, timestampForFilename } = require('./lib/audit');
 const { buildStealthScript } = require('./lib/stealth');
-const { buildLaunchOptions, resolveHeadless, isLowMemory, createPersonContexts, utilityProfileDir, browserConfigProblems, describeProxy } = require('./lib/browser');
+const { buildLaunchOptions, resolveHeadless, isLowMemory, createPersonContexts, createThrowawayContexts, utilityProfileDir, browserConfigProblems, describeProxy } = require('./lib/browser');
 const { installShutdownHandlers } = require('./lib/shutdown');
 const { writePrivateFile, mkdirPrivate } = require('./lib/private-fs');
 const { resolveMode } = require('./lib/mode-dispatch');
@@ -245,6 +245,19 @@ function loadRunnableConfigOrExit() {
   return { config, persons };
 }
 
+// A state.json this user cannot read (typically root-owned after a sudo run) loads
+// as an empty history, and saveState refuses to replace it (CFG2-2). That refusal
+// came after the lock, the browsers and the first broker, and a --confirm-emails run
+// had already clicked its link with nothing to record it in. A run that will save
+// state stops here instead, with the fix for the permissions; a dry run saves
+// nothing, so its callers do not ask.
+function exitOnUnreadableState() {
+  const problem = stateProblem();
+  if (!problem) return;
+  console.error(`❌ ${problem.message}`);
+  process.exit(1);
+}
+
 // The config and persons for a mode that only needs to read them.
 function loadConfigOrExit() {
   try {
@@ -371,6 +384,9 @@ function modeEncryption() {
         : res.notice
           ? `   WARNING: ${res.notice}`
           : '   Plaintext config.json kept (--keep-plaintext).');
+      // config.json is gone but a copy beside it (.bak, a .tmp from a killed write)
+      // could not be removed: that file still holds the PII, so it is named here (CFG2-5).
+      if (res.shredded && res.notice) console.log(`   WARNING: ${res.notice}`);
       console.log(`   Decrypt later with: node watcher.js --decrypt-config\n`);
     } else {
       const res = decryptConfigToDisk({ removeEnc: true });
@@ -551,18 +567,11 @@ async function modeBreachCheck() {
 //    response window (CCPA 45d / GDPR 30d) and write text + PDF to logs/. ─────
 async function modeComplaints() {
   const brokers = require('./brokers');
-  const { findOverdue, findOverdueKnowRequests, formatOverdueKnowNote, buildComplaintsForBroker, writeComplaintFiles } = require('./lib/complaint');
+  const { findOverdue, findOverdueKnowRequests, formatOverdueKnowNote, complainantFor, buildComplaintsForBroker, writeComplaintFiles } = require('./lib/complaint');
 
   const { config, persons } = loadConfigOrExit();
   const state   = loadState();
   const brokerMap = new Map(brokers.map(b => [b.name, b]));
-  // Resolve the complaint's complainant back to the person named in the
-  // composite state key (B2); fall back to the first person for bare keys.
-  const personByName = new Map(
-    persons
-      .filter(p => p && (p.firstName || p.lastName))
-      .map(p => [`${p.firstName || ''} ${p.lastName || ''}`.trim(), p])
-  );
 
   // An unanswered right-to-know request is not a deletion complaint (the tool
   // cannot see whether the broker replied), so it is reported, never filed.
@@ -575,14 +584,28 @@ async function modeComplaints() {
     process.exit(0);
   }
 
+  // The complainant is the person the composite state key names (B2). A row that
+  // names nobody configured is skipped, never filed under the first person: the
+  // complaint carries the signer's name, address, email and phone (CFG2-6).
+  const complainants = overdueList.map(overdue => ({ overdue, person: complainantFor(overdue, persons) }));
+  const unmatched = complainants.filter(c => !c.person);
+  if (unmatched.length > 0) {
+    console.log(`\nSkipped ${unmatched.length} overdue broker(s) whose person is not in your config (a complaint is signed by the person it is about):`);
+    for (const { overdue } of unmatched) console.log(`  - ${overdue.broker}${overdue.person ? ` (${overdue.person})` : ''}`);
+  }
+  const matched = complainants.filter(c => c.person);
+  if (matched.length === 0) {
+    console.log('\nNo complaint was written.\n');
+    process.exit(0);
+  }
+
   const outDir = PATHS.complaints;
   const pad = (s, n) => String(s).padEnd(n);
   console.log('\n' + pad('Broker', 32) + pad('Regime', 8) + pad('Days overdue', 14) + 'Requested');
   console.log('-'.repeat(78));
 
-  const entries = overdueList.map(overdue => {
+  const entries = matched.map(({ overdue, person }) => {
     const broker = brokerMap.get(overdue.broker) || { name: overdue.broker };
-    const person = (overdue.person && personByName.get(overdue.person)) || persons[0];
     console.log(
       pad(overdue.broker, 32) +
       pad(overdue.regime, 8) +
@@ -628,6 +651,7 @@ async function modeConfirmEmails() {
   // Launch a minimal headless browser context just for navigating confirm links
   const chromiumForConfirm = loadChromium();
   const { config, persons } = loadConfigOrExit();
+  if (!DRY_RUN) exitOnUnreadableState();
 
   // Acquire the same process lock as the main run - processConfirmationEmails
   // calls recordSuccess -> saveState, so it must not race a concurrent run.
@@ -635,20 +659,32 @@ async function modeConfirmEmails() {
 
   try {
     console.log(`\nProcessing confirmation emails from: ${confirmEmailsDir}`);
-    // Confirmation links are broker sites, so the configured proxy and user agent apply;
-    // the profile is the utility one, not any person's (R7).
-    const context = await chromiumForConfirm.launchPersistentContext(utilityProfileDir(profileDirOf(config)), buildLaunchOptions({ headless: true, browser: config.browser }));
-    guard.register(() => context.close().catch(() => {}));
-    tuneContext(context);
+    // Confirmation links are broker sites, so the configured proxy and user agent apply.
+    // Every link is opened in a browser profile of its own that is deleted afterwards
+    // (BRK2-11): in one shared profile each click inherited the cookies of the click
+    // before it, another person's included, which links people to each other at a
+    // broker. Nothing is launched until there is a link to open.
+    const clicks = createThrowawayContexts({
+      chromium: chromiumForConfirm,
+      baseDir: profileDirOf(config),
+      launchOptions: () => buildLaunchOptions({ headless: true, browser: config.browser }),
+      prepare: async (context) => {
+        tuneContext(context);
+        await context.addInitScript(buildStealthScript());
+      },
+    });
+    // A signal mid-click closes the browser that click is using and removes its profile.
+    guard.register(() => clicks.close());
 
     try {
       // persons + relayAliases let a confirmation be matched to the right person
       // (including mail delivered to their masked alias) instead of the first.
-      const result = await processConfirmationEmails(context, brokers, {
+      const result = await processConfirmationEmails(null, brokers, {
         dir: confirmEmailsDir,
         dryRun: DRY_RUN,
         persons,
         relayAliases: loadState().relayAliases,
+        openContext: clicks.open,
       });
 
       // A confirmation is matched to a person (entry.person is the person object),
@@ -669,7 +705,7 @@ async function modeConfirmEmails() {
       if (DRY_RUN) console.log('DRY RUN - no link was opened and no state was changed.');
       console.log('');
     } finally {
-      await context.close().catch(() => {});
+      await clicks.close();
     }
   } finally {
     guard.release();
@@ -1498,6 +1534,9 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
       // of its own would replace the one a killed full run is waiting on (CLI2-10).
       ...(FILTERED ? {} : { saveCheckpoint }),
       resumeFrom: resume.genericResume || undefined,
+      // The checkpoint lists the rows this pass finished, so a --resume after a feed
+      // update skips exactly those instead of "everything above the key" (BRK2-9).
+      checkpointDone: true,
       handleCaptcha: genericHandleCaptcha,
       captchaFailureDetail: genericCaptchaDetail,
       getContext: () => contextFor(index),
@@ -1689,6 +1728,7 @@ async function dispatch() {
   }
 
   const { config, persons } = loadRunnableConfigOrExit();
+  if (!DRY_RUN) exitOnUnreadableState();
   const state = loadState();
 
   if (KNOW_MODE)                       return modeKnow({ config, persons, state });

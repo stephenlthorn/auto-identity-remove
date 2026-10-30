@@ -842,7 +842,9 @@ also names a config or state file left at the old app-directory location while `
 points elsewhere, and any plaintext copy of the config next to an encrypted one. It
 also warns about things that run but quietly do something else: a ZIP that lost its leading
 zero, two people with one name or one email, a mistyped `captcha.manual`, an unusable
-`retention.days`. It is read-only, never exits on a bad config, and its output is made to be
+`retention.days`, and a masked-email relay whose sender (`email.smtp.from`, or the login
+`email.smtp.user`) is one of your real addresses: `email.smtp.from` must be a dedicated
+sending address, see [docs/relay.md](docs/relay.md). It is read-only, never exits on a bad config, and its output is made to be
 pasted into a bug report: initials and a masked address instead of names, and never a
 passphrase, a key, a proxy password or a quoted piece of the file. Exit `0` for ok (with or
 without warnings), `1` for a problem.

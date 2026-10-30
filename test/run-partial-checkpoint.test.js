@@ -106,7 +106,9 @@ test('--resume is not a filtered run: it keeps the checkpoint going and clears i
   await inSandbox(async (sandbox) => {
     const spy = spying(sandbox);
     seedCheckpoint(sandbox, JSON.stringify({ phase: 'generic', personIndex: 0, key: 'Whatever|Ada Lovelace', index: 3 }) + '\n');
-    const r = await runWatcher(sandbox, ['--resume'], { env: spy.env, timeoutMs: 120000 });
+    // EAI_AGAIN: no resolver at all, so every row errors and the run is a failed one. The
+    // default ENOTFOUND would report each host as dead (gone), which is not an error.
+    const r = await runWatcher(sandbox, ['--resume'], { env: { ...spy.env, AIDR_FAKE_DNS_CODE: 'EAI_AGAIN' }, timeoutMs: 120000 });
     assert.equal(r.code, 1);
     const events = spy.events();
     assert.deepEqual([...new Set(events.filter(e => e.event === 'configure').map(e => e.partial))], [false]);

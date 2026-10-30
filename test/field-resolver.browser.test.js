@@ -57,7 +57,7 @@ describe('field-resolver browser integration', { skip: !ENABLED }, () => {
     ({ fillForm } = require('../lib/forms'));
     ({ resolveField, clearResolveMarker } = require('../lib/field-resolver'));
 
-    browser = await chromium.launch({ headless: true });
+    browser = await chromium.launch({ headless: true, executablePath: process.env.AIDR_CHROME_PATH || undefined });
     // Capture Chromium version for reporting
     const pg = await browser.newPage();
     chromiumVersion = await pg.evaluate(() => navigator.userAgent);
