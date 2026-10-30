@@ -187,8 +187,9 @@ function acquireRunLock(lockPath) {
   try {
     lock.acquire(lockPath);
   } catch (err) {
-    const pidMatch = err.message.match(/pid (\d+)/);
-    console.error(`Another instance is running, pid=${pidMatch ? pidMatch[1] : '?'}. Exiting.`);
+    // Only a LockError is "another instance"; a read-only state directory is not
+    // (CLI2-9). Both exit 1, with the true reason.
+    console.error(lock.describeAcquireFailure(err, lockPath).message);
     process.exit(1);
   }
   const shutdown = installShutdownHandlers({ onShutdown: () => lock.release(lockPath) });
@@ -1613,6 +1614,12 @@ function resolveCaptchaRetry() {
 // ── Dispatch ──────────────────────────────────────────────────────────────────
 
 async function dispatch() {
+  // The pair gets its own, plainer wording; resolveMode would refuse it as well.
+  if (ARGS.allow !== null && ARGS.unallow !== null) {
+    console.error('Error: --allow and --unallow cannot be combined. Use one at a time.');
+    process.exit(2);
+  }
+
   // Combining modes is ambiguous (--list --score would silently run only one).
   // Checked before any mode runs; exit 2 like any other bad command line.
   const { conflict } = resolveMode({ ...ARGS, freeze: FREEZE_MODE });
