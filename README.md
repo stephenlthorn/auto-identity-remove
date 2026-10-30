@@ -94,7 +94,7 @@ maps to an existing entrypoint:
 | `aidr schedule install` | Installs (or reinstalls) the monthly job |
 | `aidr schedule uninstall` | Removes the monthly job |
 | `aidr purge` | Deletes old logs, audit reports and screenshots, which hold your details (never complaints or the latest run) |
-| `aidr dashboard` | Starts the local web dashboard and prints its URL + a one-time login |
+| `aidr dashboard` | Starts the local web dashboard and prints its URL + a one-time login. A login is always required, loopback included |
 
 Pass extra flags straight through, e.g. `aidr run --only Spokeo` or
 `aidr preview --skip BeenVerified`. Run `aidr --help` for the full list.
@@ -259,6 +259,25 @@ and set `AIDR_CONFIG_PATH=/home/aidr/config.json`,
 no longer needed: logs now default to `/home/aidr/logs`, which is the same host
 directory (`aidr-home/logs`), so nothing has to be moved.
 
+**Upgrading from the single-file recipe.** The very first Docker recipe bind-mounted
+two single files, `config.json` and `state.json`, at `/app/config.json` and
+`/app/state.json`. The image now sets `AIDR_HOME=/home/aidr`, so those mounts are ignored: the run reads
+`/home/aidr/config.json`, finds nothing, and used to exit 1 with only "Run node setup.js
+first". It now says where it found your files and where they must go, for example:
+
+```
+config: found /app/config.json
+        expected /home/aidr/config.json
+state:  found /app/state.json
+        expected /home/aidr/state.json
+```
+
+Move both into the one directory and mount that instead (the commands above), and keep
+the history: `cp state.json aidr-home/state.json`. If you copy only the config, the first
+run starts with an empty `state.json` and re-submits every broker; `aidr config check`
+and `aidr doctor` warn about that while a state file is still left at the old location.
+Setting only `AIDR_CONFIG_PATH` has the same effect on the state, and gets the same warning.
+
 **Why a directory, and why not `/app/data`.**
 - `rename()` onto a Docker single-file bind mount fails with `EBUSY`. A mounted
   `state.json` forces a non-atomic fallback, and the lock, `.bak` and
@@ -352,6 +371,16 @@ AIDR_PASSPHRASE='your passphrase' docker compose run --rm -e AIDR_PASSPHRASE \
   watcher node watcher.js --encrypt-config
 ```
 
+`--encrypt-config` removes `config.json` and then the plaintext copies that sit beside it:
+the dashboard's `config.json.bak` and `config.json.unreadable-*.bak`, and the temp files
+of an interrupted write. **If `config.json` cannot be deleted** (it is a single-file bind
+mount, for example), it is left exactly as it is and the command says so: check that
+`config.json.enc` is really on the host, then delete `config.json` yourself. It is never
+emptied, because the encrypted copy you just read back may be sitting in the container's
+throwaway layer. `aidr config check` and `aidr doctor` warn about any plaintext copy that
+remains next to an encrypted config. Re-running `node setup.js` on an encrypted install
+re-encrypts in place; the plaintext never touches the disk.
+
 ### Webhook notifications (any OS)
 
 When running headless or in Docker you won't have iMessage or a desktop - use
@@ -432,12 +461,16 @@ On each run you'll see:
 - `💀 Dead (stale URL)` - broker URL is gone (DNS/404); not counted as an error
 
 Every entry is stamped with a short **fingerprint of the person it was written for**
-(a hash of the normalised name, ZIP, email and phone digits). If you correct a ZIP
+(a hash of the normalised name, ZIP and email; the phone number is not part of it, so
+adding a number or writing it `+1 512...` does not re-run anything). If you correct a ZIP
 or an email, the old entries no longer match and count as never run, so those
 brokers are submitted again at the next run instead of waiting out 90 days; two people
 with the same name no longer share an entry's stamp. Entries written before this
 (which have no stamp) are trusted, so nothing re-runs just because you upgraded.
-`aidr config check` shows how many entries belong to a previous identity.
+`aidr config check` shows how many entries belong to a previous identity, and the
+dashboard does not count them as done. If `state.json` cannot be read (a file left
+root-owned by a `sudo` run, say), a run refuses to save over it rather than replacing
+your whole history; `aidr config check` reports it and tells you how to fix the owner.
 
 > **Submitted ≠ confirmed deleted.** Use `node watcher.js --verify` for spot-check verification. See [STATUS.md](STATUS.md) for a per-broker confidence table.
 
@@ -805,6 +838,8 @@ defensively, and a command that cannot answer reads as "unknown", never as "not 
 reason it could not run (blank or still-example fields, a missing file, an encrypted config
 with no passphrase, a malformed `browser` section), which config file and passphrase source
 are in use, where state lives, and how much of it is stamped with an identity fingerprint. It
+also names a config or state file left at the old app-directory location while `AIDR_HOME`
+points elsewhere, and any plaintext copy of the config next to an encrypted one. It
 also warns about things that run but quietly do something else: a ZIP that lost its leading
 zero, two people with one name or one email, a mistyped `captcha.manual`, an unusable
 `retention.days`. It is read-only, never exits on a bad config, and its output is made to be

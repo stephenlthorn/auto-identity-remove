@@ -55,7 +55,10 @@ function rawRequest(server, { method = 'GET', pathname, headers = {}, body, rawB
  * @param {object} [o.options]       extra createApp() options (spawn, brokers, ...)
  * @param {object} [o.env]           extra env for the app
  * @param {string} [o.user] [o.pass]
- * @param {boolean} [o.noAuth]       start with no credentials at all
+ * @param {boolean} [o.noAuth]       start with no credentials at all. The server fails
+ *                                   closed then: every route but /api/health is a 401.
+ *                                   Add env { AIDR_DASHBOARD_NO_AUTH: '1' } to test the
+ *                                   explicit development opt-out (loopback only).
  */
 async function startHarness(o = {}) {
   const user = o.user || 'testuser';

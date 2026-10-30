@@ -223,3 +223,29 @@ test('resolveEnvCreds: only pass set -> envConfigured false, warning emitted', (
   assert.equal(r.envConfigured, false);
   assert.ok(r.warning, 'should emit a warning');
 });
+
+// ── CFG2-3: the Host allow-list must not take any name that starts with 127. ──
+
+const { isLoopbackHost, isHostAllowed } = require('./validate');
+
+test('CFG2-3: only real loopback names and addresses are loopback', () => {
+  for (const h of ['localhost', 'LOCALHOST', 'app.localhost', '::1', '[::1]', '127.0.0.1', '127.5.5.5', '127.255.255.254']) {
+    assert.equal(isLoopbackHost(h), true, h);
+  }
+});
+
+test('CFG2-3: names that merely start with 127 are not loopback (DNS rebinding)', () => {
+  for (const h of ['127.evil.example', '127.0.0.1.nip.io', '127.0.0.1.evil.example', '127.1.evil', '127.0.0.256', '127.0.0', '127.0.0.1.', '1270.0.0.1', 'localhost.evil.example']) {
+    assert.equal(isLoopbackHost(h), false, h);
+  }
+});
+
+test('CFG2-3: the Host allow-list refuses them, with and without a port', () => {
+  const none = new Set();
+  assert.equal(isHostAllowed('127.evil.example', none), false);
+  assert.equal(isHostAllowed('127.evil.example:8080', none), false);
+  assert.equal(isHostAllowed('127.0.0.1.nip.io', none), false);
+  assert.equal(isHostAllowed('127.0.0.1:8080', none), true);
+  assert.equal(isHostAllowed('[::1]:8080', none), true);
+  assert.equal(isHostAllowed('localhost:8080', none), true);
+});

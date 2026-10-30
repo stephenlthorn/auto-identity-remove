@@ -136,6 +136,18 @@ const EXTRA_RUNTIME_PATHS = [
   'data/breach-result.json',
   'data/breach-result.json.tmp',
   'dashboard/.auth.json',
+  // CFG2-12: the dashboard's temp files carry a random suffix (safe-write.js) and
+  // private-fs.js names its temps <target>.<pid>.<hex>.tmp. A write killed midway
+  // leaves one behind with a full copy of what it was writing; npm pack shipped
+  // dashboard/.auth.json.tmp-abcd1234.
+  'config.json.tmp-ab12cd34',
+  'config.json.enc.tmp-ab12cd34',
+  'config.json.bak.tmp-ab12cd34',
+  'state.json.tmp-ab12cd34',
+  'dashboard/.auth.json.tmp-abcd1234',
+  'data/serp-history.json.4242.ab12cd34.tmp',
+  'data/exposure-history.json.4242.ab12cd34.tmp',
+  'logs/run-2026-10-29T09-00-00.json.4242.ab12cd34.tmp',
   'aidr.passphrase',
   'aidr-home/config.json',
   'aidr-home/state.json',

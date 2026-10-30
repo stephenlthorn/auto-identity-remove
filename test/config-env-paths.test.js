@@ -179,60 +179,58 @@ test('loadConfig decrypts using the passphrase file', () => {
 
 // -- shredding the plaintext under a bind mount --------------------------------
 
-test('EBUSY while shredding the plaintext: the file is emptied and the result says it was NOT removed', () => {
-  const dir = tmpdir();
-  const configPath = path.join(dir, 'config.json');
-  const encPath = path.join(dir, 'config.json.enc');
-  fs.writeFileSync(configPath, JSON.stringify(PLAIN));
+// CFG2-1: when rm fails the only proof the .enc persisted is a read-back from
+// this same container, which on a single-file bind mount is a throwaway layer. The
+// old code then zero-filled and truncated config.json - the host's only readable
+// copy. The plaintext must be left exactly as it was, and the user told how to
+// finish the job once they have confirmed the .enc really persisted.
+const RM_FAILURES = ['EBUSY', 'EPERM', 'EXDEV', 'EACCES', 'EROFS'];
 
-  const realRm = fs.rmSync;
-  fs.rmSync = (p, ...rest) => {
-    if (String(p) === configPath) { const e = new Error('EBUSY: resource busy or locked'); e.code = 'EBUSY'; throw e; }
-    return realRm(p, ...rest);
-  };
-  let res;
-  try {
-    res = config.encryptConfigToDisk({ passphrase: 'pw', shred: true, configPath, encPath });
-  } finally {
-    fs.rmSync = realRm;
-  }
+for (const code of RM_FAILURES) {
+  test(`${code} while removing the plaintext: config.json is left byte-for-byte untouched (CFG2-1)`, () => {
+    const dir = tmpdir();
+    const configPath = path.join(dir, 'config.json');
+    const encPath = path.join(dir, 'config.json.enc');
+    const original = JSON.stringify(PLAIN, null, 2);
+    fs.writeFileSync(configPath, original);
 
-  assert.equal(res.shredded, false, 'must not claim the plaintext was shredded');
-  assert.equal(res.plaintextEmptied, true);
-  assert.match(res.notice, /delete/i, 'the user is told to remove the leftover file');
-  assert.match(res.notice, new RegExp(configPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-  assert.equal(fs.readFileSync(configPath, 'utf8'), '', 'nothing secret is left in the plaintext file');
-  assert.deepEqual(secrets.decryptConfig(JSON.parse(fs.readFileSync(encPath, 'utf8')), 'pw'), PLAIN);
-  fs.rmSync(dir, { recursive: true, force: true });
-});
+    const realRm = fs.rmSync;
+    const realWrite = fs.writeFileSync;
+    const realTruncate = fs.truncateSync;
+    const touched = [];
+    fs.rmSync = (p, ...rest) => {
+      if (String(p) === configPath) { const e = new Error(`${code}: cannot remove`); e.code = code; throw e; }
+      return realRm(p, ...rest);
+    };
+    fs.writeFileSync = (p, ...rest) => {
+      if (String(p) === configPath) touched.push('write');
+      return realWrite(p, ...rest);
+    };
+    fs.truncateSync = (p, ...rest) => {
+      if (String(p) === configPath) touched.push('truncate');
+      return realTruncate(p, ...rest);
+    };
+    let res;
+    try {
+      res = config.encryptConfigToDisk({ passphrase: 'pw', shred: true, configPath, encPath });
+    } finally {
+      fs.rmSync = realRm;
+      fs.writeFileSync = realWrite;
+      fs.truncateSync = realTruncate;
+    }
 
-test('if the plaintext can neither be removed nor emptied, encryptConfigToDisk throws instead of reporting success', () => {
-  const dir = tmpdir();
-  const configPath = path.join(dir, 'config.json');
-  const encPath = path.join(dir, 'config.json.enc');
-  fs.writeFileSync(configPath, JSON.stringify(PLAIN));
-
-  const realRm = fs.rmSync;
-  const realWrite = fs.writeFileSync;
-  fs.rmSync = (p, ...rest) => {
-    if (String(p) === configPath) { const e = new Error('EBUSY'); e.code = 'EBUSY'; throw e; }
-    return realRm(p, ...rest);
-  };
-  fs.writeFileSync = (p, ...rest) => {
-    if (String(p) === configPath) { const e = new Error('EROFS: read-only file system'); e.code = 'EROFS'; throw e; }
-    return realWrite(p, ...rest);
-  };
-  try {
-    assert.throws(
-      () => config.encryptConfigToDisk({ passphrase: 'pw', shred: true, configPath, encPath }),
-      /plaintext.*(still|could not)/is,
-    );
-  } finally {
-    fs.rmSync = realRm;
-    fs.writeFileSync = realWrite;
-  }
-  fs.rmSync(dir, { recursive: true, force: true });
-});
+    assert.deepEqual(touched, [], 'the plaintext must not be overwritten or truncated');
+    assert.equal(fs.readFileSync(configPath, 'utf8'), original);
+    assert.equal(res.shredded, false, 'must not claim the plaintext was shredded');
+    assert.equal(res.plaintextKept, true);
+    assert.equal(res.plaintextEmptied, undefined);
+    assert.match(res.notice, /delete/i, 'the user is told to remove the file themselves');
+    assert.match(res.notice, /config\.json\.enc|encrypted/i, 'and to confirm the encrypted copy persisted first');
+    assert.match(res.notice, new RegExp(configPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    assert.deepEqual(secrets.decryptConfig(JSON.parse(fs.readFileSync(encPath, 'utf8')), 'pw'), PLAIN);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+}
 
 test('the encrypted file is read back before the plaintext is shredded', () => {
   // A bind mount or full disk can make the write "succeed" without persisting.

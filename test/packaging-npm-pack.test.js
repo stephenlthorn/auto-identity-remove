@@ -51,6 +51,10 @@ function packedFilesOfUsedTree() {
       'config.json.enc': '{}',
       'state.json': '{}',
       'state.json.bak': '{}',
+      // Temp files of the atomic writers, left by a write that was killed (CFG2-12).
+      'dashboard/.auth.json.tmp-abcd1234': '{}',
+      'config.json.tmp-ab12cd34': '{}',
+      'data/serp-history.json.4242.ab12cd34.tmp': '[]',
     };
     for (const [rel, body] of Object.entries(seed)) fs.writeFileSync(path.join(tmp, rel), body);
     fs.mkdirSync(path.join(tmp, 'logs'), { recursive: true });
@@ -82,6 +86,9 @@ test('npm pack leaves out the user\'s own history and runtime files', () => {
     'state.json',
     'state.json.bak',
     'logs/run-x.json',
+    'dashboard/.auth.json.tmp-abcd1234',
+    'config.json.tmp-ab12cd34',
+    'data/serp-history.json.4242.ab12cd34.tmp',
   ].filter(f => packed().includes(f));
   assert.deepEqual(leaked, [], `these would ship in the tarball: ${leaked.join(', ')}`);
 });

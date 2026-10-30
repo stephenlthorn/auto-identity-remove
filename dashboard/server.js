@@ -43,13 +43,18 @@
  * watcher.js (lib/paths.js decides both), and createApp() takes every path as an
  * option so tests never touch the real files.
  *
- * Auth (all routes except /api/health, static + API): set AIDR_USER + AIDR_PASS
- *   for HTTP Basic, and/or AIDR_TOKEN for header token auth (X-AIDR-Token). A
- *   request is allowed if it satisfies EITHER. Credentials can be changed at
+ * Auth (all routes except /api/health, static + API): credentials are REQUIRED,
+ *   loopback included. `aidr dashboard` generates a login; otherwise set AIDR_USER +
+ *   AIDR_PASS for HTTP Basic, and/or AIDR_TOKEN for header token auth (X-AIDR-Token).
+ *   A request is allowed if it satisfies EITHER. Credentials can be changed at
  *   runtime via the Admin tab, which writes a scrypt-hashed dashboard/.auth.json
  *   that overrides the env vars. Auth runs BEFORE any body is parsed. Repeated
- *   failed logins from one address are rate limited (429). Binding anything but
- *   loopback with no credentials is refused at start-up.
+ *   failed logins from one address are rate limited (429). Starting with no
+ *   credentials is refused, and if the credentials disappear while the server runs
+ *   every route answers 401 (it fails closed). The one exception is
+ *   AIDR_DASHBOARD_NO_AUTH=1, for tests and local development: it switches
+ *   authentication off on a loopback bind only, and only when no credentials exist
+ *   at start-up. AIDR_PASS=change-me (the old example value) is never accepted.
  *
  * Request hygiene: the Host header must be a loopback name, the bind address, or
  *   listed in AIDR_ALLOWED_HOSTS (blocks DNS rebinding); cross-origin mutating
@@ -101,8 +106,8 @@ const { resolveAuthFile } = require('../lib/dashboard-creds');
 const { resolvePaths } = require('../lib/paths');
 const { writeJsonAtomic, backupFile } = require('./safe-write');
 const { MASK, maskConfig, mergeConfig, applyConfigEdit } = require('./config-edit');
-const { listRuns, readRun, latestRun } = require('./runs');
-const { peopleFromConfig, peopleFromState } = require('./people');
+const { listRuns, readRun, latestRun, redactDetail, redactUrls } = require('./runs');
+const { peopleFromConfig, peopleFromState, ownedOptOuts } = require('./people');
 const { loadGenericList, tallyGeneric } = require('./generic');
 
 const DEFAULT_ROOT = path.resolve(__dirname, '..');
@@ -153,6 +158,31 @@ function readJsonMeta(file) {
   catch (_) { return { exists: true, parseError: true }; }
 }
 
+// GET /api/state is the raw state file, minus what must not leave the machine by
+// accident (the History routes already reduce URLs to hosts): the relay alias
+// cache maps each person's REAL email to its alias, and a result's detail or a
+// pending confirmation's snippet can carry an opt-out URL whose query holds the
+// email, name or zip.
+function redactState(state) {
+  if (!state || typeof state !== 'object' || Array.isArray(state)) return {};
+  const out = { ...state };
+  if (out.relayAliases && typeof out.relayAliases === 'object') {
+    out.relayAliases = { count: Object.keys(out.relayAliases).length };
+  }
+  if (out.optOuts && typeof out.optOuts === 'object' && !Array.isArray(out.optOuts)) {
+    out.optOuts = Object.fromEntries(Object.entries(out.optOuts).map(([key, entry]) => {
+      if (!entry || typeof entry !== 'object') return [key, entry];
+      const next = { ...entry };
+      if (typeof next.lastDetail === 'string') next.lastDetail = redactDetail(next.lastDetail);
+      if (next.pendingConfirm && typeof next.pendingConfirm === 'object' && typeof next.pendingConfirm.snippet === 'string') {
+        next.pendingConfirm = { ...next.pendingConfirm, snippet: redactDetail(next.pendingConfirm.snippet) };
+      }
+      return [key, next];
+    }));
+  }
+  return out;
+}
+
 // Envelope-aware config reader. Prefers config.json.enc, else config.json (which
 // may itself be an envelope). Decrypts with the passphrase (AIDR_PASSPHRASE).
 // On a missing/wrong passphrase for an encrypted config, returns
@@ -165,21 +195,25 @@ function readConfigMeta(opts) {
   const encPath    = o.encPath || path.join(DEFAULT_ROOT, 'config.json.enc');
   const passphrase = o.passphrase !== undefined ? o.passphrase : (process.env.AIDR_PASSPHRASE || '');
 
-  const tryDecrypt = (env) => {
-    if (!passphrase) return { exists: true, parseError: true, locked: true };
-    try { return { exists: true, data: secrets.decryptConfig(env, passphrase) }; }
-    catch (_) { return { exists: true, parseError: true, locked: true }; }
+  // `file` is where the config was read from, so a write goes back to the same
+  // place: an envelope kept in config.json must not be "saved" as a config.json.enc
+  // that the next read would prefer over it (CFG2-10). decryptConfigCached: the key
+  // derivation is the slow part, and this runs on every request (CFG2-11).
+  const tryDecrypt = (env, file) => {
+    if (!passphrase) return { exists: true, parseError: true, locked: true, file };
+    try { return { exists: true, data: secrets.decryptConfigCached(env, passphrase), file }; }
+    catch (_) { return { exists: true, parseError: true, locked: true, file }; }
   };
 
   if (fs.existsSync(encPath)) {
     let env;
     try { env = JSON.parse(fs.readFileSync(encPath, 'utf8')); }
-    catch (_) { return { exists: true, parseError: true }; }
-    return tryDecrypt(env);
+    catch (_) { return { exists: true, parseError: true, file: encPath }; }
+    return tryDecrypt(env, encPath);
   }
   const m = readJsonMeta(configPath);
-  if (m.exists && m.data && secrets.isEncryptedEnvelope(m.data)) return tryDecrypt(m.data);
-  return m;
+  if (m.exists && m.data && secrets.isEncryptedEnvelope(m.data)) return tryDecrypt(m.data, configPath);
+  return { ...m, file: configPath };
 }
 
 const safeEq = (a, b) => {
@@ -305,10 +339,18 @@ function createApp(options = {}) {
   }
   const authConfigured = () => !!(loadCreds() || TOKEN);
 
+  // Credentials are required on every bind. The one way around it is the explicit
+  // AIDR_DASHBOARD_NO_AUTH=1 (tests, local development), and it only counts when
+  // there were no credentials AT START-UP: a login that existed then and was
+  // deleted since (the corrupt-.auth.json advice is "delete it") must not turn
+  // every route open - the server fails closed instead (CFG2-4, codex #1).
+  const openMode = (env.AIDR_DASHBOARD_NO_AUTH === '1' || options.allowNoAuth === true) && !authConfigured();
+
   // Returns { ok } or { ok:false, attempted } where attempted means credentials
   // were actually presented (a browser's first, header-less request is not a guess).
   async function authorize(req) {
-    if (!authConfigured()) return { ok: true };
+    if (openMode) return { ok: true };
+    if (!authConfigured()) return { ok: false, attempted: false };
     let attempted = false;
     if (TOKEN) { // header only - never accept the token via query string (leaks to logs/history)
       const t = req.get('x-aidr-token');
@@ -583,7 +625,8 @@ function createApp(options = {}) {
   app.get('/api/health', (_req, res) => res.json({ ok: true })); // no path disclosure
 
   app.get('/api/brokers', (_req, res) => {
-    const optOuts = (readJsonMeta(STATE).data || {}).optOuts;
+    const cm = readConfig();
+    const optOuts = ownedOptOuts((readJsonMeta(STATE).data || {}).optOuts, cm.parseError ? null : cm.data);
     const list = loadBrokers().map(b => ({
       name: b.name, method: b.method, priority: b.priority,
       usOnly: !!b.usOnly, captchaLikely: !!b.captchaLikely,
@@ -599,7 +642,7 @@ function createApp(options = {}) {
   app.get('/api/state', (_req, res) => {
     const m = readJsonMeta(STATE);
     if (m.parseError) return res.json({ error: 'state.json could not be parsed' });
-    res.json(m.data || {});
+    res.json(redactState(m.data));
   });
 
   // GET /api/exposure -> current exposure score (computed from state.json +
@@ -628,7 +671,8 @@ function createApp(options = {}) {
     const sm = readJsonMeta(STATE);
     const cm = readConfig();
     const cfg = cm.data || null;
-    const opts = (sm.data && sm.data.optOuts) || {};
+    // Entries stamped for a previous identity are "never run" to the runner (CFG2-7).
+    const opts = ownedOptOuts((sm.data && sm.data.optOuts) || {}, cfg);
     let opted = 0, pending = 0, manual = 0;
     for (const b of brokers) {
       if (b.method === 'manual') { manual++; continue; } // mutually exclusive, matches the table
@@ -724,7 +768,9 @@ function createApp(options = {}) {
 
     const existing = (m.exists && !m.parseError && m.data) ? m.data : {};
     const merged = applyConfigEdit(existing, incoming);
-    const target = encrypted ? CONFIG_ENC : CONFIG;
+    // The file the config was read from: an envelope kept in config.json is written
+    // back there, not to a config.json.enc that would shadow it (CFG2-10).
+    const target = m.file || (encrypted ? CONFIG_ENC : CONFIG);
     try {
       // A copy of what we are about to replace, before every replace. When that
       // file was unreadable, also keep a copy no later save can roll over.
@@ -757,8 +803,12 @@ function createApp(options = {}) {
     try { st = fs.statSync(file); } catch (_) { return res.status(404).json({ error: 'not found' }); }
     if (!st.isFile()) return res.status(404).json({ error: 'not found' });
     if (st.size > MAX_LOG_BYTES) return res.status(413).json({ error: `log too large (${st.size} bytes)` });
-    res.type(name.endsWith('.json') ? 'application/json' : 'text/plain');
-    fs.createReadStream(file).on('error', () => { if (!res.headersSent) res.status(500).end(); }).pipe(res);
+    // Same URL redaction as the History routes: a log line can quote an opt-out URL
+    // whose query holds the user's email, name or zip. The file is capped above, so
+    // reading it whole is bounded.
+    let text;
+    try { text = fs.readFileSync(file, 'utf8'); } catch (_) { return res.status(500).json({ error: 'could not read the log' }); }
+    res.type(name.endsWith('.json') ? 'application/json' : 'text/plain').send(redactUrls(text));
   });
 
   // Run history. dashboard/runs.js owns the parsing and the path guarding: the id
@@ -910,7 +960,7 @@ function createApp(options = {}) {
   }
 
   return {
-    app, close, terminateRun, loadBrokers, loadCreds, authConfigured,
+    app, close, terminateRun, loadBrokers, loadCreds, authConfigured, openMode,
     paths: { root: ROOT, config: CONFIG, enc: CONFIG_ENC, state: STATE, logs: LOGS, serp: SERP_HISTORY, auth: AUTH_FILE },
   };
 }
@@ -949,8 +999,8 @@ function startServer(opts = {}) {
   const host = opts.host || env.AIDR_HOST || '127.0.0.1';
   const instance = createApp({ ...opts, env, bindHost: host });
 
-  const safety = checkBindSafety({ host, authConfigured: instance.authConfigured() });
-  if (!safety.ok) return Promise.reject(Object.assign(new Error(safety.error), { code: 'AIDR_UNSAFE_BIND' }));
+  const safety = checkBindSafety({ host, authConfigured: instance.authConfigured(), allowNoAuth: instance.openMode });
+  if (!safety.ok) return Promise.reject(Object.assign(new Error(safety.error), { code: safety.code }));
 
   const requested = opts.port !== undefined ? opts.port : parsePort(env.AIDR_PORT);
   return new Promise((resolve, reject) => {
@@ -982,7 +1032,8 @@ function forwardSignals(server, instance) {
 function describeAuth(instance, env) {
   const c = instance.loadCreds();
   const token = !!env.AIDR_TOKEN;
-  if (!instance.authConfigured()) return 'OPEN';
+  if (instance.openMode) return 'OPEN (AIDR_DASHBOARD_NO_AUTH=1)';
+  if (!instance.authConfigured()) return 'CLOSED (no credentials)';
   return [c ? `basic(${c.source})` : null, token ? 'token' : null].filter(Boolean).join('+');
 }
 
@@ -991,7 +1042,7 @@ function main() {
     console.log(`aidr-dashboard listening on ${host}:${port} (root=${instance.paths.root}, auth=${describeAuth(instance, process.env)})`);
     const c = instance.loadCreds();
     if (c && c.source === 'broken') console.warn('WARNING: .auth.json is present but corrupt - all logins will fail until it is fixed or removed.');
-    if (!instance.authConfigured()) console.warn('WARNING: no credentials set - dashboard is UNAUTHENTICATED (loopback only). Set AIDR_USER/AIDR_PASS to protect it.');
+    if (instance.openMode) console.warn('WARNING: AIDR_DASHBOARD_NO_AUTH=1 - the dashboard is UNAUTHENTICATED (loopback only). For development only: anyone on this machine can read your data and start runs.');
     // The CLI waits for this before printing its URL banner: it must not claim
     // the dashboard is up (or show a password) before it has actually bound.
     if (typeof process.send === 'function') {

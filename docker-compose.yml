@@ -10,6 +10,11 @@
 #   chmod 700 aidr-home && chmod 600 aidr-home/config.json
 #   sudo chown -R 1001:1001 aidr-home          # the image user is uid 1001
 #
+# Upgrading from the first recipe, which mounted config.json and state.json as two
+# single files at /app? Those mounts are ignored now (AIDR_HOME points at the directory
+# below). Copy BOTH files into ./aidr-home; the run tells you where it looked, and
+# copying only the config leaves the history behind and re-submits every broker.
+#
 # ./aidr-home is the ONE place this container keeps anything, via AIDR_HOME: config,
 # state and its .bak, the .lock and resume .checkpoint, run logs, audit reports,
 # snapshots, complaints, the confirmation inbox, and the SERP / exposure / breach /

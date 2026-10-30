@@ -4,7 +4,14 @@
  * R5: personFingerprint() is the identity half of a state entry. Two runs for the
  * same person must hash alike however the config was formatted, and any change
  * that makes the removal request describe a different person (a corrected zip or
- * email, a new phone number, a different name) must change the hash.
+ * email, a different name) must change the hash.
+ *
+ * CFG2-7: the phone number is NOT part of it. Adding a number, or writing it as
+ * +1 512... instead of 512..., does not make the person someone else, and counting
+ * it re-ran every broker (totalRuns back to 1) for a cosmetic edit. The brokers
+ * that take a phone (the search forms) are the same ones the 90-day window already
+ * covers; a changed phone is not a reason to re-submit everything. The legacy
+ * five-field hash is still recognised: see identity-fingerprint-phone.test.js.
  */
 
 const { test } = require('node:test');
@@ -47,10 +54,13 @@ test('ignores case, outer whitespace and repeated inner whitespace', () => {
   );
 });
 
-test('phone counts by its digits only', () => {
+test('the phone number is not part of the identity (CFG2-7)', () => {
   const formatted = { ...base(), phone: '(336) 555-0100' };
   assert.equal(personFingerprint(formatted), personFingerprint(base()));
   assert.equal(personFingerprint({ ...base(), phone: '336.555.0100' }), personFingerprint(base()));
+  assert.equal(personFingerprint({ ...base(), phone: '+1 336 555 0100' }), personFingerprint(base()));
+  assert.equal(personFingerprint({ ...base(), phone: '3365550199' }), personFingerprint(base()), 'a different number');
+  assert.equal(personFingerprint({ ...base(), phone: '' }), personFingerprint(base()), 'no number at all');
 });
 
 test('a US zip counts by its first 5 characters (ZIP+4 does not change identity)', () => {
@@ -77,10 +87,6 @@ test('correcting the zip changes the fingerprint', () => {
 
 test('correcting the email changes the fingerprint', () => {
   assert.notEqual(personFingerprint({ ...base(), email: 'alex@example.net' }), personFingerprint(base()));
-});
-
-test('a new phone number changes the fingerprint', () => {
-  assert.notEqual(personFingerprint({ ...base(), phone: '3365550199' }), personFingerprint(base()));
 });
 
 test('a different name changes the fingerprint (John Smith Sr and Jr do not share history)', () => {
@@ -110,7 +116,7 @@ test('absent optional fields hash the same as blank ones', () => {
 test('the digest is over the documented normalized fields, newline separated', () => {
   const expected = crypto
     .createHash('sha256')
-    .update(['alex', 'tester', '27312', 'alex.tester@example.net', '3365550100'].join('\n'))
+    .update(['alex', 'tester', '27312', 'alex.tester@example.net'].join('\n'))
     .digest('hex')
     .slice(0, 16);
   assert.equal(personFingerprint(base()), expected);

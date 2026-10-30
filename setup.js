@@ -23,9 +23,10 @@ const { installSchedule } = require('./lib/scheduler');
 const { resolvePaths } = require('./lib/paths');
 const { mkdirPrivate } = require('./lib/private-fs');
 const {
-  encryptConfigToDisk, writeJsonAtomic, getPassphrase,
+  encryptConfigToDisk, writeJsonAtomic, getPassphrase, plaintextConfigCopies,
   CONFIG_PATH, CONFIG_ENC_PATH, STATE_PATH,
 } = require('./lib/config');
+const secretsLib = require('./lib/secrets');
 
 /**
  * Read the existing config so setup can offer current values as defaults.
@@ -38,11 +39,12 @@ const {
  * loadConfig() prefers the .enc.
  *
  * @param {{ configPath?: string, encPath?: string, passphrase?: string }} [opts]
- * @returns {{ exists: boolean, encrypted: boolean, locked: boolean, corrupt?: boolean, config: object }}
+ * @returns {{ exists: boolean, encrypted: boolean, locked: boolean, corrupt?: boolean, file?: string, config: object }}
  *   `locked` means an encrypted config exists but could not be decrypted (no or
  *   wrong passphrase). `corrupt` means config.json exists but is not valid JSON.
  *   In both cases the caller must refuse to overwrite the file rather than
- *   silently starting from scratch.
+ *   silently starting from scratch. `file` is the file the config was read from
+ *   (the .enc file, or config.json itself), so an edit can be written back there.
  */
 function readExistingConfig(opts) {
   const o = opts || {};
@@ -51,20 +53,20 @@ function readExistingConfig(opts) {
   const passphrase = o.passphrase !== undefined ? o.passphrase : getPassphrase();
   const secrets = require('./lib/secrets');
 
-  const decrypt = (envelope) => {
-    if (!passphrase) return { exists: true, encrypted: true, locked: true, config: {} };
+  const decrypt = (envelope, file) => {
+    if (!passphrase) return { exists: true, encrypted: true, locked: true, file, config: {} };
     try {
-      return { exists: true, encrypted: true, locked: false, config: secrets.decryptConfig(envelope, passphrase) };
+      return { exists: true, encrypted: true, locked: false, file, config: secrets.decryptConfigCached(envelope, passphrase) };
     } catch (_) {
-      return { exists: true, encrypted: true, locked: true, config: {} };
+      return { exists: true, encrypted: true, locked: true, file, config: {} };
     }
   };
 
   if (fs.existsSync(encPath)) {
     try {
-      return decrypt(JSON.parse(fs.readFileSync(encPath, 'utf8')));
+      return decrypt(JSON.parse(fs.readFileSync(encPath, 'utf8')), encPath);
     } catch (_) {
-      return { exists: true, encrypted: true, locked: true, config: {} };
+      return { exists: true, encrypted: true, locked: true, file: encPath, config: {} };
     }
   }
 
@@ -80,9 +82,9 @@ function readExistingConfig(opts) {
   }
 
   // In-place encryption leaves the envelope in config.json itself.
-  if (secrets.isEncryptedEnvelope(parsed)) return decrypt(parsed);
+  if (secrets.isEncryptedEnvelope(parsed)) return decrypt(parsed, configPath);
 
-  return { exists: true, encrypted: false, locked: false, config: parsed };
+  return { exists: true, encrypted: false, locked: false, file: configPath, config: parsed };
 }
 
 // ─── Prompt helpers ──────────────────────────────────────────────────────────
@@ -172,11 +174,22 @@ function createPrompter(opts) {
     });
   });
   const askSecret = (q) => readSecretFrom(rl, { input, terminal, output, setMuted, prompt: `${q}: ` });
+  // A value that is itself a credential (an API key, a webhook URL): the stored one
+  // is never printed as a default, so it does not land in the scrollback or a pasted
+  // bug report. Enter keeps it; typing replaces it.
+  const askKeep = (q, current = '') => new Promise((resolve, reject) => {
+    const onClose = () => reject(new Error('input closed before the wizard finished'));
+    rl.once('close', onClose);
+    rl.question(current ? `${q} [press Enter to keep the current value]: ` : `${q}: `, (ans) => {
+      rl.removeListener('close', onClose);
+      resolve(ans.trim() || current);
+    });
+  });
   const confirm = async (q) => {
     const ans = (await ask(`${q} (y/n)`, 'y')).toLowerCase();
     return ans === 'y' || ans === 'yes';
   };
-  return { ask, askSecret, confirm, close: () => rl.close() };
+  return { ask, askSecret, askKeep, confirm, close: () => rl.close() };
 }
 
 /**
@@ -254,6 +267,7 @@ function maybeEncryptConfig(opts) {
     encrypted: true,
     encPath: res.encPath,
     shredded: res.shredded,
+    ...(res.removedCopies ? { removedCopies: res.removedCopies } : {}),
     ...(res.notice ? { notice: res.notice } : {}),
   };
 }
@@ -372,6 +386,78 @@ function saveConfig(config, opts) {
 }
 
 /**
+ * Write the edited config back the way it was stored.
+ *
+ * An encrypted install is re-encrypted in place: the envelope goes straight into
+ * the file the config was read from (config.json.enc, or config.json when the
+ * envelope lives there) and plaintext never touches the disk. The old flow wrote a
+ * plaintext config.json first and encrypted it afterwards, so a kill in between, or
+ * a shred that could not remove the file, left the whole config in the clear
+ * (codex round 2 #5). A plain install is written as before.
+ *
+ * @param {object} config
+ * @param {{ encrypted: boolean, locked?: boolean, file?: string }} prior  from readExistingConfig
+ * @param {{ passphrase?: string, configPath?: string }} [opts]
+ * @returns {{ encrypted: boolean, path: string }}
+ */
+function persistConfig(config, prior, opts) {
+  const o = opts || {};
+  if (prior && prior.encrypted && !prior.locked) {
+    if (!o.passphrase) throw new Error('persistConfig: an encrypted config needs its passphrase to be re-encrypted');
+    const file = prior.file || CONFIG_ENC_PATH;
+    writeJsonAtomic(file, secretsLib.encryptConfig(config, o.passphrase));
+    return { encrypted: true, path: file };
+  }
+  return { encrypted: false, path: saveConfig(config, o) };
+}
+
+const ACCOUNT_SITES = [
+  { key: 'spokeo',       url: 'https://www.spokeo.com/signup',       label: 'Spokeo'       },
+  { key: 'beenverified', url: 'https://www.beenverified.com/signup', label: 'BeenVerified' },
+  { key: 'mylife',       url: 'https://www.mylife.com/signup',       label: 'MyLife'       },
+];
+
+/**
+ * Ask for the login of each site that needs an account. Passwords are read with
+ * the secret prompt (no echo, codex round 2 #6), and a blank answer while updating
+ * keeps the stored one instead of replacing it with nothing.
+ *
+ * @param {{ prompter: { ask: Function, askSecret: Function, confirm: Function },
+ *           accounts?: object, email: string, say?: Function, open?: Function }} deps
+ * @returns {Promise<object>} the accounts map to store
+ */
+async function collectAccounts({ prompter, accounts: stored = {}, email, say = console.log, open = openInBrowser }) {
+  const { ask, askSecret, confirm } = prompter;
+  const accounts = { ...stored };
+  for (const site of ACCOUNT_SITES) {
+    const existingPassword = accounts[site.key]?.password;
+    if (existingPassword) {
+      const update = await confirm(`  ${site.label} - account already stored. Update?`);
+      if (!update) continue;
+    } else {
+      const doSetup = await confirm(`  Set up ${site.label} account? (${site.url})`);
+      if (!doSetup) {
+        accounts[site.key] = { email: email, password: '' };
+        continue;
+      }
+      say(`  → Opening ${site.url} in your browser…`);
+      open(site.url);
+      say('  Create the account, then come back here.\n');
+      await ask('  Press Enter when done');
+    }
+    const acctEmail = await ask(`  ${site.label} login email`, email);
+    const acctPass  = (await askSecret(`  ${site.label} password`)) || existingPassword || '';
+    accounts[site.key] = { email: acctEmail, password: acctPass };
+    say(`  ✓ ${site.label} credentials saved.\n`);
+  }
+  return accounts;
+}
+
+function openInBrowser(url) {
+  try { execSync(`open "${url}"`); } catch (_) { /* no browser to open: the URL was printed */ }
+}
+
+/**
  * What the monthly job runs and where it logs: this install's run.sh, and the log
  * directory the runtime itself uses (AIDR_HOME / AIDR_LOG_DIR; the app directory's
  * logs/ when neither is set).
@@ -414,6 +500,7 @@ async function runScheduleStep({ confirm }) {
 module.exports = {
   regionPrompts, formatPhone, maybeEncryptConfig, readExistingConfig,
   buildConfig, answerDefaults, saveConfig, scheduleJobOptions,
+  persistConfig, collectAccounts,
   readSecret, createPrompter, askNewPassphrase,
   describeScheduleResult, runScheduleStep,
 };
@@ -421,7 +508,8 @@ module.exports = {
 // ─── Main setup ───────────────────────────────────────────────────────────────
 
 async function main() {
-  const { ask, askSecret, confirm, close } = createPrompter();
+  const prompter = createPrompter();
+  const { ask, askSecret, askKeep, confirm, close } = prompter;
   // A required answer is asked again until it is not blank: a blank name, email
   // or postal code would make the config run as nobody (CFG-1).
   const askRequired = async (q, def = '') => {
@@ -489,13 +577,13 @@ async function main() {
   console.log('solves them automatically for ~$0.001 each - pennies per month.');
   console.log('Sign up free at https://capsolver.com and paste your API key below.');
   console.log('Leave blank to skip (those sites go to your manual list instead).\n');
-  const capsolverKey = await ask('CapSolver API key', d.capsolverKey);
+  const capsolverKey = await askKeep('CapSolver API key', d.capsolverKey);
 
   // ── Notification ─────────────────────────────────────────────────────────
   console.log('\n── Notifications ──────────────────────────────────────────');
   const textTo = await ask('iMessage number to text results to (e.g. +15125550000)', d.textTo);
   // WP2: webhook works on any OS (ntfy.sh, Slack, Discord-style). Optional.
-  const webhook = await ask('Notification webhook URL - works on any OS, optional (e.g. https://ntfy.sh/my-topic)', d.webhook);
+  const webhook = await askKeep('Notification webhook URL - works on any OS, optional (e.g. https://ntfy.sh/my-topic)', d.webhook);
 
   // ── Profile dir ──────────────────────────────────────────────────────────
   const defaultProfileDir = path.join(os.homedir(), '.config', 'auto-identity-remove');
@@ -507,34 +595,7 @@ async function main() {
   console.log('Create the accounts now (one-time) and paste credentials here.');
   console.log('They will be stored locally in config.json (gitignored).\n');
 
-  const acctSites = [
-    { key: 'spokeo',       url: 'https://www.spokeo.com/signup',       label: 'Spokeo'       },
-    { key: 'beenverified', url: 'https://www.beenverified.com/signup', label: 'BeenVerified' },
-    { key: 'mylife',       url: 'https://www.mylife.com/signup',       label: 'MyLife'       },
-  ];
-
-  const accounts = { ...d.accounts };
-  for (const site of acctSites) {
-    const hasExisting = accounts[site.key]?.password;
-    if (hasExisting) {
-      const update = await confirm(`  ${site.label} - account already stored. Update?`);
-      if (!update) continue;
-    } else {
-      const doSetup = await confirm(`  Set up ${site.label} account? (${site.url})`);
-      if (!doSetup) {
-        accounts[site.key] = { email: email, password: '' };
-        continue;
-      }
-      console.log(`  → Opening ${site.url} in your browser…`);
-      try { execSync(`open "${site.url}"`); } catch(_) {}
-      console.log('  Create the account, then come back here.\n');
-      await ask('  Press Enter when done');
-    }
-    const acctEmail = await ask(`  ${site.label} login email`, email);
-    const acctPass  = await ask(`  ${site.label} password`);
-    accounts[site.key] = { email: acctEmail, password: acctPass };
-    console.log(`  ✓ ${site.label} credentials saved.\n`);
-  }
+  const accounts = await collectAccounts({ prompter, accounts: d.accounts, email });
 
   // ── Build config ─────────────────────────────────────────────────────────
   // buildConfig keeps every key this wizard does not ask about (persons[1..],
@@ -544,29 +605,22 @@ async function main() {
     capsolverKey, textTo, webhook, profileDir, accounts,
   });
 
-  // Atomic and always 0600: config.json holds the legal name, home address,
-  // phone, DOB, the SMTP password and every API key. A plain writeFileSync `mode`
-  // only applies when the file is created, so an existing 0644 file stayed 0644.
-  saveConfig(config);
-  console.log(`\n✅ ${CONFIG_PATH} saved.\n`);
+  // Atomic and always 0600: the config holds the legal name, home address, phone,
+  // the SMTP password and every API key. An encrypted install is re-encrypted into
+  // the file it came from; plaintext never touches the disk (codex round 2 #5). A
+  // plain install is written as before.
+  const stored = persistConfig(config, prior, { passphrase: prior.encrypted ? getPassphrase() : '' });
+  console.log(`\n✅ ${stored.path} saved${stored.encrypted ? ' (encrypted)' : ''}.\n`);
+  // Copies of the old config in the clear (the dashboard's .bak files, a kept
+  // plaintext) would undo the point of encrypting: say so.
+  if (stored.encrypted) {
+    for (const copy of plaintextConfigCopies()) {
+      console.log(`⚠  ${copy} holds your config in plain text beside the encrypted one. Delete it: rm "${copy}"`);
+    }
+  }
 
   // -- At-rest encryption ------------------------------------------------------
-  //
-  // If the install was already encrypted, re-encrypt without asking. Leaving the
-  // freshly written plaintext config.json in place would silently downgrade a
-  // user who had deliberately turned encryption on, and loadConfig() would keep
-  // reading the stale .enc so the edit above would not take effect either.
-  if (prior.encrypted && !prior.locked) {
-    const encResult = maybeEncryptConfig({ passphrase: getPassphrase() });
-    if (encResult.encrypted) {
-      console.log(encResult.shredded
-        ? `🔒 Re-encrypted to ${encResult.encPath}; plaintext shredded.\n`
-        : `🔒 Re-encrypted to ${encResult.encPath}.\n⚠  ${encResult.notice}\n`);
-    } else {
-      console.error('⚠  Could not re-encrypt the config. config.json is currently PLAINTEXT.');
-      console.error('   Fix it now with: AIDR_PASSPHRASE=... node watcher.js --encrypt-config\n');
-    }
-  } else {
+  if (!stored.encrypted) {
     console.log('-- Encrypt config at rest? ----------------------------------------');
     console.log('Your config holds PII, the CapSolver key, and (optionally) an SMTP');
     console.log('password. You can encrypt it with AES-256-GCM. You will then need to');
@@ -582,6 +636,8 @@ async function main() {
           console.log(encResult.shredded
             ? `\nconfig encrypted to ${encResult.encPath}; plaintext shredded.`
             : `\nconfig encrypted to ${encResult.encPath}.\n⚠  ${encResult.notice}`);
+          if (encResult.removedCopies && encResult.removedCopies.length) console.log(`   Removed ${encResult.removedCopies.length} plain text copy(ies) of the old config.`);
+          if (encResult.shredded && encResult.notice) console.log(`⚠  ${encResult.notice}`);
           console.log('   Run the watcher with: AIDR_PASSPHRASE=... node watcher.js\n');
         }
       } else {

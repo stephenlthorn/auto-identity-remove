@@ -31,6 +31,9 @@ config.json.bak
 config.json.enc.bak
 config.json.unreadable-*.bak
 config.json.enc.unreadable-*.bak
+# Temp files of the atomic writers, at any depth (dashboard/.auth.json.tmp-abcd1234)
+**/*.tmp
+**/*.tmp-*
 dashboard/.auth.json
 aidr-home/
 **/*.passphrase

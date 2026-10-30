@@ -19,6 +19,7 @@ const {
   isHostAllowed,
   isLoopbackHost,
   checkBindSafety,
+  resolveEnvCreds,
 } = require('../dashboard/validate');
 
 const MODE_ARGS = {
@@ -202,7 +203,25 @@ test('DASH-13: refuses a non-loopback bind with no credentials', () => {
   assert.match(r.error, /AIDR_USER|credentials/);
 });
 
-test('DASH-13: loopback without credentials, or non-loopback with credentials, is allowed', () => {
-  assert.equal(checkBindSafety({ host: '127.0.0.1', authConfigured: false }).ok, true);
+test('DASH-13: any bind with credentials is allowed; no credentials is refused, loopback included (codex #1)', () => {
+  assert.equal(checkBindSafety({ host: '127.0.0.1', authConfigured: true }).ok, true);
   assert.equal(checkBindSafety({ host: '0.0.0.0', authConfigured: true }).ok, true);
+  const loopback = checkBindSafety({ host: '127.0.0.1', authConfigured: false });
+  assert.equal(loopback.ok, false);
+  assert.equal(loopback.code, 'AIDR_NO_CREDENTIALS');
+  assert.match(loopback.error, /AIDR_DASHBOARD_NO_AUTH/);
+});
+
+test('codex #1: the explicit opt-out is honoured on loopback and never on a network bind', () => {
+  assert.equal(checkBindSafety({ host: '127.0.0.1', authConfigured: false, allowNoAuth: true }).ok, true);
+  assert.equal(checkBindSafety({ host: '::1', authConfigured: false, allowNoAuth: true }).ok, true);
+  const open = checkBindSafety({ host: '0.0.0.0', authConfigured: false, allowNoAuth: true });
+  assert.equal(open.ok, false);
+  assert.equal(open.code, 'AIDR_UNSAFE_BIND');
+});
+
+test('the example service password is not accepted as an env credential', () => {
+  const r = resolveEnvCreds('admin', 'change-me');
+  assert.equal(r.envConfigured, false);
+  assert.match(r.warning, /change-me/);
 });

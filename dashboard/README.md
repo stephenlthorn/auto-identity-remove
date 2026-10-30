@@ -51,29 +51,33 @@ AIDR_PORT=8080 AIDR_USER=admin AIDR_PASS='a-strong-password' node server.js
 
 ## Auth
 
-Set credentials via env; the app authenticates **itself** (so it doesn't depend
-on a reverse proxy for access control):
+Credentials are required, loopback included: another account on the same machine
+can reach a loopback port, and this app edits personal data and starts real runs.
+`aidr dashboard` generates a login for you and prints it once; running
+`node server.js` yourself needs `AIDR_USER` + `AIDR_PASS` (or `AIDR_TOKEN`), and
+refuses to start without them. The app authenticates **itself** (so it doesn't
+depend on a reverse proxy for access control):
 
 | Var | Default | Meaning |
 |-----|---------|---------|
 | `AIDR_PORT` | `8080` | Listen port |
 | `AIDR_HOST` | `127.0.0.1` | Bind address. Defaults to loopback (local access only). Set `AIDR_HOST=0.0.0.0` **only** if you intend LAN/public access (use a reverse proxy with TLS). |
-| `AIDR_USER` / `AIDR_PASS` | _(unset)_ | HTTP Basic credentials. **Both must be set** for the env credentials to be active (setting only one is treated as misconfigured and logs a warning). When set, **all routes except `/api/health`** require them (browser-native login prompt). |
+| `AIDR_USER` / `AIDR_PASS` | _(unset)_ | HTTP Basic credentials. **Both must be set** for the env credentials to be active (setting only one is treated as misconfigured and logs a warning). **All routes except `/api/health`** require them (browser-native login prompt). `AIDR_PASS=change-me`, the placeholder the example service file used to carry, is refused. |
 | `AIDR_TOKEN` | _(unset)_ | Token accepted **only** via the `X-AIDR-Token` header (for scripts/automation). Not accepted via query string. |
 | `AIDR_ALLOWED_HOSTS` | _(unset)_ | Comma-separated host names the dashboard may be reached under, besides `localhost` / `127.0.0.1` / `[::1]` and the concrete address in `AIDR_HOST`. Needed when you bind `0.0.0.0` and browse by LAN name or through a reverse proxy; any other `Host` header gets a 403 (DNS-rebinding defense). |
+| `AIDR_DASHBOARD_NO_AUTH` | _(unset)_ | **Development and tests only.** `1` turns authentication off on a **loopback** bind when no credentials exist at start-up. It is never honoured on a network bind, and a login that existed at start-up stays required. Do not set it on a machine other people can log in to. |
 | `AIDR_AUTH_FILE` | `dashboard/.auth.json` | Where credentials changed in the Admin tab are stored (use it when the install directory is read-only). |
 | `AIDR_CONFIG_PATH` / `AIDR_CONFIG_ENC_PATH` / `AIDR_STATE_PATH` | repo root | Relocate `config.json`, `config.json.enc` and `state.json`. The dashboard reads and writes the same files `watcher.js` does, and hands them to the runs it starts. |
 | `AIDR_PASSPHRASE` | _(unset)_ | Needed when the config is encrypted (`config.json.enc`). Without it the dashboard reports the config as **locked** and refuses to overwrite it. |
 
 A request is allowed if it satisfies **either** valid Basic credentials **or** a
 valid token. Cross-origin state-changing requests are rejected (CSRF defense).
-If none of the three are set the dashboard runs **unauthenticated** (and logs a
-warning) - only acceptable on a trusted, isolated network. Credentials are
-compared in constant time.
+If none of the three are set the dashboard **refuses to start** (and, were the
+credentials to disappear while it runs, every route answers `401`: it fails
+closed). Credentials are compared in constant time.
 
 Failed logins are rate limited per client address (10 per minute, then `429`
-until the window passes), and a non-loopback `AIDR_HOST` with no credentials set
-is refused at start-up instead of merely warned about.
+until the window passes).
 
 ### Changing the login (Admin tab)
 
@@ -81,7 +85,8 @@ is refused at start-up instead of merely warned about.
 password from the **Admin** tab, the new username + a salted `scrypt` hash are
 written atomically to `dashboard/.auth.json` (gitignored, `0600`), which then
 **overrides** the env vars - no restart needed. Delete `.auth.json` to fall back
-to the env credentials. Changing the password requires the current one. If
+to the env credentials (with none set, every route answers `401` until you
+restart with credentials). Changing the password requires the current one. If
 `.auth.json` is ever corrupt, the app **fails closed** (all logins denied) until
 it is fixed or removed - it never silently downgrades to open access.
 
@@ -94,7 +99,7 @@ environment, and the timer activates `aidr.service`, which you must install.
 
 Example units are in [`examples/`](examples/):
 
-- `examples/aidr-dashboard.service` - runs this dashboard (set your creds here).
+- `examples/aidr-dashboard.service` - runs this dashboard (its login comes from a root-only `EnvironmentFile`; you create it, see the comments in the unit).
 - `examples/aidr.service` - the oneshot the timer triggers (`node watcher.js`).
 
 Copy them to `/etc/systemd/system/`, edit paths/creds, then
@@ -140,9 +145,12 @@ that trims URLs.
 ## Security notes
 
 The config holds personal data and the UI can trigger real opt-out submissions,
-so set `AIDR_USER`/`AIDR_PASS` (and optionally `AIDR_TOKEN` for automation). The
-server binds `127.0.0.1` by default (loopback only); set `AIDR_HOST=0.0.0.0` if
-you need LAN access and use a TLS-terminating reverse proxy. `/api/health` is
+it requires a login (`AIDR_USER`/`AIDR_PASS`, and optionally `AIDR_TOKEN` for
+automation) and will not start without one. The server binds `127.0.0.1` by
+default (loopback only); set `AIDR_HOST=0.0.0.0` if you need LAN access and use a
+TLS-terminating reverse proxy. `GET /api/state` and `GET /api/logs/:name` reduce
+URLs to their host and never return the relay alias cache, like the History
+routes. `/api/health` is
 intentionally unauthenticated and returns only `{ ok: true }` (no path or
 version disclosure).
 

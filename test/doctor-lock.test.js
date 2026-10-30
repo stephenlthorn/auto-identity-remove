@@ -104,6 +104,52 @@ describe('checkLock', () => {
     assert.equal(r.warn, true);
   });
 
+  // A running watcher re-stamps `ts` every refreshMs (5 minutes) and records that promise
+  // in the lock. A holder on ANOTHER host that has missed three refreshes in a row is
+  // gone (a container killed with SIGKILL leaves its lock behind), whatever the max age.
+  describe('a holder on another host that promised to refresh', () => {
+    const other = (overrides = {}) => holder({ host: 'other-container', refreshMs: 5 * MIN, ...overrides });
+
+    it('is live while it keeps refreshing', () => {
+      const r = check(tmpLock(other({ ts: new Date(NOW - 10 * MIN).toISOString() })), { isAlive: dead });
+      assert.ok(!r.warn, r.hint);
+      assert.match(r.hint, /run in progress/);
+    });
+
+    it('is stale once it has missed three refreshes (15 minutes), and says why', () => {
+      const file = tmpLock(other({ ts: new Date(NOW - 16 * MIN).toISOString() }));
+      const r = check(file, { isAlive: alive });
+      assert.equal(r.warn, true);
+      assert.match(r.hint, /stale/);
+      assert.match(r.hint, /other-container/);
+      assert.match(r.hint, /stopped refreshing/);
+      assert.ok(r.hint.includes(file));
+    });
+
+    it('counts from the holder\'s own promise, not a fixed 15 minutes', () => {
+      const fast = tmpLock(other({ refreshMs: MIN, ts: new Date(NOW - 4 * MIN).toISOString() }));
+      assert.equal(check(fast).warn, true, 'promised every minute, quiet for four');
+      const slow = tmpLock(other({ refreshMs: 10 * MIN, ts: new Date(NOW - 20 * MIN).toISOString() }));
+      assert.ok(!check(slow).warn, 'promised every ten minutes, quiet for twenty');
+    });
+
+    it('uses a refreshedAt stamp when the record carries one newer than ts', () => {
+      const r = check(tmpLock(other({ ts: new Date(NOW - 40 * MIN).toISOString(), refreshedAt: new Date(NOW - 2 * MIN).toISOString() })));
+      assert.ok(!r.warn, r.hint);
+    });
+
+    it('leaves a record with no promise exactly as before (not stale until the max age)', () => {
+      const r = check(tmpLock(holder({ host: 'other-container', ts: new Date(NOW - 16 * MIN).toISOString() })), { isAlive: dead });
+      assert.ok(!r.warn, r.hint);
+    });
+
+    it('never changes the verdict on the same host: a live pid stays live however long ago it refreshed', () => {
+      const r = check(tmpLock(holder({ refreshMs: 5 * MIN, ts: new Date(NOW - 20 * MIN).toISOString() })), { isAlive: alive });
+      assert.ok(!r.warn, r.hint);
+      assert.match(r.hint, /holder process is running/);
+    });
+  });
+
   it('warns about a lock file that is not valid JSON once it is not freshly written', () => {
     const file = tmpLock('not json');
     const old = new Date(NOW - 3 * HOUR);

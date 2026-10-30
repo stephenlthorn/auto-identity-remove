@@ -11,9 +11,13 @@ Type=simple
 WorkingDirectory=/opt/auto-identity-remove/dashboard
 ExecStart=/usr/bin/node /opt/auto-identity-remove/dashboard/server.js
 Environment=AIDR_PORT=8080
-# Set a real login (the dashboard edits PII and can submit opt-outs):
-Environment=AIDR_USER=admin
-Environment=AIDR_PASS=change-me
+# The dashboard edits PII and can submit opt-outs, so it will not start without a
+# login. Keep it in a root-only file, not in this unit (anyone can read `systemctl
+# cat`), and make the password a real one - the server refuses the old example
+# value and starts with no credentials at all only if you set AIDR_DASHBOARD_NO_AUTH=1:
+#   install -m 600 /dev/null /etc/aidr-dashboard.env
+#   printf 'AIDR_USER=admin\nAIDR_PASS=%s\n' "$(openssl rand -base64 18)" > /etc/aidr-dashboard.env
+EnvironmentFile=/etc/aidr-dashboard.env
 # Binding anything but loopback needs credentials (above) and, to browse it by
 # name, the names you will use:
 #Environment=AIDR_HOST=0.0.0.0

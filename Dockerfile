@@ -27,6 +27,10 @@
 #       -e HOME=/tmp \
 #       auto-identity-remove
 #
+# Coming from the first recipe, which bind-mounted config.json and state.json as two single
+# files at /app? Those mounts are ignored now: the image reads AIDR_HOME. Copy BOTH files into
+# the directory above. A run that finds them at /app instead says where they must go.
+#
 # The container user is pwuser (uid 1001). Either chown the directory to 1001 as
 # above, or add --user "$(id -u):$(id -g)" so it runs as the directory's owner.
 # AIDR_CONFIG_PATH, AIDR_CONFIG_ENC_PATH, AIDR_STATE_PATH, AIDR_LOG_DIR and
