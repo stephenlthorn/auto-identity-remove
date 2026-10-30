@@ -1014,6 +1014,7 @@ async function processGenericUrl(page, broker, state, dryRun = false, injectedDe
 
     // Strategy 1: click "Do Not Sell" link
     const dnsBaseline = await readBodyText(page);
+    const urlBeforeClick = typeof page.url === 'function' ? page.url() : '';
     let formsBeforeClick = null;
     const clicked = await clickDoNotSell(page, {
       beforeClick: async () => {
@@ -1034,11 +1035,18 @@ async function processGenericUrl(page, broker, state, dryRun = false, injectedDe
         label: 'Do Not Sell clicked, form submitted',
       });
       if (submitted) return submitted;
-      // The click may still have flipped a preference with no form at all, so a
-      // confirmation or success message that APPEARED counts. Otherwise a human
-      // has to finish it.
-      const shown = await judgeNewText(page, dnsBaseline, 'Do Not Sell clicked');
-      if (shown.status === 'pending_confirm' || shown.status === 'success') return shown;
+      // No form opened, so nothing was submitted and this branch can never report a
+      // removal (BRK2-1). The control usually navigates to a policy page, where every
+      // line is "new" and legal boilerplate ("we will respond within 45 days after
+      // your request is received") reads as a success message. A message that shows
+      // up in place, on the same page, may be the preference toggle's own
+      // acknowledgement: that is worth an `unverified` (no cooldown, checked again
+      // next run). Anything else is for a human.
+      const movedOn = (typeof page.url === 'function' ? page.url() : '') !== urlBeforeClick;
+      const shown = movedOn ? null : await judgeNewText(page, dnsBaseline, 'Do Not Sell clicked');
+      if (shown && (shown.status === 'pending_confirm' || shown.status === 'success')) {
+        return { status: 'unverified', detail: 'Do Not Sell clicked and the page acknowledged it, but no request form was submitted - confirm by hand' };
+      }
       return { status: 'manual', detail: 'Do Not Sell clicked but nothing was submitted - finish this one by hand' };
     }
 
