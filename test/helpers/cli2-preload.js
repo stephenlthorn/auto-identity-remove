@@ -17,6 +17,9 @@
  *   AIDR_TEST_JOURNAL_THROWS=1     openJournal() throws: a crash in the middle of a real
  *                                  run, which lands in the Fatal handler.
  *   AIDR_TEST_GENERIC_THROWS=1     runGenericBrokers() throws: a crash that a dry run reaches too.
+ *   AIDR_TEST_SLOW_CLOSE=<ms>      context.close() takes that long, as closing a real Chromium does:
+ *                                  a shutdown is then still part-way through its cleanups when a
+ *                                  second signal arrives.
  *   AIDR_TEST_STATE_ON_LOCK=<file> just before lock.acquire() runs, the content of <file> is written to
  *                                  AIDR_STATE_PATH: another run that finished after this one had already
  *                                  loaded state.json at start-up.
@@ -87,6 +90,21 @@ function killAfter(chromium, limit) {
 
 const spied = new WeakSet();
 
+function slowClose(chromium, ms) {
+  if (spied.has(chromium)) return;
+  spied.add(chromium);
+  const launch = chromium.launchPersistentContext.bind(chromium);
+  chromium.launchPersistentContext = async (dir, options) => {
+    const context = await launch(dir, options);
+    const close = context.close.bind(context);
+    context.close = async () => {
+      await new Promise(resolve => setTimeout(resolve, ms));
+      return close();
+    };
+    return context;
+  };
+}
+
 function spyOnBrokerRunner(runner) {
   if (spied.has(runner)) return;
   spied.add(runner);
@@ -126,6 +144,7 @@ const originalLoad = Module._load;
 Module._load = function patchedLoad(request) {
   const result = originalLoad.apply(this, arguments);
   if (process.env.AIDR_TEST_STATE_ON_LOCK && request === './lib/lock') stateOnLock(result);
+  if (request === 'playwright' && Number(process.env.AIDR_TEST_SLOW_CLOSE) > 0) slowClose(result.chromium, Number(process.env.AIDR_TEST_SLOW_CLOSE));
   if (process.env.AIDR_TEST_SPY && request === './lib/broker-runner') spyOnBrokerRunner(result);
   if (process.env.AIDR_TEST_SPY && request === './generic-runner' && !process.env.AIDR_TEST_GENERIC_THROWS) return spyOnGeneric(result);
   if (request === 'playwright' && Number(process.env.AIDR_TEST_CLOSE_AFTER) >= 0 && process.env.AIDR_TEST_CLOSE_AFTER !== undefined && process.env.AIDR_TEST_CLOSE_AFTER !== '') {
