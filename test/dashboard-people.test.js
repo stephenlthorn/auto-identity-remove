@@ -12,7 +12,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { stateKey } = require('../lib/config');
-const { initialsOf, assignInitials, personKeyName, peopleFromConfig, peopleFromState } = require('../dashboard/people');
+const { initialsOf, assignInitials, personKeyName, peopleFromConfig, peopleFromState, ownedOptOuts } = require('../dashboard/people');
 
 test('initialsOf takes the first letter of the first and last word, upper-cased', () => {
   assert.equal(initialsOf('Alice Smith'), 'AS');
@@ -68,4 +68,23 @@ test('peopleFromState finds the people multi-person state keys name, in first-se
   assert.deepEqual(peopleFromState(optOuts), [{ name: 'Bob Jones', initials: 'BJ' }, { name: 'Alice Smith', initials: 'AS' }]);
   assert.deepEqual(peopleFromState(null), []);
   assert.deepEqual(peopleFromState([]), []);
+});
+
+test('ownedOptOuts drops only entries stamped for an identity nobody configured has (CFG2-7)', () => {
+  const { personFingerprint } = require('../lib/config');
+  const ann = { firstName: 'Ann', lastName: 'Probe', email: 'ann@example.test', zip: '12345' };
+  const optOuts = {
+    Kept: { history: ['success'], fp: personFingerprint(ann) },
+    Unstamped: { history: ['success'] },
+    Old: { history: ['success'], fp: personFingerprint({ ...ann, zip: '99999' }) },
+    'Composite|Ann Probe': { fp: personFingerprint(ann) },
+  };
+  const before = JSON.stringify(optOuts);
+  const out = ownedOptOuts(optOuts, { person: ann });
+  assert.deepEqual(Object.keys(out).sort(), ['Composite|Ann Probe', 'Kept', 'Unstamped']);
+  assert.equal(JSON.stringify(optOuts), before, 'the input is not changed');
+  assert.deepEqual(Object.keys(ownedOptOuts(optOuts, { persons: [ann, { ...ann, zip: '99999' }] })).sort(), Object.keys(optOuts).sort(), 'any configured person owns it');
+  assert.equal(ownedOptOuts(optOuts, null), optOuts, 'no config: nothing to compare against');
+  assert.equal(ownedOptOuts(optOuts, {}), optOuts);
+  assert.equal(ownedOptOuts(undefined, { person: ann }), undefined);
 });

@@ -13,6 +13,7 @@
 'use strict';
 
 const { stateKey } = require('../lib/config');
+const { fingerprintMatches } = require('../lib/identity');
 
 /**
  * The person half of the key the runner writes for this person. Built by the
@@ -104,4 +105,30 @@ function peopleFromState(optOuts) {
   return withInitials(names);
 }
 
-module.exports = { personKeyName, initialsOf, assignInitials, peopleFromConfig, peopleFromState };
+/**
+ * state.optOuts without the entries that describe someone else (CFG2-7): one
+ * stamped with an identity fingerprint that matches none of the configured people
+ * (a corrected zip or email) counts as never run for the runner, so the status
+ * table and the summary must not call it done. Unstamped entries (everything the
+ * released versions wrote) and entries for any configured person stay. With no
+ * readable config there is nothing to compare against and nothing is dropped.
+ *
+ * @param {object|null|undefined} optOuts
+ * @param {object|null|undefined} cfg  the decrypted config, or null when unreadable
+ * @returns {object|null|undefined}  `optOuts` itself when nothing applies
+ */
+function ownedOptOuts(optOuts, cfg) {
+  if (!optOuts || typeof optOuts !== 'object' || Array.isArray(optOuts) || !cfg || typeof cfg !== 'object') return optOuts;
+  const list = cfg.persons !== undefined ? cfg.persons : (cfg.person ? [cfg.person] : []);
+  const persons = Array.isArray(list) ? list.filter(p => p && typeof p === 'object') : [];
+  if (persons.length === 0) return optOuts;
+  const out = {};
+  for (const [key, entry] of Object.entries(optOuts)) {
+    const stamped = entry && typeof entry === 'object' && entry.fp;
+    if (stamped && !persons.some(p => fingerprintMatches(entry.fp, p))) continue;
+    out[key] = entry;
+  }
+  return out;
+}
+
+module.exports = { personKeyName, initialsOf, assignInitials, peopleFromConfig, peopleFromState, ownedOptOuts };

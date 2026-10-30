@@ -84,3 +84,48 @@ test('DASH-5: no state file at all gives none for every broker and zero counts',
     assert.ok((await request({ pathname: '/api/brokers' })).json.filter(b => b.method !== 'manual').every(b => b.status.key === 'none'));
   });
 });
+
+// CFG2-7: an entry stamped for another identity counts as "never run" everywhere
+// else (readEntry, complaints, config check). The status table and the summary
+// read the raw state, so they kept showing OK for a submission made with a zip or
+// email the person no longer has.
+
+const { personFingerprint } = require('../lib/config');
+
+const ANN = { firstName: 'Ann', lastName: 'Probe', email: 'ann@example.test', zip: '12345' };
+const ANN_OLD_ZIP = { ...ANN, zip: '99999' };
+
+test('CFG2-7: an entry stamped for a previous identity is not shown as opted out', async () => {
+  const stateContent = {
+    optOuts: {
+      Spokeo: { history: ['success'], fp: personFingerprint(ANN_OLD_ZIP) },
+      MyLife: { history: ['success'], fp: personFingerprint(ANN) },
+      Whitepages: { history: ['success'] },
+    },
+  };
+  await withServer({ cfgContent: { person: ANN }, stateContent, options: { brokers: BROKERS } }, async ({ request }) => {
+    const s = (await request({ pathname: '/api/summary' })).json;
+    assert.equal(s.optedOut, 2, 'MyLife (current identity) and Whitepages (unstamped); not Spokeo');
+    const list = (await request({ pathname: '/api/brokers' })).json;
+    const status = (name) => list.find(b => b.name === name).status.key;
+    assert.equal(status('Spokeo'), 'none');
+    assert.equal(status('MyLife'), 'ok');
+    assert.equal(status('Whitepages'), 'ok');
+  });
+});
+
+test('CFG2-7: with the config locked or unreadable nothing is filtered', async () => {
+  const stateContent = { optOuts: { Spokeo: { history: ['success'], fp: personFingerprint(ANN_OLD_ZIP) } } };
+  await withServer({ stateContent, options: { brokers: BROKERS } }, async ({ request }) => {
+    assert.equal((await request({ pathname: '/api/summary' })).json.optedOut, 1, 'no config to compare against');
+  });
+});
+
+test('CFG2-7: an entry stamped with the first-generation (phone) fingerprint still counts', async () => {
+  const crypto = require('node:crypto');
+  const legacy = crypto.createHash('sha256').update(['ann', 'probe', '12345', 'ann@example.test', '5125550000'].join('\n')).digest('hex').slice(0, 16);
+  const stateContent = { optOuts: { Spokeo: { history: ['success'], fp: legacy } } };
+  await withServer({ cfgContent: { person: { ...ANN, phone: '5125550000' } }, stateContent, options: { brokers: BROKERS } }, async ({ request }) => {
+    assert.equal((await request({ pathname: '/api/summary' })).json.optedOut, 1);
+  });
+});

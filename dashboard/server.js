@@ -107,7 +107,7 @@ const { resolvePaths } = require('../lib/paths');
 const { writeJsonAtomic, backupFile } = require('./safe-write');
 const { MASK, maskConfig, mergeConfig, applyConfigEdit } = require('./config-edit');
 const { listRuns, readRun, latestRun, redactDetail, redactUrls } = require('./runs');
-const { peopleFromConfig, peopleFromState } = require('./people');
+const { peopleFromConfig, peopleFromState, ownedOptOuts } = require('./people');
 const { loadGenericList, tallyGeneric } = require('./generic');
 
 const DEFAULT_ROOT = path.resolve(__dirname, '..');
@@ -625,7 +625,8 @@ function createApp(options = {}) {
   app.get('/api/health', (_req, res) => res.json({ ok: true })); // no path disclosure
 
   app.get('/api/brokers', (_req, res) => {
-    const optOuts = (readJsonMeta(STATE).data || {}).optOuts;
+    const cm = readConfig();
+    const optOuts = ownedOptOuts((readJsonMeta(STATE).data || {}).optOuts, cm.parseError ? null : cm.data);
     const list = loadBrokers().map(b => ({
       name: b.name, method: b.method, priority: b.priority,
       usOnly: !!b.usOnly, captchaLikely: !!b.captchaLikely,
@@ -670,7 +671,8 @@ function createApp(options = {}) {
     const sm = readJsonMeta(STATE);
     const cm = readConfig();
     const cfg = cm.data || null;
-    const opts = (sm.data && sm.data.optOuts) || {};
+    // Entries stamped for a previous identity are "never run" to the runner (CFG2-7).
+    const opts = ownedOptOuts((sm.data && sm.data.optOuts) || {}, cfg);
     let opted = 0, pending = 0, manual = 0;
     for (const b of brokers) {
       if (b.method === 'manual') { manual++; continue; } // mutually exclusive, matches the table
