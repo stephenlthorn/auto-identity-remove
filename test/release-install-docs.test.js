@@ -107,8 +107,10 @@ test('the Updating note also covers a git checkout and a rebuilt Docker image', 
   assert.match(updating, /docker build -t auto-identity-remove \./);
 });
 
-test('docs/SYNOLOGY.md step 1 downloads the release on the NAS and keeps git as the alternative', () => {
-  const step = section(synology, '### 1. Put the project somewhere on a volume', '### 2. Create your config');
+test('docs/SYNOLOGY.md keeps the release download, with git as the alternative, for building the image from source', () => {
+  // The primary Synology path is the prebuilt image (test/ghcr-image-docs.test.js);
+  // the tarball is what "build from source" starts from.
+  const step = section(synology, '## Alternative: build from source', '## Settings that matter on a small box');
 
   assert.ok(step.includes(`curl -L -O ${LATEST}`), 'DSM step 1 must fetch the release asset');
   assert.match(step, /tar xzf auto-identity-remove\.tar\.gz/);
