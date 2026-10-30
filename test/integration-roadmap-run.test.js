@@ -149,7 +149,10 @@ test('--retry-failed reads a crashed run\'s journal and says where the list came
 test('the run in progress is never its own --retry-failed source', async () => {
   await inSandbox({ state: freshSpokeo }, async (sandbox) => {
     const r = await runWatcher(sandbox, ['--retry-failed']);
-    assert.equal(r.code, 0, r.stderr);
+    // With no earlier log it runs every broker, and the fake network answers "no such
+    // host" for all of them: an offline run in which only the two fresh Spokeo rows were
+    // skipped. Skipped rows are not progress for an offline run, so it is failed (exit 1).
+    assert.equal(r.code, 1, r.stderr);
     assert.match(r.stdout, /no previous log found/);
   });
 });

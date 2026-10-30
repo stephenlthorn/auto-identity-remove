@@ -42,6 +42,7 @@ const { resolveMode } = require('./lib/mode-dispatch');
 const { resolvePaths } = require('./lib/paths');
 const { openJournal, journalPathFor, countResults } = require('./lib/journal');
 const { startHeartbeat, defaultHeartbeatPath, outcomeFromResults } = require('./lib/heartbeat');
+const { OFFLINE_HINT } = require('./lib/outage');
 const { applyRetention } = require('./lib/retention');
 const { isPlaceholderKey, detectAndSolveCaptcha } = require('./lib/captcha');
 const { RELAY_BROKER, relaySkippedNames, guardResumePlan } = require('./lib/resume-guard');
@@ -1636,8 +1637,9 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
     + results.skipped.length + results.notFound.length + manualCount + results.errors.length + results.dead.length;
   const short = [
     failed
-      ? `❌ Privacy Watcher FAILED (${new Date().toLocaleDateString()}): every broker ended in an error, so nothing was submitted.`
+      ? `❌ Privacy Watcher FAILED (${new Date().toLocaleDateString()}): ${end.offline ? 'most sites could not be resolved' : 'every broker ended in an error'}, so nothing was submitted.`
       : `🔒 Privacy Watcher (${new Date().toLocaleDateString()}):`,
+    ...(end.offline ? [`🌐 ${OFFLINE_HINT}`] : []),
     `✅ Submitted: ${results.succeeded.length}`,
     `📧 Awaiting email confirm: ${results.pendingConfirm.length}`,
     `❓ Unconfirmed: ${results.unverified.length}`,
@@ -1648,8 +1650,10 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
   ].join('\n');
   sendText(short, config.notify);
   desktopNotify('Privacy Watcher', failed
-    ? `Failed - every broker errored (${results.errors.length} errors, ${totalProcessed} total). Nothing was submitted.`
-    : `Done - ${results.succeeded.length} submitted, ${results.pendingConfirm.length} awaiting email confirmation, ${manualCount} need manual action (${totalProcessed} total)`);
+    ? (end.offline
+      ? `Failed - most sites could not be resolved (${results.dead.length} of ${totalProcessed}). Check the network or DNS. Nothing was submitted.`
+      : `Failed - every broker errored (${results.errors.length} errors, ${totalProcessed} total). Nothing was submitted.`)
+    : `Done - ${results.succeeded.length} submitted, ${results.pendingConfirm.length} awaiting email confirmation, ${manualCount} need manual action (${totalProcessed} total)${end.offline ? '. Most sites could not be resolved: check the network or DNS.' : ''}`);
   // notify.webhook is documented as POSTed after every run; only serp-watch ever
   // sent it (CLI2-3). Awaited, with its own deadline (lib/notify.js).
   if (config.notify && config.notify.webhook) await sendWebhook(config.notify.webhook, short);
