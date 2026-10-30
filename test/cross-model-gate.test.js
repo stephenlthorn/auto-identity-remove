@@ -36,7 +36,10 @@ function repoWithTrailerAboveALongHistory() {
   fs.mkdirSync(path.join(dir, 'lib'));
   fs.writeFileSync(path.join(dir, 'lib', 'config.js'), 'module.exports = {};\n');
   git(dir, ['add', '.']);
-  git(dir, ['commit', '-q', '-m', `touch a tier-1 file\n\n${'filler line for the pipe buffer\n'.repeat(8000)}`]);
+  // Linux caps one argv string at 128 KiB, so the long message goes in a file.
+  const message = path.join(dir, '.git', 'LONG_MSG');
+  fs.writeFileSync(message, `touch a tier-1 file\n\n${'filler line for the pipe buffer\n'.repeat(8000)}`);
+  git(dir, ['commit', '-q', '-F', message]);
   git(dir, ['commit', '-q', '--allow-empty', '-m',
     'merge the work\n\nCross-model-review: docs/reviews/cross-model/2026-10-29-abc1234.md (P1:0 P2:0)']);
   return { dir, base };
