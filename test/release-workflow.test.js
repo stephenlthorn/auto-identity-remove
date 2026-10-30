@@ -20,6 +20,11 @@
  *
  * The workflow family style (pinned runs, values passed through env, never
  * interpolated into a shell) follows .github/workflows/test.yml.
+ *
+ * The file now holds a second job, `image`, which publishes the container image
+ * once a release exists. test/image-workflow.test.js pins that job. This file
+ * keeps the properties of the whole workflow (who may write what, that every
+ * action is pinned) and everything about the `release` job.
  */
 
 'use strict';
@@ -31,64 +36,29 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
-const ROOT = path.join(__dirname, '..');
+const {
+  ROOT, readOrEmpty, parseWorkflow, nameOf, runScript, jobKey, usesLines,
+} = require('./workflow-helpers');
+
 const WORKFLOW = path.join(ROOT, '.github', 'workflows', 'release.yml');
 const pkg = require(path.join(ROOT, 'package.json'));
 
 const skip = process.platform === 'win32' ? 'the run: scripts are bash and are exercised on POSIX CI' : false;
 
-const readOrEmpty = file => (fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '');
-const yml = readOrEmpty(WORKFLOW);
+const workflow = parseWorkflow(WORKFLOW);
+const yml = workflow.text;
+const sections = workflow.sections;
 const changelog = readOrEmpty(path.join(ROOT, 'CHANGELOG.md'));
 
-/** The workflow split at its top-level keys: { on, permissions, concurrency, jobs, ... }. */
-function topLevelSections(text) {
-  const sections = {};
-  let key = null;
-  for (const line of text.split('\n')) {
-    const m = line.match(/^([A-Za-z][\w-]*):/);
-    if (m) {
-      key = m[1];
-      sections[key] = '';
-    }
-    if (key) sections[key] += `${line}\n`;
-  }
-  return sections;
-}
+const release = workflow.jobs.release || { name: 'release', text: '', steps: [] };
+const steps = release.steps;
 
-const sections = topLevelSections(yml);
-const jobs = sections.jobs || '';
-
-/** The job's steps, each as the text of one list item. */
-const steps = jobs
-  .slice(jobs.indexOf('    steps:\n') + '    steps:\n'.length)
-  .split(/^ {6}- /m)
-  .slice(1)
-  // The first key of an item sits on the "- " line; give it its siblings' indent.
-  .map(s => `        ${s}`);
-
-const nameOf = step => (step.match(/^ {8}name: (.+)$/m) || [])[1];
 const stepNamed = name => {
   const step = steps.find(s => nameOf(s) === name);
-  assert.ok(step, `precondition: the workflow has a step named "${name}"`);
+  assert.ok(step, `precondition: the release job has a step named "${name}"`);
   return step;
 };
 const indexOfStep = name => steps.indexOf(stepNamed(name));
-
-/** The script a step runs: a `run: |` block, dedented, or a one-line `run: cmd` ('' when it has none). */
-function runScript(step) {
-  const oneLine = step.match(/^ {8}run: (?!\|\s*$)(.+)$/m);
-  if (oneLine) return oneLine[1];
-  const lines = step.split('\n');
-  const start = lines.findIndex(l => /^ {8}run: \|\s*$/.test(l));
-  if (start === -1) return '';
-  const body = [];
-  for (const line of lines.slice(start + 1)) {
-    if (line.trim() !== '' && !line.startsWith(' '.repeat(10))) break;
-    body.push(line.slice(10));
-  }
-  return body.join('\n');
-}
 
 const NAMES = {
   version: 'Read the version',
@@ -111,8 +81,8 @@ test('the workflow and the changelog exist', () => {
   assert.ok(changelog.length > 0, 'CHANGELOG.md is missing');
 });
 
-test('the workflow was parsed into the one job and the steps this file reasons about', () => {
-  assert.equal([...jobs.matchAll(/^ {2}[\w-]+:\s*$/gm)].length, 1, 'exactly one job');
+test('the workflow was parsed into the release and image jobs and the steps this file reasons about', () => {
+  assert.deepEqual(Object.keys(workflow.jobs), ['release', 'image'], 'a release job, then the image job that needs it');
   for (const name of Object.values(NAMES)) stepNamed(name);
   assert.ok(steps.length >= 10, `expected the checkout plus the ten named steps, got ${steps.length}`);
 });
@@ -125,17 +95,18 @@ test('it runs when package.json changes on main, or when started by hand, and ne
   assert.doesNotMatch(on, /pull_request/);
 });
 
-test('the job only runs for main, so a hand-started run from another branch is skipped', () => {
-  assert.match(jobs, /^ {4}if: github\.ref == 'refs\/heads\/main'$/m);
+test('the release job only runs for main, so a hand-started run from another branch is skipped', () => {
+  assert.equal(jobKey(release, 'if'), "github.ref == 'refs/heads/main'");
 });
 
-test('permissions default to read and only the release job may write', () => {
+test('permissions default to read; only the release job may write contents and only the image job may write packages', () => {
   assert.match(sections.permissions, /^permissions:\n {2}contents: read\n/);
   assert.doesNotMatch(sections.permissions, /write/);
 
-  const writes = yml.match(/:\s*write\b/g) || [];
-  assert.equal(writes.length, 1, 'exactly one write permission in the whole file');
-  assert.match(jobs, /^ {4}permissions:\n {6}contents: write\n/m, 'and it sits on the release job');
+  const writes = yml.match(/[\w-]+:\s*write\b/g) || [];
+  assert.deepEqual(writes.sort(), ['contents: write', 'packages: write'], 'exactly these two write permissions in the whole file');
+  assert.match(release.text, /^ {4}permissions:\n {6}contents: write\n/m, 'contents: write sits on the release job');
+  assert.doesNotMatch(release.text, /packages:/, 'and the release job, which runs the tests, cannot publish a package');
   assert.doesNotMatch(yml, /write-all/);
 });
 
@@ -144,49 +115,67 @@ test('releases are serialised and never cancelled half way', () => {
   assert.match(sections.concurrency, /^ {2}cancel-in-progress: false$/m);
 });
 
-test('the job has a timeout', () => {
-  const m = jobs.match(/^ {4}timeout-minutes: (\d+)$/m);
+test('every job has a timeout', () => {
+  for (const job of Object.values(workflow.jobs)) {
+    const m = job.text.match(/^ {4}timeout-minutes: (\d+)$/m);
 
-  assert.ok(m, 'timeout-minutes is set on the job');
-  assert.ok(Number(m[1]) > 0 && Number(m[1]) <= 60, `a sane timeout, got ${m[1]}`);
+    assert.ok(m, `timeout-minutes is set on the ${job.name} job`);
+    assert.ok(Number(m[1]) > 0 && Number(m[1]) <= 60, `a sane timeout for ${job.name}, got ${m[1]}`);
+  }
 });
 
 test('checkout does not leave the token in .git/config', () => {
-  const checkout = steps.find(s => /uses: actions\/checkout@/.test(s));
+  for (const job of Object.values(workflow.jobs)) {
+    const checkout = job.steps.find(s => /uses: actions\/checkout@/.test(s));
 
-  assert.ok(checkout, 'the job checks the repository out');
-  assert.match(checkout, /^ {10}persist-credentials: false$/m);
+    assert.ok(checkout, `the ${job.name} job checks the repository out`);
+    assert.match(checkout, /^ {10}persist-credentials: false$/m, `${job.name}: a later step could push with a token left in .git/config`);
+  }
 });
 
 test('every action is pinned to a full commit SHA with a version comment', () => {
-  const uses = yml.split('\n').filter(l => /^\s*(- )?uses:/.test(l));
+  const uses = usesLines(yml);
   const unpinned = uses.filter(l => !/uses:\s+[\w.-]+\/[\w./-]+@[0-9a-f]{40}\s+#\s+v\d+\.\d+\.\d+\s*$/.test(l));
 
   assert.ok(uses.length >= 2, `expected at least checkout and setup-node, got ${uses.length}`);
   assert.deepEqual(unpinned, [], 'a tag can be moved after review; a SHA cannot');
 });
 
-test('no third-party release action: only first-party actions/*, and gh does the publishing', () => {
-  const owners = [...yml.matchAll(/uses:\s+([\w.-]+)\//g)].map(m => m[1]);
+test('no third-party release action: the release job uses only first-party actions/*, and gh does the publishing', () => {
+  const owners = [...release.text.matchAll(/uses:\s+([\w.-]+)\//g)].map(m => m[1]);
 
   assert.deepEqual([...new Set(owners)], ['actions']);
   assert.match(runScript(stepNamed(NAMES.create)), /^gh release create /m);
+});
+
+test('the release job hands the image job the tag, the version and whether the release already existed', () => {
+  const outputs = release.text.match(/^ {4}outputs:\n((?: {6}.+\n)+)/m);
+
+  assert.ok(outputs, 'the release job declares outputs');
+  assert.match(outputs[1], /^ {6}tag: \$\{\{ steps\.version\.outputs\.tag \}\}$/m);
+  assert.match(outputs[1], /^ {6}version: \$\{\{ steps\.version\.outputs\.version \}\}$/m);
+  assert.match(outputs[1], /^ {6}exists: \$\{\{ steps\.check\.outputs\.exists \}\}$/m);
 });
 
 test('the tests run on Node 22', () => {
   assert.match(stepNamed(NAMES.node), /^ {10}node-version: 22$/m);
 });
 
-test('GH_TOKEN is set only on the two steps that call gh', () => {
+test('GH_TOKEN is set only on the two steps that call gh, and never in the image job', () => {
   const withToken = steps.filter(s => /GH_TOKEN/.test(s)).map(nameOf);
 
   assert.deepEqual(withToken.sort(), [NAMES.check, NAMES.create].sort());
   assert.equal((yml.match(/GH_TOKEN: \$\{\{ github\.token \}\}/g) || []).length, 2);
+  assert.doesNotMatch((workflow.jobs.image || { text: '' }).text, /GH_TOKEN/);
 });
 
 test('no run: script interpolates a ${{ }} expression; values arrive through env', () => {
-  const offenders = steps.filter(s => /\$\{\{/.test(runScript(s))).map(s => nameOf(s) || s.split('\n')[0]);
+  const every = Object.values(workflow.jobs).flatMap(job => job.steps.map(s => ({ job: job.name, step: s })));
+  const offenders = every
+    .filter(({ step }) => /\$\{\{/.test(runScript(step)))
+    .map(({ job, step }) => `${job}: ${nameOf(step) || step.split('\n')[0]}`);
 
+  assert.ok(every.length > steps.length, 'precondition: the image job is scanned too');
   assert.deepEqual(offenders, [], 'interpolating into a shell is how workflow injection happens');
 });
 
@@ -237,6 +226,13 @@ test('the release is titled with the tag and pinned to the commit that was teste
 
 test('package.json carries a plain X.Y.Z version, the only shape the workflow will tag', () => {
   assert.match(pkg.version, /^\d+\.\d+\.\d+$/);
+});
+
+test('package-lock.json names the same version as package.json, in both places npm writes it', () => {
+  const lock = require(path.join(ROOT, 'package-lock.json'));
+
+  assert.equal(lock.version, pkg.version, 'the lockfile top-level version');
+  assert.equal(lock.packages[''].version, pkg.version, 'the lockfile root package entry');
 });
 
 test('CHANGELOG.md has a dated section for the version in package.json', () => {

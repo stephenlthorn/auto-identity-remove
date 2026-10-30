@@ -10,6 +10,13 @@
 # test/docker-build-contract.test.js enforces the match; do not bump one without
 # the other.
 #
+# Prebuilt: every release publishes this image for linux/amd64 and linux/arm64 to
+# ghcr.io/stephenlthorn/auto-identity-remove, so you only build it yourself to work
+# on the tool or for another architecture. The release workflow builds it from this
+# file and launches Chromium in it before it publishes anything.
+#
+#   docker pull ghcr.io/stephenlthorn/auto-identity-remove:latest
+#
 # Build:  docker build -t auto-identity-remove .
 #
 # Everything the container must keep lives in ONE host directory, mounted at

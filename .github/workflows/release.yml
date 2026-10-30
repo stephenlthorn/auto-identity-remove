@@ -12,8 +12,17 @@ name: Release
 # notice and no error: a push that touches package.json for any other reason
 # (a dependency bump) must not fail or re-release.
 #
-# test/release-workflow.test.js pins the properties below and runs the scripts in
-# this file against a stub `gh`.
+# The `image` job then publishes the container image for that release to
+# ghcr.io/stephenlthorn/auto-identity-remove (linux/amd64 and linux/arm64), so a
+# Synology NAS pulls it instead of building it (issue #8). It runs after a run
+# that created a release, and when the workflow is started by hand against a
+# release that already exists: that is how an image is rebuilt if its job failed.
+# A push that finds the release already there does not rebuild it. GHCR shows a
+# download count on the package page, the counterpart of the release asset count.
+#
+# test/release-workflow.test.js pins the properties of the workflow and the
+# release job, and runs its scripts against a stub `gh`. test/image-workflow.test.js
+# pins the image job.
 
 on:
   push:
@@ -43,6 +52,12 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: write
+    # What the image job needs: which tag the release is at, and whether this run
+    # made it or found it already there.
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      exists: ${{ steps.check.outputs.exists }}
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -153,3 +168,116 @@ jobs:
             --title "$TAG" \
             --notes-file "$RUNNER_TEMP/release-notes.md" \
             --target "$GITHUB_SHA"
+
+  # Publishes the image for a release that exists. It needs the release job to
+  # have succeeded, so a failed test run or a failed release never gets an image.
+  #
+  # `exists == 'false'` means this run just created the release (the job succeeded,
+  # so every step guarded on it ran). A hand-started run may also rebuild the image
+  # for a release that was already there. A push that found the release already
+  # there must not: that is a package.json edit that was not a version bump.
+  #
+  # The only job allowed to write packages. It builds from the release TAG, not from
+  # whatever main has moved to, which is also what makes a rebuild of an older
+  # release come out right. Nothing is pushed until the amd64 image has been built,
+  # loaded and made to launch Chromium: a broken image must never be published.
+  image:
+    needs: release
+    runs-on: ubuntu-latest
+    if: >-
+      github.ref == 'refs/heads/main'
+      && github.repository == 'stephenlthorn/auto-identity-remove'
+      && (needs.release.outputs.exists == 'false'
+      || (github.event_name == 'workflow_dispatch' && needs.release.outputs.exists == 'true'))
+    # arm64 under QEMU running `npm ci` is the slow part.
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/stephenlthorn/auto-identity-remove
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: refs/tags/${{ needs.release.outputs.tag }}
+          persist-credentials: false
+
+      # The labels come from the tree that is about to be built. A tag whose
+      # package.json says another version would publish an image whose version
+      # label is a lie, so that stops the job here.
+      - name: Read the image metadata
+        id: meta
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
+        run: |
+          declared="$(node -p "require('./package.json').version")"
+          if [ "$declared" != "$VERSION" ]; then
+            echo "::error::The release is $VERSION but the checked-out package.json says $declared, so the image would carry the wrong version label."
+            exit 1
+          fi
+          license="$(node -p "require('./package.json').license || ''")"
+          if [ -z "$license" ]; then
+            echo "::error::package.json has no license, so the org.opencontainers.image.licenses label would be empty."
+            exit 1
+          fi
+          # One line each: a newline inside a value would add outputs of its own.
+          description="$(node -p "String(require('./package.json').description || '').split(/\s+/).filter(Boolean).join(' ')")"
+          {
+            echo "version=$declared"
+            echo "license=$license"
+            echo "description=$description"
+            echo "revision=$(git rev-parse HEAD)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        with:
+          platforms: arm64
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # The same build and the same smoke test as the `docker` job in test.yml. This
+      # build shares its layers with the push below, so amd64 is not built twice.
+      - name: Build the amd64 image for the smoke test
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          push: false
+          provenance: false
+          tags: aidr-image-smoke
+
+      - name: Chromium must launch inside the image
+        run: docker run --rm --init aidr-image-smoke node scripts/ci/docker-smoke.js
+
+      # Only now does the job touch the registry.
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # org.opencontainers.image.source is what links the package to this
+      # repository on GitHub, and gives it the repository's permissions. No
+      # provenance or SBOM attestation: they add `unknown/unknown` entries to the
+      # image index, and the index should list the two platforms people pull.
+      - name: Build and push the multi-arch image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          provenance: false
+          tags: |
+            ${{ env.IMAGE }}:${{ steps.meta.outputs.version }}
+            ${{ env.IMAGE }}:latest
+          labels: |
+            org.opencontainers.image.source=https://github.com/stephenlthorn/auto-identity-remove
+            org.opencontainers.image.version=${{ steps.meta.outputs.version }}
+            org.opencontainers.image.licenses=${{ steps.meta.outputs.license }}
+            org.opencontainers.image.description=${{ steps.meta.outputs.description }}
+            org.opencontainers.image.revision=${{ steps.meta.outputs.revision }}

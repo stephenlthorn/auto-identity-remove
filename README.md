@@ -96,8 +96,11 @@ cd auto-identity-remove
   `scripts/prune-dead.js` can add to) is replaced by the release's copy. For a clean
   tree, unpack into a new folder and copy `config.json` and `state.json` across.
 - **Git install.** `git pull && bash install.sh`.
-- **Docker or Synology.** Update the folder as above, then rebuild the image:
-  `docker build -t auto-identity-remove .` (compose: `docker compose build`).
+- **Docker or Synology.** Pull the new image:
+  `docker pull ghcr.io/stephenlthorn/auto-identity-remove:latest` (compose:
+  `docker compose pull`). Your `aidr-home` is not part of the image, so it stays. If you
+  built the image yourself, update the folder as above and rebuild it:
+  `docker build -t auto-identity-remove .`.
 
 Check what is installed with `node bin/aidr.js --version`. What changed between releases is in
 [CHANGELOG.md](CHANGELOG.md).
@@ -234,9 +237,22 @@ earlier versions moved straight on. Scheduled runs (no terminal) are unchanged. 
 
 ## Running with Docker
 
-The `Dockerfile` uses the official Playwright image, so Chromium and all system
-dependencies are pre-installed. No Mac required. Builds for `linux/amd64` and
-`linux/arm64`; the amd64 image is about 940 MB.
+Every release publishes a prebuilt image to GitHub Container Registry, for
+`linux/amd64` and `linux/arm64`. It is built on the official Playwright image, so
+Chromium and all system dependencies are already in it. No Mac, no source download
+and no build: on a small box that saves building about 940 MB of Playwright on a slow
+CPU.
+
+```bash
+docker pull ghcr.io/stephenlthorn/auto-identity-remove:latest
+```
+
+`latest` is the newest release. To stay on one you have checked, use its version tag
+instead, for example `ghcr.io/stephenlthorn/auto-identity-remove:2.0.1` (compose:
+`AIDR_VERSION=2.0.1`). The tags are on the
+[package page](https://github.com/stephenlthorn/auto-identity-remove/pkgs/container/auto-identity-remove).
+The image holds no config, state or logs; those are the one directory below. To build
+the image from this source instead, see [Building the image yourself](#building-the-image-yourself).
 
 ### One directory holds everything
 
@@ -250,13 +266,11 @@ those subdirectories itself. Back it up and treat it like `config.json`: it is
 full of PII.
 
 ```bash
-# Once, from the project directory
+# Once, in any directory
 mkdir -p aidr-home
 cp config.json aidr-home/config.json        # made on a laptop with `node setup.js`
 chmod 700 aidr-home && chmod 600 aidr-home/config.json
 sudo chown -R 1001:1001 aidr-home           # the container user is uid 1001
-
-docker build -t auto-identity-remove .
 ```
 
 ```bash
@@ -265,13 +279,15 @@ docker run --rm --init \
   -v "$(pwd)/aidr-home:/home/aidr" \
   -e HOME=/tmp \
   -e TZ="$(date +%Z)" \
-  auto-identity-remove node watcher.js --dry-run
+  ghcr.io/stephenlthorn/auto-identity-remove:latest node watcher.js --dry-run
 
 # Full run: the same command without the trailing `node watcher.js --dry-run`
 ```
 
-Or with compose, which already carries the mount and the variable:
-`docker compose run --rm watcher node watcher.js --dry-run`.
+Or with compose, which already carries the mount and the variable, from a folder
+holding `docker-compose.yml` and your `aidr-home`: `docker compose run --rm watcher
+node watcher.js --dry-run`. It pulls the same image the first time and uses the copy it
+has after that; `docker compose pull` updates it.
 
 **`AIDR_HOME` and its overrides.** `AIDR_HOME` is the default base for every
 runtime file. Each of these still wins over it for one file, if you ever need it
@@ -376,8 +392,29 @@ A relative `email.smtp.ca` path resolves against `/app`; use an absolute path
 under `/home/aidr` for a certificate you keep in the mounted directory.
 
 > **Synology / NAS users:** see [docs/SYNOLOGY.md](docs/SYNOLOGY.md) for a full
-> DSM Container Manager walkthrough, measured memory numbers, DSM Task Scheduler
-> setup, and the three defects that used to make the container unusable.
+> DSM Container Manager walkthrough that needs no source download and no build,
+> measured memory numbers, DSM Task Scheduler setup, and the three defects that used
+> to make the container unusable.
+
+### Building the image yourself
+
+You do not need to: the published image above is built from this source by the release
+workflow, after it has launched Chromium in it. Build it yourself to work on the tool, for
+an architecture the image is not published for, or to run a change that is not released
+yet. From the project directory:
+
+```bash
+docker build -t auto-identity-remove .
+```
+
+Then use `auto-identity-remove` in place of `ghcr.io/stephenlthorn/auto-identity-remove:latest`
+in the recipes above. With compose, `docker-compose.build.yml` adds the build to the same
+service, and the default `docker-compose.yml` has no `build:` on purpose (its header says why):
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.build.yml build
+docker compose run --rm watcher node watcher.js --dry-run
+```
 
 ### Encrypted config and unattended runs
 
@@ -1055,6 +1092,19 @@ the tests, builds `auto-identity-remove.tar.gz` and its `.sha256` with
 `scripts/release-archive.sh`, and creates the `vX.Y.Z` release with both attached. A
 version that already has a release or tag is left alone, and a missing CHANGELOG section
 fails the run.
+
+The same run then publishes the container image, `ghcr.io/stephenlthorn/auto-identity-remove`
+for `linux/amd64` and `linux/arm64`, tagged `X.Y.Z` and `latest`. The `image` job builds from
+the `vX.Y.Z` tag and pushes nothing until Chromium has launched in the built image. If it
+fails, the release is already out: start the workflow by hand from `main` (Actions, Release,
+Run workflow), which rebuilds the image for the release that exists and does nothing else.
+
+**Once, after the first image is published:** GitHub creates a new package private, and a
+linked repository's permissions are inherited but its visibility is not. Until the package
+is public, `docker pull` fails with `denied` or `403` for everyone but you. Open the package
+(`https://github.com/stephenlthorn/auto-identity-remove/pkgs/container/auto-identity-remove`),
+Package settings, Danger Zone, Change visibility, Public. It cannot be made private again.
+The package page then shows the pull count for the image.
 
 GitHub counts downloads only for files attached to a release, so the numbers are on the
 release assets (`assets[].download_count`):
