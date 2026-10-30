@@ -87,6 +87,24 @@ const MAILTO_WITH_QUERY = /\bmailto:[^\s?<>"')\]]*\?[^\s<>"')\]]*/gi;
 const URL_IN_TEXT = /\bhttps?:\/\/[^\s<>"')\]]*/gi;
 
 /**
+ * `text` with every URL reduced to its host and every mailto: query cut, and
+ * nothing else changed (line breaks, length and quoting are kept, so a JSON or
+ * text log stays what it was). For the raw log routes, where redactDetail's
+ * control-character and length handling would damage the file.
+ *
+ * @param {*} text
+ * @returns {string}  "" for anything that is not a string
+ */
+function redactUrls(text) {
+  if (typeof text !== 'string') return '';
+  return text
+    .replace(MAILTO_WITH_QUERY, m => m.slice(0, m.indexOf('?')))
+    .replace(URL_IN_TEXT, m => {
+      try { return new URL(m).hostname || '[url]'; } catch (_) { return '[url]'; }
+    });
+}
+
+/**
  * A broker result's detail with every URL reduced to its host. A query string or
  * path can hold the user's email, zip or name, and a mailto: link's query can be
  * a pre-filled message body, so those are cut as well. Control characters become
@@ -97,11 +115,7 @@ const URL_IN_TEXT = /\bhttps?:\/\/[^\s<>"')\]]*/gi;
  */
 function redactDetail(text) {
   if (typeof text !== 'string') return '';
-  let out = text.replace(CONTROL, ' ');
-  out = out.replace(MAILTO_WITH_QUERY, m => m.slice(0, m.indexOf('?')));
-  out = out.replace(URL_IN_TEXT, m => {
-    try { return new URL(m).hostname || '[url]'; } catch (_) { return '[url]'; }
-  });
+  let out = redactUrls(text.replace(CONTROL, ' '));
   out = out.trim();
   return out.length > MAX_DETAIL ? `${out.slice(0, MAX_DETAIL)}...` : out;
 }
@@ -337,4 +351,4 @@ function readRun(logsDir, id) {
   return { ok: true, run, rows, truncated: read.rows.length > MAX_ROWS, rowCount: read.rows.length };
 }
 
-module.exports = { listRuns, latestRun, readRun, redactDetail, isRunId, MAX_LIMIT, MAX_ROWS, MAX_RUN_BYTES };
+module.exports = { listRuns, latestRun, readRun, redactDetail, redactUrls, isRunId, MAX_LIMIT, MAX_ROWS, MAX_RUN_BYTES };

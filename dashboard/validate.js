@@ -35,10 +35,14 @@
 
 'use strict';
 
+const net = require('net');
+
 // Modes that perform real, outward-facing actions (submit PII to brokers, click
 // confirmation links, retry live submissions). These require explicit confirm.
 const LIVE_MODES = new Set(['real', 'retry', 'snapshot', 'confirm']);
 
+// The placeholder dashboard/examples/aidr-dashboard.service used to ship. Never a credential.
+const EXAMPLE_PASSWORD = 'change-me';
 const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
 const MAX_FILTER_LENGTH = 4096;
 const MAX_USERNAME_LENGTH = 64;
@@ -107,6 +111,17 @@ function classifyStatus(status) {
 function resolveEnvCreds(envUser, envPass) {
   const hasUser = typeof envUser === 'string' && envUser.length > 0;
   const hasPass = typeof envPass === 'string' && envPass.length > 0;
+  // The password the shipped example service file used to carry. Anyone who copied
+  // the file and forgot to edit it would otherwise protect the dashboard (which
+  // edits PII and starts real runs) with a password that is public.
+  if (hasPass && envPass === EXAMPLE_PASSWORD) {
+    return {
+      envUser: '',
+      envPass: '',
+      envConfigured: false,
+      warning: `AIDR_PASS is still the example value "${EXAMPLE_PASSWORD}" - env credentials ignored. Set a real password.`,
+    };
+  }
   if (hasUser && hasPass) {
     return { envUser, envPass, envConfigured: true };
   }
@@ -293,7 +308,9 @@ function hostnameOf(hostHeader) {
  */
 function isLoopbackHost(host) {
   const h = String(host || '').toLowerCase().replace(/^\[|\]$/g, '');
-  return h === 'localhost' || h.endsWith('.localhost') || h === '::1' || /^127\./.test(h);
+  // A literal 127.x.y.z only: matching the prefix alone also took 127.evil.example
+  // and 127.0.0.1.nip.io, names an attacker controls (CFG2-3).
+  return h === 'localhost' || h.endsWith('.localhost') || h === '::1' || (net.isIPv4(h) && h.startsWith('127.'));
 }
 
 const WILDCARD_BINDS = new Set(['', '0.0.0.0', '::', '[::]']);
@@ -336,18 +353,35 @@ function isHostAllowed(hostHeader, allowed) {
 }
 
 /**
- * Decide whether the server may start on `host`. A non-loopback bind with no
- * credentials hands every machine on the network the config editor (names,
- * addresses, SMTP password) and a button that submits real opt-outs, so it is a
- * refusal rather than the warning it used to be.
+ * Decide whether the server may start on `host`.
  *
- * @param {{ host: string, authConfigured: boolean }} opts
- * @returns {{ ok: true } | { ok: false, error: string }}
+ * Credentials are required on every bind, loopback included (codex round 2 #1):
+ * "loopback only" is not a boundary on a machine with other local accounts, and
+ * the dashboard edits personal data and can submit real opt-outs. The one way to
+ * run without them is the explicit AIDR_DASHBOARD_NO_AUTH=1 (`allowNoAuth`), meant
+ * for tests and local development, and it is honoured on loopback only: a network
+ * bind with no credentials hands every machine on the network the config editor
+ * (names, addresses, SMTP password) and a button that submits real opt-outs.
+ *
+ * @param {{ host: string, authConfigured: boolean, allowNoAuth?: boolean }} opts
+ * @returns {{ ok: true } | { ok: false, code: string, error: string }}
  */
-function checkBindSafety({ host, authConfigured }) {
-  if (isLoopbackHost(host) || authConfigured) return { ok: true };
+function checkBindSafety({ host, authConfigured, allowNoAuth = false }) {
+  if (authConfigured) return { ok: true };
+  if (isLoopbackHost(host)) {
+    if (allowNoAuth) return { ok: true };
+    return {
+      ok: false,
+      code: 'AIDR_NO_CREDENTIALS',
+      error: `refusing to listen on ${host} with no credentials: the dashboard edits personal data and can `
+        + 'submit real opt-outs, and other accounts on this machine can reach a loopback port. '
+        + 'Run `aidr dashboard` (it generates a login), or set AIDR_USER and AIDR_PASS (or AIDR_TOKEN). '
+        + 'For local development only, AIDR_DASHBOARD_NO_AUTH=1 turns authentication off on a loopback bind.',
+    };
+  }
   return {
     ok: false,
+    code: 'AIDR_UNSAFE_BIND',
     error: `refusing to listen on ${host} with no credentials: the dashboard edits personal data and can `
       + 'submit real opt-outs. Set AIDR_USER and AIDR_PASS (or AIDR_TOKEN), or bind AIDR_HOST=127.0.0.1.',
   };
