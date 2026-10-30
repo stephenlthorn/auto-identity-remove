@@ -14,7 +14,7 @@
 
 const path = require('path');
 const { spawn } = require('child_process');
-const { resolveCommand, resolveSpawnTarget, buildHelp } = require('../lib/cli-map');
+const { resolveCommand, resolveSpawnTarget, absolutizePathEnv, buildHelp } = require('../lib/cli-map');
 const {
   generateDashboardCreds, resolveAuthFile, hasSavedCredentials,
   findExpress, expressMissingMessage, formatBanner,
@@ -65,7 +65,9 @@ function startDashboard(resolved) {
     process.exit(1);
   }
 
-  const env = { ...process.env };
+  // Relative AIDR_* paths mean "relative to where the user ran this", as they do for
+  // run.sh, not to the dashboard directory the child starts in (CLI2-12).
+  const env = absolutizePathEnv(process.env, process.cwd());
   // dashboard/.auth.json (credentials changed in the Admin tab) overrides
   // AIDR_USER/AIDR_PASS, so inventing a password next to one would print a login
   // that 401s. With a saved file, or credentials already in the environment,
@@ -92,7 +94,8 @@ function startDashboard(resolved) {
 function spawnNode(resolved) {
   if (resolved.command === 'dashboard') return startDashboard(resolved);
   const { cwd, args } = resolveSpawnTarget(resolved, ROOT);
-  superviseChild(spawn(process.execPath, args, { cwd, env: { ...process.env }, stdio: 'inherit' }), resolved);
+  // The child starts in the repo root; a relative AIDR_* path must not follow it there (CLI2-12).
+  superviseChild(spawn(process.execPath, args, { cwd, env: absolutizePathEnv(process.env, process.cwd()), stdio: 'inherit' }), resolved);
 }
 
 function main() {
