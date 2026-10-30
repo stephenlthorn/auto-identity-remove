@@ -39,6 +39,7 @@
 const path = require('path');
 const fs   = require('fs');
 const os   = require('os');
+const crypto = require('crypto');
 
 // The three datasets below ship with the app and always load from it. The feeds
 // cache is written by --update-brokers, so it lives in the writable data
@@ -1501,28 +1502,42 @@ function hostOfBroker(broker) {
 // fsync'd rename per row would be ~490 disk writes for nothing.
 const CHECKPOINT_MIN_INTERVAL_MS = 1000;
 
+// A short stable fingerprint of a state key, so a checkpoint can list the rows it
+// finished without carrying their names (a few KB for a full pass).
+const keyHash = (key) => crypto.createHash('sha1').update(String(key)).digest('hex').slice(0, 10);
+
 /**
- * Where in `queue` a resumed pass should start.
+ * Where in `queue` a resumed pass should start, and which later rows it skips.
  *
- * The checkpoint holds { index, key }. The index is only a hint: the dataset (the
- * Markup list, BADBOOL, the registry feeds) can change between an interrupted run
- * and its --resume, and the --only/--skip filters change what is in `queue`. So the
- * row at `index` must still carry `key`, else `key` is looked up by name. A key that
- * cannot be found means we cannot tell what was already done, and the only safe
- * answer is to start over: skipping on an unverified index could leave brokers
- * that were never submitted looking handled.
+ * The checkpoint holds { index, key } and, when the run asked for it
+ * (opts.checkpointDone), `done`: fingerprints of the rows it had finished. The index
+ * is only a hint: the dataset (the Markup list, BADBOOL, the registry feeds) can change
+ * between an interrupted run and its --resume, and the --only/--skip filters change
+ * what is in `queue`. So the row at `index` must still carry `key`.
+ *
+ * If it does, nothing moved and everything before it is done. If it does not, rows
+ * were added or removed before the checkpoint, and "everything above the key" no longer
+ * means "everything that was finished": skipping it would leave a row inserted there
+ * unprocessed for the whole month (BRK2-9). So:
+ *   - with `done`, exactly the finished rows are skipped and every other row runs
+ *     (the one in progress and any new one included);
+ *   - without it, the pass starts over; rows that already have a recent result are
+ *     skipped cheaply by the per-row state check, and none is skipped on a guess.
+ * A key that cannot be found at all means we cannot tell what was done either, so
+ * that also starts over.
  *
  * Two rows can share a name; the FIRST is taken, so a duplicate never makes a
  * resume skip further than the interrupted run got.
  *
  * @param {Array<{ name: string }>} queue  the rows that will run, in order
- * @param {{ index?: number|null, key?: string }|null|undefined} resumeFrom
+ * @param {{ index?: number|null, key?: string, done?: string[] }|null|undefined} resumeFrom
  * @param {(brokerName: string) => string} keyFor  broker name -> state key
- * @returns {{ start: number, note: string|null }}  note is a line for the operator, or null
+ * @returns {{ start: number, note: string|null, skip?: Set<number> }}  `skip` holds
+ *   rows after `start` that were already finished; note is a line for the operator
  */
 function resolveResumeStart(queue, resumeFrom, keyFor) {
   if (!resumeFrom) return { start: 0, note: null };
-  const { index, key } = resumeFrom;
+  const { index, key, done } = resumeFrom;
   if (typeof key !== 'string' || key === '') {
     return { start: 0, note: '--resume: the generic checkpoint names no broker to verify, starting the generic pass over' };
   }
@@ -1533,10 +1548,23 @@ function resolveResumeStart(queue, resumeFrom, keyFor) {
   if (found === -1) {
     return { start: 0, note: `--resume: checkpoint broker "${label}" is not in the generic list any more, starting the generic pass over` };
   }
-  const note = Number.isInteger(index)
-    ? `--resume: "${label}" moved in the generic list (row ${index + 1} -> ${found + 1}); continuing there`
-    : `--resume: continuing the generic pass at "${label}" (row ${found + 1})`;
-  return { start: found, note };
+  if (Array.isArray(done)) {
+    const finished = new Set(done);
+    const skip = new Set();
+    queue.forEach((broker, i) => {
+      if (i !== found && finished.has(keyHash(keyFor(broker.name)))) skip.add(i);
+    });
+    return {
+      start: 0,
+      skip,
+      note: `--resume: the generic list changed since the interrupted run; skipping the ${skip.size} row(s) it had finished and running the rest, new rows included`,
+    };
+  }
+  const where = Number.isInteger(index) ? ` (row ${index + 1} -> ${found + 1})` : '';
+  return {
+    start: 0,
+    note: `--resume: "${label}" moved in the generic list${where}, so the rows before it cannot be assumed finished; starting the generic pass over (rows with a recent result are skipped)`,
+  };
 }
 
 async function runGenericBrokers(context, explicitBrokerHosts, state, logResult, recordSuccess, opts = {}) {
@@ -1572,9 +1600,16 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
   console.log(`\n── Generic brokers (${queue.length} from Markup CSV + BADBOOL)${dryRun ? ' [DRY RUN]' : ''} ──`);
 
   // --resume: pick the pass back up where an interrupted run left it (R2).
-  const { start, note: resumeNote } = resolveResumeStart(queue, opts.resumeFrom, keyFor);
+  const { start, note: resumeNote, skip: finishedRows = new Set() } = resolveResumeStart(queue, opts.resumeFrom, keyFor);
   if (resumeNote) console.log(resumeNote);
   else if (start > 0) console.log(`--resume: skipping ${start} generic broker(s) already covered`);
+  // Rows this pass has finished or inherited as finished, in checkpoint form. Only
+  // written into the checkpoint when the caller asks (opts.checkpointDone): the stored
+  // record then lets a later --resume skip exactly these rows even if the list changed.
+  const doneKeys = [
+    ...queue.slice(0, start).map(b => keyHash(keyFor(b.name))),
+    ...[...finishedRows].map(i => keyHash(keyFor(queue[i].name))),
+  ];
 
   // Checkpoint the pass as it advances so a kill leaves a resume point. The record
   // is written BEFORE its broker runs, so it never points past an unprocessed row:
@@ -1598,6 +1633,7 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
   const checkpointRow = (index, broker) => {
     if (dryRun || typeof opts.saveCheckpoint !== 'function') return;
     const record = { phase: 'generic', personIndex: opts.personIndex === undefined ? 0 : opts.personIndex, key: keyFor(broker.name), index };
+    if (opts.checkpointDone) record.done = [...doneKeys];
     const at = checkpointClock();
     // A clock that stepped backwards (NTP) must not mute checkpoints until it catches up.
     const sinceLast = at - lastCheckpointAt;
@@ -1669,6 +1705,7 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
   try {
     let retriedRow = -1;
     for (let rowIndex = start; rowIndex < queue.length && !browserClosed; rowIndex++) {
+      if (finishedRows.has(rowIndex)) continue;
       const broker = queue[rowIndex];
       checkpointRow(rowIndex, broker);
       process.stdout.write(`\n  [${broker.name.slice(0,40)}]… `);
@@ -1688,6 +1725,7 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
         }
       }
       reached++;
+      doneKeys.push(keyHash(keyFor(broker.name)));
 
       // Rows are named by company, so record which host this one was about:
       // scripts/prune-dead.js can only judge a host it can see in the run log.
@@ -1753,8 +1791,8 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
 
   return {
     // The rows that ran (a resumed pass does not count the rows it skipped).
-    count: browserClosed ? reached : queue.length - start,
-    resumeSkipped: start,
+    count: browserClosed ? reached : queue.length - start - finishedRows.size,
+    resumeSkipped: start + finishedRows.size,
     ...(browserClosed ? { browserClosed: true, stoppedAt: start + reached } : {}),
     genericStats: {
       attempted: stats.attempted,
