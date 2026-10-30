@@ -21,7 +21,7 @@ const os   = require('os');
 // that sends the user's name, address and phone to ~540 sites (CORE-6).
 const ARGS = require('./lib/args').parseWatcherArgsOrExit();
 
-const { STATE_PATH, CONFIG_PATH, CONFIG_ENC_PATH, RECHECK_DAYS, loadConfig, loadState, resetState, saveState, recordSuccess, setDryRun, getPersonsFromConfig, loadCheckpoint, saveCheckpoint, clearCheckpoint, findResumeIndex, planResume, readEntry, validateRunnableConfig } = require('./lib/config');
+const { STATE_PATH, CONFIG_PATH, CONFIG_ENC_PATH, RECHECK_DAYS, loadConfig, loadState, resetState, saveState, recordSuccess, setDryRun, getPersonsFromConfig, loadCheckpoint, saveCheckpoint, clearCheckpoint, findResumeIndex, planResume, readEntry, validateRunnableConfig, stateProblem } = require('./lib/config');
 const { results, logResult, buildSummary, setDefunctBrokers, setCurrentPerson, setStateForSummary, setJournal } = require('./lib/logger');
 const { findDefunct, DEFUNCT_THRESHOLD } = require('./lib/defunct');
 const { sendText, desktopNotify, sendWebhook, dispatchNotify, openInBrowser, canOpenBrowser, pickManualUrlsToOpen, manualUrlsFromResults } = require('./lib/notify');
@@ -243,6 +243,19 @@ function loadRunnableConfigOrExit() {
   }
   notifyConfig = config.notify;
   return { config, persons };
+}
+
+// A state.json this user cannot read (typically root-owned after a sudo run) loads
+// as an empty history, and saveState refuses to replace it (CFG2-2). That refusal
+// came after the lock, the browsers and the first broker, and a --confirm-emails run
+// had already clicked its link with nothing to record it in. A run that will save
+// state stops here instead, with the fix for the permissions; a dry run saves
+// nothing, so its callers do not ask.
+function exitOnUnreadableState() {
+  const problem = stateProblem();
+  if (!problem) return;
+  console.error(`❌ ${problem.message}`);
+  process.exit(1);
 }
 
 // The config and persons for a mode that only needs to read them.
@@ -638,6 +651,7 @@ async function modeConfirmEmails() {
   // Launch a minimal headless browser context just for navigating confirm links
   const chromiumForConfirm = loadChromium();
   const { config, persons } = loadConfigOrExit();
+  if (!DRY_RUN) exitOnUnreadableState();
 
   // Acquire the same process lock as the main run - processConfirmationEmails
   // calls recordSuccess -> saveState, so it must not race a concurrent run.
@@ -1699,6 +1713,7 @@ async function dispatch() {
   }
 
   const { config, persons } = loadRunnableConfigOrExit();
+  if (!DRY_RUN) exitOnUnreadableState();
   const state = loadState();
 
   if (KNOW_MODE)                       return modeKnow({ config, persons, state });
