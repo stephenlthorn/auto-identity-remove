@@ -206,6 +206,22 @@ as the `user:` in `docker-compose.yml` (uid 1001 unless you set `AIDR_UID`), so
 
 ## If something goes wrong
 
+**"config.json not found" right after an upgrade.** If you set the container up with
+the very first recipe, which bind-mounted `config.json` and `state.json` as two single
+files at `/app`, those mounts are ignored now: the image sets `AIDR_HOME=/home/aidr` and reads everything
+from the one directory you mount there. The run says where it found your files and where
+they must go. Copy **both** into `aidr-home` (`cp config.json state.json aidr-home/`) and
+mount the directory as in step 4. Copying only the config makes the next run re-submit every
+broker, because the history stayed behind; `docker compose run --rm watcher node watcher.js
+config check` warns about that while a `state.json` is still left at the old location.
+
+**`--encrypt-config` says it could not delete `config.json`.** A single-file mount cannot
+be removed from inside the container. The file is left untouched (never emptied: the
+encrypted copy may only exist in the container's throwaway layer). Check that
+`aidr-home/config.json.enc` is really on the volume, then delete `config.json` from DSM
+yourself. `config check` also lists any plaintext copy (`config.json.bak` from the
+dashboard, for example) that sits next to an encrypted config.
+
 ```bash
 # Is the browser actually launchable in your image?
 docker run --rm auto-identity-remove node -e \
