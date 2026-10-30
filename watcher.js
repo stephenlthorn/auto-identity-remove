@@ -44,6 +44,7 @@ const { openJournal, journalPathFor, countResults } = require('./lib/journal');
 const { startHeartbeat, defaultHeartbeatPath, outcomeFromResults } = require('./lib/heartbeat');
 const { applyRetention } = require('./lib/retention');
 const { isPlaceholderKey, detectAndSolveCaptcha } = require('./lib/captcha');
+const { RELAY_BROKER, relaySkippedNames, guardResumePlan } = require('./lib/resume-guard');
 const { handleCaptcha, resolveManualMode, manualTimeoutSec, captchaFailureDetail, announceCaptchaWait, captchaBrokersFromLog, captchaConfigWarnings } = require('./lib/manual-captcha');
 
 const PREVIEW           = ARGS.preview;
@@ -1262,7 +1263,14 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
   // explicit pass and the generic pass of every person come back to where they stopped.
   const savedCheckpoint = RESUME ? loadCheckpoint() : null;
   if (RESUME && !savedCheckpoint) console.log('\n--resume: no checkpoint found, running all brokers');
-  const resumePlan = planResume(savedCheckpoint, persons);
+  // planResume infers from a generic-phase checkpoint that every explicit pass ended,
+  // which is false for a person the interrupted run skipped because the relay was
+  // down. Take back every skip it made for someone the run's own record names.
+  const resumePlan = guardResumePlan(
+    planResume(savedCheckpoint, persons),
+    persons,
+    savedCheckpoint ? relaySkippedNames(LOG_DIR, { exclude: logFile }) : new Set(),
+  );
   const planFor = (i) => resumePlan[i] || { skipExplicit: false, explicitResumeKey: null, skipGeneric: false, genericResume: null };
 
   // The crash-safe journal (R3): every result is appended as it happens, so a kill
@@ -1286,7 +1294,7 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
   for (const { person, message } of unavailable) {
     setCurrentPerson(person);
     logResult(
-      'Masked-email relay',
+      RELAY_BROKER,
       'error',
       `unavailable (${message}); nothing was submitted for ${personName(person)}. Re-run once it works (a plain run: --retry-failed will not revisit them), or set relay.failOpen: true to send the real email`
     );
