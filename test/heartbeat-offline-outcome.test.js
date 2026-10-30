@@ -75,7 +75,28 @@ describe('outcomeFromResults when most hosts could not be resolved', () => {
   it('does not let skipped rows dilute the share: a skip made no request, so it is not a host that answered', () => {
     const end = outcomeFromResults({ dead: freshDead(12), skipped: rows(300) });
     assert.equal(end.offline, true);
-    assert.equal(end.outcome, 'partial', 'skipped rows are still progress for failed vs partial');
+  });
+
+  it('is failed when offline and the only other rows were skipped (a monthly run skips most explicit brokers)', () => {
+    const end = outcomeFromResults({ dead: freshDead(900), skipped: rows(102), manual: rows(14) });
+    assert.equal(end.outcome, 'failed');
+    assert.equal(end.offline, true);
+  });
+
+  it('is still partial when offline but something really was submitted, left unconfirmed, awaiting email or checked', () => {
+    for (const bucket of ['succeeded', 'pendingConfirm', 'unverified', 'notFound']) {
+      const end = outcomeFromResults({ dead: freshDead(12), skipped: rows(100), [bucket]: rows(1) });
+      assert.equal(end.outcome, 'partial', bucket);
+      assert.equal(end.offline, true, bucket);
+    }
+    const generic = outcomeFromResults({ dead: freshDead(12), skipped: rows(100), genericStats: { attempted: 14, submitted: 2, dead: 12 } });
+    assert.equal(generic.outcome, 'partial', 'generic submitted');
+  });
+
+  it('keeps skipped rows as progress when not offline: some errors beside a skipped majority stay partial', () => {
+    const end = outcomeFromResults({ errors: rows(2), skipped: rows(50), dead: freshDead(3) });
+    assert.equal(end.outcome, 'partial');
+    assert.notEqual(end.offline, true);
   });
 
   it('does not count cache hits in the tried total either', () => {
@@ -148,6 +169,7 @@ describe('a whole run on a machine that cannot resolve any host', () => {
 
       const heartbeat = JSON.parse(fs.readFileSync(path.join(sandbox.home, 'last-run.json'), 'utf8'));
       assert.equal(heartbeat.outcome, 'failed');
+      assert.equal(heartbeat.offline, true);
       assert.ok(heartbeat.counts.dead >= 10, `the dead rows are counted (${heartbeat.counts.dead})`);
       assert.doesNotMatch(JSON.stringify(heartbeat), /https?:|\.com|\.org/, 'numbers only, no host names');
     } finally {
@@ -155,7 +177,7 @@ describe('a whole run on a machine that cannot resolve any host', () => {
     }
   });
 
-  it('no longer reads as a healthy run when only the generic pass is dead and the explicit brokers were all fresh', async () => {
+  it('is a failed run, exit 1, when only the generic pass is dead and the explicit brokers were all fresh (the scheduled monthly case)', async () => {
     const day = 86400000;
     const stamp = new Date(Date.now() - 3 * day).toISOString();
     const optOuts = {};
@@ -166,12 +188,16 @@ describe('a whole run on a machine that cannot resolve any host', () => {
     const sandbox = createSandbox({ state: { optOuts } });
     try {
       // Before: no errors and no progress counted, so outcome ok, exit 0, with ~900 dead hosts.
+      // The skipped explicit brokers are not work this run did, so they are not progress.
       const run = await runWatcher(sandbox, [], { timeoutMs: 120000 });
       assert.equal(run.timedOut, false);
+      assert.equal(run.code, 1, run.stderr);
       assert.match(run.stdout, /most sites could not be resolved/i);
 
       const heartbeat = JSON.parse(fs.readFileSync(path.join(sandbox.home, 'last-run.json'), 'utf8'));
-      assert.equal(heartbeat.outcome, 'partial', 'the fresh explicit brokers are progress, the dead generic rows are errors');
+      assert.equal(heartbeat.outcome, 'failed');
+      assert.equal(heartbeat.offline, true, 'the heartbeat says why, for aidr schedule status');
+      assert.ok(heartbeat.counts.skipped > 0, 'the explicit brokers really were skipped');
       assert.ok(heartbeat.counts.dead >= 10);
       assert.equal(heartbeat.counts.errors, 0, 'the heartbeat counts stay what the run logged');
     } finally {
