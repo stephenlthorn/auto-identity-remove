@@ -17,6 +17,9 @@
  *   AIDR_TEST_JOURNAL_THROWS=1     openJournal() throws: a crash in the middle of a real
  *                                  run, which lands in the Fatal handler.
  *   AIDR_TEST_GENERIC_THROWS=1     runGenericBrokers() throws: a crash that a dry run reaches too.
+ *   AIDR_TEST_STATE_ON_LOCK=<file> just before lock.acquire() runs, the content of <file> is written to
+ *                                  AIDR_STATE_PATH: another run that finished after this one had already
+ *                                  loaded state.json at start-up.
  *   AIDR_TEST_SPY=1                records, as `configure` and `generic-opts`, what the watcher hands the
  *                                  explicit runner (the `partial` option) and the generic runner (whether
  *                                  it was given saveCheckpoint / getContext).
@@ -108,9 +111,21 @@ function spyOnGeneric(generic) {
   };
 }
 
+function stateOnLock(lock) {
+  if (spied.has(lock)) return;
+  spied.add(lock);
+  const acquire = lock.acquire;
+  lock.acquire = function acquireAfterAnotherRun() {
+    fs.writeFileSync(process.env.AIDR_STATE_PATH, fs.readFileSync(process.env.AIDR_TEST_STATE_ON_LOCK));
+    record('state-replaced', {});
+    return acquire.apply(this, arguments);
+  };
+}
+
 const originalLoad = Module._load;
 Module._load = function patchedLoad(request) {
   const result = originalLoad.apply(this, arguments);
+  if (process.env.AIDR_TEST_STATE_ON_LOCK && request === './lib/lock') stateOnLock(result);
   if (process.env.AIDR_TEST_SPY && request === './lib/broker-runner') spyOnBrokerRunner(result);
   if (process.env.AIDR_TEST_SPY && request === './generic-runner' && !process.env.AIDR_TEST_GENERIC_THROWS) return spyOnGeneric(result);
   if (request === 'playwright' && Number(process.env.AIDR_TEST_CLOSE_AFTER) >= 0 && process.env.AIDR_TEST_CLOSE_AFTER !== undefined && process.env.AIDR_TEST_CLOSE_AFTER !== '') {

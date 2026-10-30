@@ -21,7 +21,7 @@ const os   = require('os');
 // that sends the user's name, address and phone to ~540 sites (CORE-6).
 const ARGS = require('./lib/args').parseWatcherArgsOrExit();
 
-const { STATE_PATH, CONFIG_PATH, CONFIG_ENC_PATH, RECHECK_DAYS, loadConfig, loadState, saveState, recordSuccess, setDryRun, getPersonsFromConfig, loadCheckpoint, saveCheckpoint, clearCheckpoint, findResumeIndex, planResume, readEntry, validateRunnableConfig } = require('./lib/config');
+const { STATE_PATH, CONFIG_PATH, CONFIG_ENC_PATH, RECHECK_DAYS, loadConfig, loadState, resetState, saveState, recordSuccess, setDryRun, getPersonsFromConfig, loadCheckpoint, saveCheckpoint, clearCheckpoint, findResumeIndex, planResume, readEntry, validateRunnableConfig } = require('./lib/config');
 const { results, logResult, buildSummary, setDefunctBrokers, setCurrentPerson, setStateForSummary, setJournal } = require('./lib/logger');
 const { findDefunct, DEFUNCT_THRESHOLD } = require('./lib/defunct');
 const { sendText, desktopNotify, sendWebhook, dispatchNotify, openInBrowser, canOpenBrowser, pickManualUrlsToOpen, manualUrlsFromResults } = require('./lib/notify');
@@ -185,15 +185,24 @@ const profileDirOf = (config) =>
  */
 function acquireRunLock(lockPath) {
   try {
-    lock.acquire(lockPath);
+    lock.acquire(lockPath, { refreshMs: lock.refreshIntervalMs() });
   } catch (err) {
     // Only a LockError is "another instance"; a read-only state directory is not
     // (CLI2-9). Both exit 1, with the true reason.
     console.error(lock.describeAcquireFailure(err, lockPath).message);
     process.exit(1);
   }
-  const shutdown = installShutdownHandlers({ onShutdown: () => lock.release(lockPath) });
+  // state.json was read when this process started, before the lock. A run that
+  // finished in between has saved a newer one, and working from (then saving over)
+  // the old copy would resubmit what that run did and drop its entries. In place,
+  // so every reference to the state stays valid.
+  resetState();
+  // A lock older than the max age (default 6 h) is treated as stale whoever holds
+  // it, so a live run keeps re-stamping its own: a full run can outlast that.
+  const stopRefresh = lock.startRefresh(lockPath);
+  const shutdown = installShutdownHandlers({ onShutdown: () => { stopRefresh(); lock.release(lockPath); } });
   shutdown.release = () => {
+    stopRefresh();
     shutdown.uninstall();
     lock.release(lockPath);
   };
