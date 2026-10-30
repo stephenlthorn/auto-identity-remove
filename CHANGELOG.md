@@ -33,10 +33,11 @@ The plan is in `docs/plans/2026-10-29-roadmap.md`. The full account is in PR #20
 
 ### Upgrading from 1.x
 
+- **If you ran the test suite** (`npm test`) from a checkout between 2026-08-13 and 2026-10-29, check `crontab -l`. The old scheduler test replaced your whole crontab with a single test line pointing at a temporary folder. Restore any jobs you had from a backup; `aidr schedule install` puts back the monthly aidr job.
 - Node 20 or newer is required (nodemailer 10). CI runs 20, 22 and 24.
 - The dashboard requires a username and password, even on localhost. `aidr dashboard` prints generated ones, and `AIDR_PASS=change-me` counts as unset.
 - Unknown or misspelled flags exit 2 with a suggestion. For example, `--dryrun` suggests `--dry-run`.
-- A run where every broker failed exits 1. `aidr schedule status` exits non-zero when the last full run failed or crashed.
+- A run where every broker failed exits 1. So does a run where most sites could not be resolved: that points to a network or DNS problem, not to dead brokers. `aidr schedule status` exits non-zero when the last full run failed or crashed, and says when it could not reach most sites.
 - In a headed, interactive run, `captcha.manual: "auto"` waits up to 180 s per CAPTCHA for you to solve it.
 - When an email relay is configured, `email.smtp.from` should be a dedicated sender address. Otherwise brokers still see your real mailbox in `From`. `aidr config check` and `aidr doctor` warn about this.
 - The Docker image uses `AIDR_HOME=/home/aidr`. The old `/app/config.json` mounts fail with a message naming both paths, so they are not silently ignored.

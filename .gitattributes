@@ -5,3 +5,5 @@
 # the unpacked folder reads .dockerignore.
 test/ export-ignore
 .github/ export-ignore
+# Working plans from development sessions; nothing a user installs links to them.
+docs/superpowers/ export-ignore
