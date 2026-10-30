@@ -213,6 +213,8 @@ function spyOnGenericRunner(real) {
         submissionEmail: opts.submissionEmail,
         includeNamed: typeof opts.include === 'function' ? ['Spokeo', 'zzz-no-such-broker'].filter(n => opts.include(n)) : null,
         explicitBrokers: Array.isArray(opts.explicitBrokers) ? opts.explicitBrokers.length : null,
+        checkpointDone: opts.checkpointDone === true,
+        resumeFrom: opts.resumeFrom || null,
       });
       return real.runGenericBrokers(context, explicitHosts, state, logResult, recordSuccess, opts);
     },

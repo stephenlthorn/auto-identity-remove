@@ -1522,6 +1522,9 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
       // of its own would replace the one a killed full run is waiting on (CLI2-10).
       ...(FILTERED ? {} : { saveCheckpoint }),
       resumeFrom: resume.genericResume || undefined,
+      // The checkpoint lists the rows this pass finished, so a --resume after a feed
+      // update skips exactly those instead of "everything above the key" (BRK2-9).
+      checkpointDone: true,
       handleCaptcha: genericHandleCaptcha,
       captchaFailureDetail: genericCaptchaDetail,
       getContext: () => contextFor(index),
