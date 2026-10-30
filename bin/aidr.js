@@ -21,6 +21,7 @@ const {
 } = require('../lib/dashboard-creds');
 
 const ROOT = path.resolve(__dirname, '..');
+const EXAMPLE_PASSWORD = 'change-me';
 
 function printHelp() {
   process.stdout.write(buildHelp() + '\n');
@@ -73,7 +74,9 @@ function startDashboard(resolved) {
   // that 401s. With a saved file, or credentials already in the environment,
   // generate nothing and say which one applies.
   const savedCredentials = hasSavedCredentials(resolveAuthFile(env, dashboardDir));
-  const envCredentials = !!(env.AIDR_USER && env.AIDR_PASS);
+  // AIDR_PASS=change-me is the old example value: the server refuses it, so counting
+  // it as "credentials already in the environment" printed a login that always 401s.
+  const envCredentials = !!(env.AIDR_USER && env.AIDR_PASS && env.AIDR_PASS !== EXAMPLE_PASSWORD);
   let generated = null;
   if (!savedCredentials && !envCredentials) {
     generated = generateDashboardCreds();
