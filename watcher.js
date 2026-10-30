@@ -24,7 +24,7 @@ const ARGS = require('./lib/args').parseWatcherArgsOrExit();
 const { STATE_PATH, CONFIG_PATH, CONFIG_ENC_PATH, RECHECK_DAYS, loadConfig, loadState, saveState, recordSuccess, setDryRun, getPersonsFromConfig, loadCheckpoint, saveCheckpoint, clearCheckpoint, findResumeIndex, planResume, readEntry, validateRunnableConfig } = require('./lib/config');
 const { results, logResult, buildSummary, setDefunctBrokers, setCurrentPerson, setStateForSummary, setJournal } = require('./lib/logger');
 const { findDefunct, DEFUNCT_THRESHOLD } = require('./lib/defunct');
-const { sendText, desktopNotify, openInBrowser, canOpenBrowser, pickManualUrlsToOpen, manualUrlsFromResults } = require('./lib/notify');
+const { sendText, desktopNotify, sendWebhook, dispatchNotify, openInBrowser, canOpenBrowser, pickManualUrlsToOpen, manualUrlsFromResults } = require('./lib/notify');
 const brokerRunner = require('./lib/broker-runner');
 const { sendOptOutEmails } = require('./lib/email');
 const { smtpTransportOptions } = require('./lib/smtp');
@@ -750,13 +750,16 @@ function modeInstallScheduler() {
 
 // ── --schedule-status: is the monthly job installed, and how did its last run end? ──
 // Read-only: it asks the OS scheduler and reads last-run.json, nothing else. Exit
-// status is for scripts: 0 installed and active, 1 not installed, 2 installed but
-// not active (a job that exists and will not fire is worse than one that is absent).
+// status is for scripts: 0 installed, active and the last full run did not fail,
+// 1 not installed, 2 installed but not active (a job that exists and will not fire
+// is worse than one that is absent), 3 installed and active but the last full run
+// failed or crashed (a monthly job that breaks every time reads as healthy otherwise).
 function modeScheduleStatus() {
   const { getScheduleStatus, formatScheduleStatus } = require('./lib/scheduler');
   const status = getScheduleStatus({ scriptPath: path.join(__dirname, 'run.sh') });
   console.log(ARGS.json ? JSON.stringify(status, null, 2) : '\n' + formatScheduleStatus(status) + '\n');
-  process.exit(!status.installed ? 1 : status.active === false ? 2 : 0);
+  const lastRunBroken = Boolean(status.lastRun) && ['failed', 'crashed'].includes(status.lastRun.outcome);
+  process.exit(!status.installed ? 1 : status.active === false ? 2 : lastRunBroken ? 3 : 0);
 }
 
 // ── --uninstall-scheduler: remove the monthly job (only the one this tool installed) ──
@@ -904,9 +907,16 @@ async function main({ config, persons, state, captchaNames }) {
   // an interrupted run says so, instead of reading as a crash later.
   if (heartbeat) guard.register(() => { heartbeat.finish({ outcome: 'failed' }); });
   try {
-    const outcome = await runWithBrowser({ config, persons, state, guard, captchaNames });
-    if (heartbeat) heartbeat.finish(outcomeFromResults(results));
-    return outcome;
+    const end = await runWithBrowser({ config, persons, state, guard, captchaNames });
+    if (heartbeat) {
+      const final = end || outcomeFromResults(results);
+      heartbeat.finish(final);
+      // A run in which every broker errored is a failed run: exit 0 told cron,
+      // launchd and `docker run` that it worked (CLI2-3). Some errors beside some
+      // progress stay exit 0, since an unreachable site is normal.
+      if (final.outcome === 'failed') process.exitCode = 1;
+    }
+    return end;
   } catch (err) {
     if (heartbeat) heartbeat.finish({ outcome: 'failed' });
     throw err;
@@ -1464,16 +1474,21 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
   console.log(DRY_RUN ? '\n📄 Log: not written (dry run)' : `\n📄 Log: ${logFile}`);
   console.log(DRY_RUN ? '💾 State: not saved (dry run)\n' : `💾 State: ${STATE_PATH}\n`);
 
-  // A dry run or preview must not text anyone or raise a desktop notification.
-  if (DRY_RUN) return;
+  // A dry run or preview must not text anyone, raise a desktop notification or
+  // POST the webhook.
+  if (DRY_RUN) return null;
 
   // "Submitted" is not "removed": a form that was accepted may still need an
   // email click, and brokers re-list people. The wording says what happened.
+  const end = outcomeFromResults(results);
+  const failed = end.outcome === 'failed';
   const manualCount = results.captchaFailed.length + results.manual.length;
   const totalProcessed = results.succeeded.length + results.pendingConfirm.length + results.unverified.length
     + results.skipped.length + results.notFound.length + manualCount + results.errors.length + results.dead.length;
   const short = [
-    `🔒 Privacy Watcher (${new Date().toLocaleDateString()}):`,
+    failed
+      ? `❌ Privacy Watcher FAILED (${new Date().toLocaleDateString()}): every broker ended in an error, so nothing was submitted.`
+      : `🔒 Privacy Watcher (${new Date().toLocaleDateString()}):`,
     `✅ Submitted: ${results.succeeded.length}`,
     `📧 Awaiting email confirm: ${results.pendingConfirm.length}`,
     `❓ Unconfirmed: ${results.unverified.length}`,
@@ -1483,7 +1498,13 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
     `📊 Total: ${totalProcessed} brokers checked`,
   ].join('\n');
   sendText(short, config.notify);
-  desktopNotify('Privacy Watcher', `Done - ${results.succeeded.length} submitted, ${results.pendingConfirm.length} awaiting email confirmation, ${manualCount} need manual action (${totalProcessed} total)`);
+  desktopNotify('Privacy Watcher', failed
+    ? `Failed - every broker errored (${results.errors.length} errors, ${totalProcessed} total). Nothing was submitted.`
+    : `Done - ${results.succeeded.length} submitted, ${results.pendingConfirm.length} awaiting email confirmation, ${manualCount} need manual action (${totalProcessed} total)`);
+  // notify.webhook is documented as POSTed after every run; only serp-watch ever
+  // sent it (CLI2-3). Awaited, with its own deadline (lib/notify.js).
+  if (config.notify && config.notify.webhook) await sendWebhook(config.notify.webhook, short);
+  return end;
 }
 
 // ── aidr captchas: which brokers to go back to ───────────────────────────────
@@ -1562,9 +1583,15 @@ async function dispatch() {
   return main({ config, persons, state, captchaNames });
 }
 
-dispatch().catch(err => {
+dispatch().catch(async err => {
   console.error('\nFatal:', err && err.message ? err.message : err);
-  // A crash text is a real notification: never from a dry run or preview.
-  if (!DRY_RUN && notifyConfig) sendText(`❌ Privacy Watcher crashed: ${String(err && err.message).slice(0, 100)}`, notifyConfig);
+  // A crash is a real notification, on every channel the user set up (iMessage, a
+  // desktop toast, notify.webhook): never from a dry run or preview. dispatchNotify
+  // never throws, and its webhook POST has a deadline, so this cannot hang the exit.
+  if (!DRY_RUN && notifyConfig) {
+    try {
+      await dispatchNotify(`❌ Privacy Watcher crashed: ${String(err && err.message).slice(0, 100)}`, { notify: notifyConfig });
+    } catch (_) { /* a notification that fails must not mask the crash */ }
+  }
   process.exit(1);
 });
