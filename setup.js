@@ -20,6 +20,8 @@ const { Writable } = require('stream');
 const { execSync } = require('child_process');
 
 const { installSchedule } = require('./lib/scheduler');
+const { resolvePaths } = require('./lib/paths');
+const { mkdirPrivate } = require('./lib/private-fs');
 const {
   encryptConfigToDisk, writeJsonAtomic, getPassphrase,
   CONFIG_PATH, CONFIG_ENC_PATH, STATE_PATH,
@@ -369,9 +371,18 @@ function saveConfig(config, opts) {
   return configPath;
 }
 
+/**
+ * What the monthly job runs and where it logs: this install's run.sh, and the log
+ * directory the runtime itself uses (AIDR_HOME / AIDR_LOG_DIR; the app directory's
+ * logs/ when neither is set).
+ */
+function scheduleJobOptions(env = process.env) {
+  return { scriptPath: path.join(__dirname, 'run.sh'), logDir: resolvePaths(env).logs };
+}
+
 module.exports = {
   regionPrompts, formatPhone, maybeEncryptConfig, readExistingConfig,
-  buildConfig, answerDefaults, saveConfig,
+  buildConfig, answerDefaults, saveConfig, scheduleJobOptions,
   readSecret, createPrompter, askNewPassphrase,
 };
 
@@ -549,6 +560,9 @@ async function main() {
 
   // Initialize state.json if not present
   if (!fs.existsSync(STATE_PATH)) {
+    // The state may live in a directory the config did not (AIDR_STATE_PATH elsewhere).
+    // Only a directory that is missing is created (owner-only); one that exists is not ours to chmod.
+    if (!fs.existsSync(path.dirname(STATE_PATH))) mkdirPrivate(path.dirname(STATE_PATH));
     fs.writeFileSync(STATE_PATH, JSON.stringify({ optOuts: {}, createdAt: new Date().toISOString() }, null, 2), { mode: 0o600 });
     console.log('✅ state.json initialized (tracks opt-out history).\n');
   }
@@ -557,9 +571,7 @@ async function main() {
   console.log('── Monthly Schedule ────────────────────────────────────────');
   const doSchedule = await confirm('Schedule to run automatically on the 1st of every month at 9am?');
   if (doSchedule) {
-    const scriptPath = path.join(__dirname, 'run.sh');
-    const logDir     = path.join(__dirname, 'logs');
-    const result = installSchedule({ scriptPath, logDir });
+    const result = installSchedule(scheduleJobOptions());
     console.log(`✅ [${result.method}] ${result.detail}\n`);
   }
 

@@ -130,14 +130,17 @@ function stateKeyOf(brokerName, person, total) {
 
 function loadRunner(stubs = {}) {
   const logged = [];
-  const recorded = { success: [], pending: [], failure: [], checkpoints: [], skipChecks: [], skipOpts: [] };
+  const recorded = { success: [], pending: [], failure: [], checkpoints: [], skipChecks: [], skipOpts: [], stamps: [] };
   const calls = { fillForm: [], findListingUrl: [], captcha: [] };
 
   const map = {
     './config': {
-      recordSuccess: (name, detail) => recorded.success.push({ name, detail }),
-      recordPendingConfirmation: (name, snippet) => recorded.pending.push({ name, snippet }),
-      recordFailure: (name, kind) => recorded.failure.push({ name, kind }),
+      // The third argument the real writers take ({ person }, R5) is kept apart in
+      // recorded.stamps, so a test can see whose identity fingerprint a write would
+      // carry without changing the shape of the arrays older tests compare.
+      recordSuccess: (name, detail, opts) => { recorded.success.push({ name, detail }); recorded.stamps.push({ writer: 'success', name, opts }); },
+      recordPendingConfirmation: (name, snippet, opts) => { recorded.pending.push({ name, snippet }); recorded.stamps.push({ writer: 'pending', name, opts }); },
+      recordFailure: (name, kind, opts) => { recorded.failure.push({ name, kind }); recorded.stamps.push({ writer: 'failure', name, kind, opts }); },
       // shouldSkip(brokerName, { person, personCount, personIndex }): skipChecks keeps
       // the state key the lookup resolves to, skipOpts the raw call.
       shouldSkip: (name, o) => {

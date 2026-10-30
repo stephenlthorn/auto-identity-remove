@@ -13,7 +13,9 @@ It wraps the existing tooling rather than reimplementing it:
   generic brokers are not rows here; the summary counts them (loaded the way the
   generic runner loads them) and totals their state, e.g. `507 generic: 40 opted
   out, 3 pending, 464 not run yet`.
-- **History** - one row per finished run from `../logs/run-*.json`, newest first:
+- **History** - one row per finished run from the log directory (`../logs/` by default;
+  `AIDR_LOG_DIR`, or `AIDR_HOME`, moves it, and the runs the dashboard starts are told
+  the same directory), newest first:
   date, full or partial (and which filter), the count per status (submitted,
   pending confirmation, unverified, not listed, manual, CAPTCHA failed, errors,
   dead) and the same per person, as initials. A run that crashed before it wrote
@@ -27,7 +29,7 @@ It wraps the existing tooling rather than reimplementing it:
   streamed output (SSE) and `--only` / `--skip` filters.
 - **Config editor** - a form over `../config.json` (person, CapSolver, SMTP,
   notifications, broker accounts). Secrets (CapSolver key, SMTP password,
-  webhook, account passwords) are masked in transit and preserved on save
+  webhook, account passwords, browser proxy username and password) are masked in transit and preserved on save
   unless you type a new value. If `../config.json` doesn't exist yet the form is
   prefilled from `../config.example.json` and the first Save creates it (`0600`).
 - **Schedule** - enable/disable and set the cadence of a systemd timer (see

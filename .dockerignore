@@ -25,6 +25,8 @@ state.json.corrupt-*
 state.json.bak.corrupt-*
 confirm-processed.json
 confirm-processed.json.*.tmp
+last-run.json
+last-run.json.*.tmp
 config.json.bak
 config.json.enc.bak
 config.json.unreadable-*.bak

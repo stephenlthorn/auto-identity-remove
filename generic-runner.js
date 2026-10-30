@@ -904,17 +904,33 @@ async function hasCaptchaWidget(page, form) {
 }
 
 /**
+ * The detail for an unsolved CAPTCHA from the watcher's describer (the same words
+ * the explicit runner uses: opt-out URL first, why, and `aidr captchas`), or null
+ * to keep the built-in wording. A describer that throws or answers something that
+ * is not text must never cost the failure itself.
+ */
+function captchaDetail(describeFailure, outcome, broker) {
+  if (typeof describeFailure !== 'function') return null;
+  try {
+    const detail = describeFailure({ outcome: typeof outcome === 'string' && outcome ? outcome : 'failed', broker });
+    return typeof detail === 'string' && detail ? detail : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+/**
  * Run the CAPTCHA handler. Only 'none' (nothing to solve) and 'solved' clear the
  * form; every other answer, an unknown one and a throw included, does not: a form
  * submitted into an unsolved CAPTCHA is how a run ends up guessing.
  * @returns {Promise<{ cleared: boolean, detail?: string }>}
  */
-async function clearCaptcha(handleCaptcha, page, broker) {
+async function clearCaptcha(handleCaptcha, page, broker, describeFailure) {
   try {
     const outcome = await handleCaptcha(page, { broker });
     if (outcome === 'none' || outcome === 'solved') return { cleared: true };
     const why = typeof outcome === 'string' && outcome ? outcome : 'unexpected result';
-    return { cleared: false, detail: `CAPTCHA not solved (${why}) - finish this one by hand` };
+    return { cleared: false, detail: captchaDetail(describeFailure, outcome, broker) || `CAPTCHA not solved (${why}) - finish this one by hand` };
   } catch (err) {
     return { cleared: false, detail: `CAPTCHA handling failed (${((err && err.message) || 'error').slice(0, 60)}) - finish this one by hand` };
   }
@@ -926,7 +942,7 @@ async function clearCaptcha(handleCaptcha, page, broker) {
  * with a fillable field exists, so the caller can fall through to the next
  * strategy; otherwise a { status, detail } result.
  */
-async function submitOptOutForm(page, { person, submissionEmail, checkUrl, formCtx = {}, label, broker, handleCaptcha }) {
+async function submitOptOutForm(page, { person, submissionEmail, checkUrl, formCtx = {}, label, broker, handleCaptcha, captchaFailureDetail }) {
   const found = await describeForms(page);
   if (found.length === 0) return null;
 
@@ -956,7 +972,7 @@ async function submitOptOutForm(page, { person, submissionEmail, checkUrl, formC
     // not typed into a form that cannot be sent.
     const captcha = await hasCaptchaWidget(page, locator);
     if (captcha && typeof handleCaptcha !== 'function') {
-      return { status: 'captcha_failed', detail: 'CAPTCHA on the opt-out form and this run cannot solve it - finish this one by hand' };
+      return { status: 'captcha_failed', detail: captchaDetail(captchaFailureDetail, 'skipped', broker) || 'CAPTCHA on the opt-out form and this run cannot solve it - finish this one by hand' };
     }
 
     const filled = await fillGenericForm(page, person, { submissionEmail, scope: locator });
@@ -965,7 +981,7 @@ async function submitOptOutForm(page, { person, submissionEmail, checkUrl, formC
     // Filled first, so a person solving it by hand only has the CAPTCHA left. The
     // baseline below is read after, so a "verified" banner is not the broker's answer.
     if (captcha) {
-      const cleared = await clearCaptcha(handleCaptcha, page, broker);
+      const cleared = await clearCaptcha(handleCaptcha, page, broker, captchaFailureDetail);
       if (!cleared.cleared) return { status: 'captcha_failed', detail: cleared.detail };
     }
 
@@ -1086,7 +1102,7 @@ async function processGenericUrl(page, broker, state, dryRun = false, injectedDe
       const movedBad = await guardLanding();
       if (movedBad) return movedBad;
       const submitted = await submitOptOutForm(page, {
-        person, submissionEmail, checkUrl, broker, handleCaptcha: opts.handleCaptcha,
+        person, submissionEmail, checkUrl, broker, handleCaptcha: opts.handleCaptcha, captchaFailureDetail: opts.captchaFailureDetail,
         formCtx: { afterOptOutClick: true, beforeSigs: formsBeforeClick },
         label: 'Do Not Sell clicked, form submitted',
       });
@@ -1113,7 +1129,7 @@ async function processGenericUrl(page, broker, state, dryRun = false, injectedDe
     const methodAllowsForms = broker.method === undefined || broker.method === null || broker.method === 'direct-form';
     if (methodAllowsForms && !isHomepageUrl(broker.url)) {
       const submitted = await submitOptOutForm(page, {
-        person, submissionEmail, checkUrl, broker, handleCaptcha: opts.handleCaptcha,
+        person, submissionEmail, checkUrl, broker, handleCaptcha: opts.handleCaptcha, captchaFailureDetail: opts.captchaFailureDetail,
         formCtx: { afterOptOutClick: false },
         label: 'Form submitted',
       });
@@ -1547,7 +1563,7 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
 
       let result;
       try {
-        result = await processFn(page, broker, state, dryRun, opts.injectedDeadSet, { person, personCount, personIndex: opts.personIndex, stateKey: keyFor(broker.name), submissionEmail: opts.submissionEmail || undefined, dnsLookup: opts.dnsLookup, handleCaptcha: opts.handleCaptcha });
+        result = await processFn(page, broker, state, dryRun, opts.injectedDeadSet, { person, personCount, personIndex: opts.personIndex, stateKey: keyFor(broker.name), submissionEmail: opts.submissionEmail || undefined, dnsLookup: opts.dnsLookup, handleCaptcha: opts.handleCaptcha, captchaFailureDetail: opts.captchaFailureDetail });
       } catch (err) {
         // One broker must never abort the whole run or skip the cleanup below.
         result = { status: 'error', detail: (err && err.message ? err.message.slice(0, 80) : 'error') };
@@ -1573,11 +1589,14 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
       // All three record under the per-person key so one household member's
       // success never suppresses another's submission.
       const recordKey = keyFor(broker.name);
+      // `{ person }` stamps the entry with this person's identity fingerprint (R5), so
+      // a corrected zip or email counts the old entry as never run.
+      const stamp = { person };
       if (result.status === 'success') {
-        recordSuccess(recordKey, result.detail || '');
+        recordSuccess(recordKey, result.detail || '', stamp);
       } else if (result.status === 'pending_confirm') {
         const { recordPendingConfirmation } = require('./lib/config');
-        recordPendingConfirmation(recordKey, result.detail || '');
+        recordPendingConfirmation(recordKey, result.detail || '', stamp);
       } else if (result.status === 'error' || result.status === 'dead' || result.status === 'captcha_failed') {
         const { recordFailure } = require('./lib/config');
         // B24: record the real status so defunct/drift can tell a gone site
@@ -1585,7 +1604,7 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
         // A CAPTCHA failure keeps its own kind, as the explicit runner records it:
         // the site is up and the CAPTCHA is the problem, so it must not count
         // toward "defunct".
-        recordFailure(recordKey, result.status);
+        recordFailure(recordKey, result.status, stamp);
       }
 
       await prunePopups(); // reap any popups / tabs this broker opened

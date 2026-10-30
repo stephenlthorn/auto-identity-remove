@@ -47,14 +47,16 @@ const mode = (p) => fs.statSync(p).mode & 0o777;
 
 // ── a complete run ────────────────────────────────────────────────────────────
 
-test('a run launches the browser once, closes it, writes private logs and releases the lock', async () => {
+test('a run launches one browser per person, closes each, writes private logs and releases the lock', async () => {
   await inSandbox({}, async (sandbox) => {
     const r = await runWatcher(sandbox, ['--only', 'zzz-no-such-broker']);
     assert.equal(r.code, 0, r.stderr);
 
+    // R7: one profile and one context per person. The explicit pass has nothing to run
+    // for this filter, so only each person's generic pass opens a browser.
     const events = sandbox.fakeEvents().map(e => e.event);
-    assert.equal(events.filter(e => e === 'launch').length, 1);
-    assert.ok(events.includes('close'), 'the browser context is closed');
+    assert.equal(events.filter(e => e === 'launch').length, 2);
+    assert.equal(events.filter(e => e === 'close').length, 2, 'every launched browser is closed');
     assert.deepEqual(sandbox.networkAttempts(), [], 'a filter that matches nothing must reach nowhere');
     assert.equal(fs.existsSync(sandbox.lock), false, 'the lock is released');
 

@@ -49,6 +49,9 @@ const RUNTIME_PATHS = [
   // The dashboard backs the config up next to itself on every save.
   CONFIG_PATH + '.bak',
   CONFIG_ENC_PATH + '.bak',
+  // R4: the run heartbeat sits beside state.json (counts only, but it is a record of
+  // when this tool ran for a particular person, so it does not ship either).
+  path.join(path.dirname(STATE_PATH), 'last-run.json'),
 ];
 
 /** @returns {boolean} true when git would ignore the path. */
@@ -127,6 +130,7 @@ const EXTRA_RUNTIME_PATHS = [
   'state.json.corrupt-2026-10-29T09-00-00-000Z',
   'state.json.bak.corrupt-2026-10-29T09-00-00-000Z',
   'confirm-processed.json.12345.tmp',
+  'last-run.json.12345.tmp',
   'config.json.unreadable-2026-10-29T09-00-00-000Z.bak',
   'config.json.enc.unreadable-2026-10-29T09-00-00-000Z.bak',
   'data/breach-result.json',

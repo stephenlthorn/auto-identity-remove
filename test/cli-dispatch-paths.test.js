@@ -23,7 +23,10 @@ const ROOT = path.resolve(__dirname, '..');
 
 test('every subcommand resolves to a script that exists on disk', () => {
   for (const name of Object.keys(COMMANDS)) {
-    const target = resolveSpawnTarget(resolveCommand([name]), ROOT);
+    // A two-word command with no default verb (`config check`) needs its verb.
+    const { sub, defaultSub } = COMMANDS[name];
+    const argv = sub && defaultSub === undefined ? [name, Object.keys(sub)[0]] : [name];
+    const target = resolveSpawnTarget(resolveCommand(argv), ROOT);
     assert.ok(
       path.isAbsolute(target.script),
       `${name}: script should be absolute so the spawn cwd cannot double the path, got ${target.script}`

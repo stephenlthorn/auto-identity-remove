@@ -54,9 +54,13 @@ test('no doc recipe mounts state.json or config.json as a single file', () => {
 });
 
 test('every doc recipe tells the container where its config and state live', () => {
+  // R0: one variable, AIDR_HOME=/home/aidr, puts config, state and everything else
+  // inside the mounted directory (test/paths-docker-recipes.test.js is the contract
+  // for the recipe text). The per-file variables are the older way of saying the same.
   for (const [name, text] of DOCS) {
-    assert.match(text, /AIDR_CONFIG_PATH=\/home\/aidr\//, `${name} must set AIDR_CONFIG_PATH inside the mounted directory`);
-    assert.match(text, /AIDR_STATE_PATH=\/home\/aidr\//, `${name} must set AIDR_STATE_PATH inside the mounted directory`);
+    const home = /AIDR_HOME=\/home\/aidr\b/.test(text);
+    const perFile = /AIDR_CONFIG_PATH=\/home\/aidr\//.test(text) && /AIDR_STATE_PATH=\/home\/aidr\//.test(text);
+    assert.ok(home || perFile, `${name} must put config and state inside the mounted directory (AIDR_HOME=/home/aidr)`);
   }
 });
 
@@ -77,9 +81,11 @@ test('every doc mentions AIDR_PASSPHRASE_FILE for unattended encrypted runs', ()
 });
 
 test('the docs name everything that does and does not persist in a container', () => {
-  assert.match(dockerSection, /\/app\/logs/);
+  // R0: logs and the history caches now persist in the one mounted directory, so the
+  // old "/app/logs is lost" caveat is gone. The section still has to NAME the files.
   assert.match(dockerSection, /serp-history|exposure-history|feeds-brokers/,
-    'SERP/exposure history and the registry cache are not persisted in Docker today; the section must say so');
+    'the section must say where the SERP/exposure history and the registry cache live');
+  assert.match(dockerSection, /logs\//, 'and where the run logs live');
 });
 
 test('the README says what --verify really does: it saves state and writes no report file', () => {

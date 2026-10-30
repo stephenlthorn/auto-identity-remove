@@ -77,16 +77,16 @@ function captureLog(fn) {
 }
 
 describe('runDoctor: the R4 checks', () => {
-  it('adds schedule, lock and unattended-passphrase checks after the existing six', async () => {
+  it('adds schedule, lock and unattended-passphrase checks after the existing six, behind the home check (R0)', async () => {
     writePlainConfig();
     const results = await doctor();
-    assert.deepEqual(results.map(r => r.name), ['config', 'playwright', 'smtp', 'capsolver', 'state', 'webhook', 'schedule', 'lock', 'unattended']);
+    assert.deepEqual(results.map(r => r.name), ['home', 'config', 'playwright', 'smtp', 'capsolver', 'state', 'webhook', 'schedule', 'lock', 'unattended']);
   });
 
   it('counts the checks it runs in its header', async () => {
     writePlainConfig();
     const { lines } = await captureLog(() => doctor({ printOutput: true }));
-    assert.ok(lines.some(line => /running 9 checks/.test(line)), lines.join('\n'));
+    assert.ok(lines.some(line => /running 10 checks/.test(line)), lines.join('\n'));
   });
 
   it('prints nothing when printOutput is false', async () => {

@@ -37,10 +37,11 @@
  *   POST /api/freeze             -> { key, action: done|clear } mark a freeze target
  *                                   (409 while a run is active or the state lock is held)
  *
- * Paths: config/state/logs default to the repo root; AIDR_CONFIG_PATH,
- * AIDR_CONFIG_ENC_PATH and AIDR_STATE_PATH relocate them exactly as they do for
- * watcher.js, and createApp() takes every path as an option so tests never touch
- * the real files.
+ * Paths: config/state/logs and the SERP history default to the repo root; AIDR_HOME
+ * moves them all and AIDR_CONFIG_PATH, AIDR_CONFIG_ENC_PATH, AIDR_STATE_PATH,
+ * AIDR_LOG_DIR and AIDR_DATA_DIR relocate one each, exactly as they do for
+ * watcher.js (lib/paths.js decides both), and createApp() takes every path as an
+ * option so tests never touch the real files.
  *
  * Auth (all routes except /api/health, static + API): set AIDR_USER + AIDR_PASS
  *   for HTTP Basic, and/or AIDR_TOKEN for header token auth (X-AIDR-Token). A
@@ -97,6 +98,7 @@ const secrets = require('../lib/secrets');
 const configLib = require('../lib/config');
 const lock = require('../lib/lock');
 const { resolveAuthFile } = require('../lib/dashboard-creds');
+const { resolvePaths } = require('../lib/paths');
 const { writeJsonAtomic, backupFile } = require('./safe-write');
 const { MASK, maskConfig, mergeConfig, applyConfigEdit } = require('./config-edit');
 const { listRuns, readRun, latestRun } = require('./runs');
@@ -224,14 +226,17 @@ async function makeCred(user, pw) {
 function createApp(options = {}) {
   const env = options.env || process.env;
   const ROOT = path.resolve(options.root || DEFAULT_ROOT);
-  const envPath = name => (env[name] ? path.resolve(env[name]) : null);
-  const CONFIG = options.configPath || envPath('AIDR_CONFIG_PATH') || path.join(ROOT, 'config.json');
-  const CONFIG_ENC = options.encPath || envPath('AIDR_CONFIG_ENC_PATH') || path.join(ROOT, 'config.json.enc');
-  const STATE = options.statePath || envPath('AIDR_STATE_PATH') || path.join(ROOT, 'state.json');
+  // The same decision the watcher makes (lib/paths.js): AIDR_HOME moves everything,
+  // each specific variable still wins, and with none set it is the repo root. An
+  // option beats all of them (tests, and any caller that knows better).
+  const P = resolvePaths(env, ROOT);
+  const CONFIG = options.configPath || P.config;
+  const CONFIG_ENC = options.encPath || P.configEnc;
+  const STATE = options.statePath || P.state;
   const STATE_LOCK = STATE + '.lock'; // same name watcher.js takes (lib/config STATE_PATH + '.lock')
-  const LOGS = options.logsDir || path.join(ROOT, 'logs');
+  const LOGS = options.logsDir || P.logs;
   const BROKERS = path.join(ROOT, 'brokers.js');
-  const SERP_HISTORY = options.serpHistoryPath || path.join(ROOT, 'data', 'serp-history.json');
+  const SERP_HISTORY = options.serpHistoryPath || path.join(P.data, 'serp-history.json');
   const EXPOSURE_LIB = path.join(ROOT, 'lib', 'exposure.js');
   const AUTH_FILE = options.authFile || resolveAuthFile(env, __dirname);
   const PASSPHRASE = options.passphrase !== undefined
@@ -485,7 +490,9 @@ function createApp(options = {}) {
     const e = { ...env };
     for (const k of CHILD_ENV_STRIP) delete e[k];
     // The run must read and write the same files this dashboard shows.
-    return { ...e, HEADLESS: '1', CI: '1', AIDR_STATE_PATH: STATE, AIDR_CONFIG_PATH: CONFIG, AIDR_CONFIG_ENC_PATH: CONFIG_ENC };
+    // The log directory too: a run that wrote its logs anywhere else would leave the
+    // History tab and the latest-run summary reading a directory nothing writes to.
+    return { ...e, HEADLESS: '1', CI: '1', AIDR_STATE_PATH: STATE, AIDR_CONFIG_PATH: CONFIG, AIDR_CONFIG_ENC_PATH: CONFIG_ENC, AIDR_LOG_DIR: LOGS };
   }
 
   function startRun(mode, opts = {}) {
@@ -904,7 +911,7 @@ function createApp(options = {}) {
 
   return {
     app, close, terminateRun, loadBrokers, loadCreds, authConfigured,
-    paths: { root: ROOT, config: CONFIG, enc: CONFIG_ENC, state: STATE, logs: LOGS, auth: AUTH_FILE },
+    paths: { root: ROOT, config: CONFIG, enc: CONFIG_ENC, state: STATE, logs: LOGS, serp: SERP_HISTORY, auth: AUTH_FILE },
   };
 }
 
