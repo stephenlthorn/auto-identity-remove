@@ -371,6 +371,9 @@ function modeEncryption() {
         : res.notice
           ? `   WARNING: ${res.notice}`
           : '   Plaintext config.json kept (--keep-plaintext).');
+      // config.json is gone but a copy beside it (.bak, a .tmp from a killed write)
+      // could not be removed: that file still holds the PII, so it is named here (CFG2-5).
+      if (res.shredded && res.notice) console.log(`   WARNING: ${res.notice}`);
       console.log(`   Decrypt later with: node watcher.js --decrypt-config\n`);
     } else {
       const res = decryptConfigToDisk({ removeEnc: true });
