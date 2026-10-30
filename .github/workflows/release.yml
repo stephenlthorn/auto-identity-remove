@@ -1,0 +1,155 @@
+name: Release
+
+# Cuts a GitHub Release when `version` in package.json changes on main, and
+# attaches auto-identity-remove.tar.gz (plus its .sha256) built by
+# scripts/release-archive.sh. GitHub counts downloads only for files attached to
+# a release, never for `git clone` or the auto-generated "Source code" archives,
+# so this is what lets the maintainer see how many people install the tool.
+#
+# To release: bump `version` in package.json (X.Y.Z) on main, with a matching
+# `## X.Y.Z - <date>` section in CHANGELOG.md, which becomes the release notes.
+# If the tag or release for that version already exists, the run stops with a
+# notice and no error: a push that touches package.json for any other reason
+# (a dependency bump) must not fail or re-release.
+#
+# test/release-workflow.test.js pins the properties below and runs the scripts in
+# this file against a stub `gh`.
+
+on:
+  push:
+    branches: [main]
+    paths: [package.json]
+  workflow_dispatch:
+
+# Read-only by default. Only the release job is granted anything more.
+permissions:
+  contents: read
+
+# Two pushes to main in a row must not race to create the same tag, and a run
+# that has started creating a release must not be cancelled half way.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    # A hand-started run from another branch would tag that branch's commit.
+    if: github.ref == 'refs/heads/main'
+    timeout-minutes: 30
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Read the version
+        id: version
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::package.json version is not X.Y.Z, so there is no tag to cut."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+
+      # `gh api` exits 1 for every HTTP error, so the exit code alone cannot tell
+      # "no such release" from "GitHub is down" or "the token is wrong". Only a
+      # 404 means absent. Treating anything else as absent would publish over a
+      # release that exists, so anything else fails the job.
+      - name: Stop if the release already exists
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          exists_at() {
+            local out
+            if out="$(gh api "$1" 2>&1)"; then
+              return 0
+            fi
+            if printf '%s' "$out" | grep -qF '(HTTP 404)'; then
+              return 1
+            fi
+            echo "::error::Could not tell whether $TAG exists (a 404 would mean it does not): $out"
+            exit 2
+          }
+
+          exists=false
+          # A tag with no release still counts: creating the release would move or reuse it.
+          if exists_at "repos/$REPO/releases/tags/$TAG"; then exists=true; fi
+          if exists_at "repos/$REPO/git/ref/tags/$TAG"; then exists=true; fi
+
+          if [ "$exists" = true ]; then
+            echo "::notice::$TAG already exists, so there is nothing to release. Bump version in package.json to cut a new one."
+          fi
+          echo "exists=$exists" >> "$GITHUB_OUTPUT"
+
+      # No npm cache: this job holds a write token, and it runs rarely enough
+      # that restoring a cache is not worth trusting.
+      - name: Set up Node.js 22
+        if: steps.check.outputs.exists == 'false'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        if: steps.check.outputs.exists == 'false'
+        run: npm ci
+
+      # test/cli-dashboard-boot.test.js skips itself without the dashboard's own
+      # dependencies; the same reason test.yml installs them.
+      - name: Install dashboard dependencies
+        if: steps.check.outputs.exists == 'false'
+        working-directory: dashboard
+        run: npm ci
+
+      - name: Run tests
+        if: steps.check.outputs.exists == 'false'
+        run: npm test
+
+      - name: Extract the release notes
+        if: steps.check.outputs.exists == 'false'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          awk -v version="$VERSION" '
+            /^## / {
+              if (found) exit
+              if ($2 == version || $2 == "[" version "]") { found = 1; next }
+            }
+            found { print }
+          ' CHANGELOG.md > "$RUNNER_TEMP/release-notes.md"
+          if ! grep -q '[^[:space:]]' "$RUNNER_TEMP/release-notes.md"; then
+            echo "::error::CHANGELOG.md has no section, or an empty one, for $VERSION. Add \"## $VERSION - <date>\" with the release notes."
+            exit 1
+          fi
+
+      - name: Build the release archive
+        if: steps.check.outputs.exists == 'false'
+        run: bash scripts/release-archive.sh "$RUNNER_TEMP/release"
+
+      # --target pins the tag to the commit that was tested, not to wherever main
+      # has moved by the time this runs.
+      - name: Create the release
+        if: steps.check.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          gh release create "$TAG" \
+            "$RUNNER_TEMP/release/auto-identity-remove.tar.gz" \
+            "$RUNNER_TEMP/release/auto-identity-remove.tar.gz.sha256" \
+            --repo "$REPO" \
+            --title "$TAG" \
+            --notes-file "$RUNNER_TEMP/release-notes.md" \
+            --target "$GITHUB_SHA"
