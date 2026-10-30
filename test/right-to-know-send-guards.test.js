@@ -198,3 +198,42 @@ test('NET-15: a Texas resident is not sent CCPA wording', async () => {
   await runner.sendKnowRequests([PIPL], { person: PERSON, email: { smtp: SMTP } }, {});
   assert.doesNotMatch(sendCalls[0].text, /CCPA|California/);
 });
+
+// CFG2 risky list: a single-person install records the request under the bare broker
+// name. Adding a second person flips every key to "Broker|First Last", and
+// persons[0] must still find the request they already sent - the same fallback
+// readEntry gives opt-out history - or every know request is sent again.
+
+test('adding a second person does not re-send persons[0]\'s know request (bare-key fallback)', async () => {
+  const bare = new Date(Date.now() - 5 * 86400000).toISOString();
+  configMod.loadState().optOuts.Pipl = { knowRequestedAt: bare };
+  const cfg = { persons: [PERSON, PERSON_B], email: { smtp: SMTP } };
+
+  const result = await runner.sendKnowRequests([PIPL], cfg, {});
+
+  assert.equal(sendCalls.length, 1, 'only the new person gets a request');
+  assert.match(sendCalls[0].text, /John Roe|Roe/);
+  assert.deepEqual(result.sent, ['Pipl']);
+  assert.deepEqual(result.skipped, ['Pipl'], 'persons[0] is skipped: already sent 5 days ago');
+  assert.ok(knowTimestamp('Pipl|John Roe'), 'the new person is recorded under their own key');
+  assert.equal(knowTimestamp('Pipl'), bare, 'the legacy entry is untouched');
+});
+
+test('the bare entry is persons[0]\'s alone: persons[1] never inherits it', async () => {
+  configMod.loadState().optOuts.Pipl = { knowRequestedAt: new Date(Date.now() - 5 * 86400000).toISOString() };
+  const cfg = { persons: [PERSON_B, PERSON], email: { smtp: SMTP } };
+  await runner.sendKnowRequests([PIPL], cfg, {});
+  const recipients = sendCalls.map(c => c.text.includes('Jane') ? 'jane' : 'john');
+  assert.deepEqual(recipients, ['jane'], 'persons[0] (John) was covered by the bare entry; Jane was not');
+});
+
+test('a composite entry for persons[0] still wins over the bare one', async () => {
+  const old = new Date(Date.now() - 400 * 86400000).toISOString();
+  const recent = new Date(Date.now() - 2 * 86400000).toISOString();
+  configMod.loadState().optOuts.Pipl = { knowRequestedAt: old };
+  configMod.loadState().optOuts['Pipl|Jane Doe'] = { knowRequestedAt: recent };
+  const cfg = { persons: [PERSON, PERSON_B], email: { smtp: SMTP } };
+  const result = await runner.sendKnowRequests([PIPL], cfg, {});
+  assert.equal(result.skipped.length, 1, 'Jane is covered by her own recent entry, not re-sent because the bare one is old');
+  assert.equal(sendCalls.length, 1);
+});
