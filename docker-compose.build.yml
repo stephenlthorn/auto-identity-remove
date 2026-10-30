@@ -1,0 +1,17 @@
+# docker-compose.build.yml - build the image from this directory instead of pulling it
+#
+# An override for docker-compose.yml, never used on its own and never needed to
+# run the tool (docker-compose.yml pulls the published image). Merge it in to
+# build from source, which is for contributors, for an architecture the image is
+# not published for, and for trying a change before it is released:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml build
+#   docker compose run --rm watcher
+#
+# It adds the build and nothing else. The mounts, user, environment and the rest
+# stay in docker-compose.yml, so the two cannot drift apart. The image keeps its
+# name, so `docker compose pull` replaces your build with the published image.
+
+services:
+  watcher:
+    build: .

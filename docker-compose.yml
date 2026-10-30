@@ -1,7 +1,32 @@
 # docker-compose.yml - auto-identity-remove
 #
+# Runs the prebuilt image from GitHub Container Registry. Every release publishes
+# ghcr.io/stephenlthorn/auto-identity-remove for linux/amd64 and linux/arm64, so
+# nothing is built on your machine (a NAS no longer builds 940 MB of Playwright).
+#
 # One-off run:        docker compose run --rm watcher
 # Preview only:       docker compose run --rm watcher node watcher.js --dry-run
+#
+# Which image. The latest release by default. Pin a release with AIDR_VERSION,
+# for example `AIDR_VERSION=2.0.1 docker compose run --rm watcher`, or export it.
+# The first run pulls the image and later runs use the copy already on the host, so
+# a run never updates it behind your back. To update:
+#
+#   docker compose pull
+#
+# Building from source instead of pulling (needs this whole directory, and a
+# machine that can take the build). docker-compose.build.yml only adds `build: .`
+# to the service below, and the build is tagged with the same image name, so after
+# it plain `docker compose run --rm watcher` uses your build until a
+# `docker compose pull` replaces it:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml build
+#
+# Why a second file and not `build: .` in this one: with both `image:` and `build:`
+# on a service, Compose treats a failed pull (the package is private, the host is
+# offline) as a warning and then BUILDS from source, silently starting the build
+# that the prebuilt image exists to avoid. Without a `build:` here, a failed pull
+# is an error that says so.
 #
 # First-time setup, once, from this directory:
 #
@@ -21,13 +46,13 @@
 # registry caches under aidr-home/data. The app creates its subdirectories itself.
 # Back it up and treat it like config.json - it is full of PII.
 #
-# For a scheduled monthly run, use cron/systemd on the host (or DSM Task
-# Scheduler on a Synology) to invoke `docker compose run --rm watcher`.
-# docs/SYNOLOGY.md has a worked NAS example.
+# For a scheduled monthly run, use cron/systemd on the host to invoke
+# `docker compose run --rm watcher`. On a Synology, DSM Task Scheduler runs a plain
+# `docker run` with no compose file at all; docs/SYNOLOGY.md has the worked example.
 
 services:
   watcher:
-    build: .
+    image: ghcr.io/stephenlthorn/auto-identity-remove:${AIDR_VERSION:-latest}
     # node runs as PID 1 without this, so `docker stop` cannot reap the Chromium
     # children and the state lock is left behind - wedging the next run.
     init: true
