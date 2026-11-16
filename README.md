@@ -1,6 +1,7 @@
 # auto-identity-remove
 
 ![CI](https://github.com/stephenlthorn/auto-identity-remove/actions/workflows/test.yml/badge.svg)
+[![Hacker News points via HackerGit](https://hackergit.org/badge/stephenlthorn/auto-identity-remove.svg?style=card)](https://news.ycombinator.com/item?id=48178184)
 
 Automated data broker opt-out runner for macOS, Linux, and Windows. Removes your personal information from **500+ people-search sites and data broker databases** on a monthly schedule - with CAPTCHA solving, persistent state tracking (so completed opt-outs aren't resubmitted every run), and an iMessage notification when done. [**Privacy & data flow ->**](docs/PRIVACY.md)
 
