@@ -802,9 +802,11 @@ async function modeReport() {
 
 // ── --doctor: self-diagnose and exit ─────────────────────────────────────────
 async function modeDoctor() {
-  const { runDoctor } = require('./lib/doctor');
+  const { runDoctor, runBrokerHealthDoctor } = require('./lib/doctor');
   const outcome = await runDoctor();
-  process.exit(outcome.exitCode);
+  // --brokers adds the broker health check from this machine; it loads pages only.
+  const brokerOutcome = ARGS.brokers ? await runBrokerHealthDoctor() : { exitCode: 0 };
+  process.exit(Math.max(outcome.exitCode, brokerOutcome.exitCode));
 }
 
 // ── --update-brokers: refresh data/feeds-brokers.json from live registries ───
