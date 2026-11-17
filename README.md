@@ -820,7 +820,9 @@ aidr run --found-only           # submit only where the scan found you
 `listingPattern`, whatever its opt-out method), for each person, in that person's own
 browser profile. **It submits nothing and sends no email.** It prints where you were
 found (with the listing URL), where you were not, where it could not tell (with the
-reason), and how many brokers cannot be searched. `--only` and `--skip` apply.
+reason), and how many brokers cannot be searched. `--only` and `--skip` apply. It exits 2
+when it could not tell anywhere (every search failed, for instance offline), so a scheduled
+scan that learned nothing does not look like a clean one.
 
 The latest result for each person and broker is saved in `state.json` under `scans`
 (keyed like the opt-outs), with a short history:

@@ -77,6 +77,12 @@
   "retention": {
     "_comment": "OPTIONAL. Run logs, audit reports, form screenshots and monthly report PDFs hold your name and the list of brokers that have your data, and they pile up. Add \"days\": 180 here (a number of days, or text like \"6m\" or \"1y\"; at least 7 days) to delete the ones older than that at the end of each successful run. With no \"days\" key, everything is kept forever (the default). Never deleted, whatever you set: the newest run log and its journal, the newest audit report, complaints, state and config. `aidr purge --older-than 180d --dry-run` shows what an age would delete without deleting anything."
   },
+  "scan": {
+    "_comment": "OPTIONAL. Used by `aidr run --found-only`, which submits only where the latest `aidr scan` found a listing. unknown: what to do with a broker whose scan result cannot be used (the scan could not tell, it is older than maxAgeDays, it was never scanned, or the broker cannot be searched). \"submit\" (default) sends the opt-out anyway; \"skip\" leaves it out and logs why. The email opt-outs and the generic brokers cannot be searched, so they follow this setting as a whole. A value other than submit or skip is a config problem.",
+    "unknown": "submit",
+    "maxAgeDays": 30,
+    "_maxAgeDays_comment": "How old a scan result may be and still count, as a whole number of days (1 or more). Default 30."
+  },
   "browser": {
     "_comment": "OPTIONAL browser settings; every field can stay blank. Each person in config gets their own browser profile folder under profileDir (named person-<n>-<hash>, never the person's name), so cookies and logins never carry from one person to the next. An existing single-person install keeps its current profile for the first person. Headless runs send a regular Chrome user agent instead of HeadlessChrome (same Chrome version); set userAgent below only to override that.",
     "proxy": {
