@@ -26,7 +26,7 @@ Beyond the monthly run, it can also:
 - **Stay private** - submit from a masked relay email (SimpleLogin), encrypt `config.json` at rest (AES-256-GCM, opt-in via `AIDR_PASSPHRASE`), and detect success/confirmation text in 6 languages
 - **Run from a browser** - an optional local web dashboard with a first-run config wizard, live run console, status board and a **History** tab of past runs (`aidr dashboard`)
 - **Stay in control of the job** - solve the CAPTCHAs a solver cannot (`aidr captchas`), check and remove the monthly job (`aidr schedule`), resume a killed run, check your config (`aidr config check`) and purge old PII files (`aidr purge`)
-- **Keep coverage fresh** - pull the broker list from the official California (SB 362) and Vermont registries (`aidr update-brokers`), and keep brokers you *want* to stay listed on via an allowlist
+- **Keep coverage fresh** - pull the broker list from the California Privacy Protection Agency's current data broker registry (`aidr update-brokers`; Vermont no longer offers a file export, and Texas and Oregon have none), and keep brokers you *want* to stay listed on via an allowlist
 
 ---
 
@@ -126,8 +126,9 @@ maps to an existing entrypoint:
 | `aidr breach` | Checks Have I Been Pwned and recommends a credit freeze on high-severity breaches |
 | `aidr freeze` | Shows the credit/identity-freeze checklist and its status |
 | `aidr complaints` | Generates regulator complaints for brokers past the CCPA/GDPR deadline |
+| `aidr drop` | California: shows how to file your DROP request, records when you did (`--done`, `--on DATE`, `--person NAME`, `--clear`), and skips the brokers it covers |
 | `aidr know` | Sends CCPA/GDPR right-to-know requests |
-| `aidr update-brokers` | Refreshes the broker list from the CA + Vermont registries |
+| `aidr update-brokers` | Refreshes the broker list from the current California registry |
 | `aidr list` | Lists configured brokers and their last-known status |
 | `aidr doctor` | Self-diagnoses your environment and configuration |
 | `aidr config check` | Checks `config.json`, the passphrase source and where state lives; exits 1 on a problem |
@@ -146,6 +147,52 @@ verb (`aidr schedule remove`) stops with the list of real ones before anything r
 
 > A native desktop wrapper (Electron/Tauri) is a planned follow-up and is **not**
 > included here - this release is clean CLI packaging only.
+
+### See which of your details go to which broker
+
+```
+aidr preview --fields
+```
+
+fills each form without sending it and prints, per broker, the form fields it typed into and
+which of your details went in each. It prints the NAME of the detail, never the value:
+
+```
+   fields for FastPeopleSearch:
+     optout_name <- full name
+     email <- masked email
+```
+
+The names are `first name`, `last name`, `full name`, `email` (`masked email` when your
+email relay supplies an alias), `phone`, `city`, `state` and `ZIP`. A field that gets a fixed
+choice, such as a dropdown option, shows `fixed text`. `unmapped` means the tool could not work
+out which detail a field carries; treat it as "unknown", not as "harmless".
+
+At the end of the run one table lists, for each broker, the set of details it would receive,
+then how many brokers would receive each detail (for example `phone: 12 of 140`). A broker whose
+form was not reached, or had no fillable form, is not in the table because nothing was typed.
+For the generic pass only a form that is already on the page is previewed; a form that opens
+after clicking a "Do Not Sell" link is not.
+
+Nothing printed contains a value unless you add `--show-values`, which also prints each value
+after its field on standard output (it is not written to the run log file, but anything that
+captures the terminal, such as `docker logs`, will see it). Use it to check a selector before a
+real run, and do not share that output.
+
+**What a preview itself does.** `--fields` is not "nothing leaves my machine". A preview still
+visits sites:
+
+- **Search steps run.** For a broker that searches first, the search page is loaded, and your name
+  (usually with your state) is in that URL. The table marks these as `search: full name, state`
+  and counts them in the totals.
+- **Explicit brokers' forms are filled in the page, not submitted.** The preview types your details
+  into the form fields of the brokers listed in `brokers.js` and stops before the submit click.
+  A script on such a page can read what is typed.
+- **Generic brokers' forms are not touched.** For the generic pass the tool works out what it
+  would type and types nothing, clicks nothing and submits nothing, so those pages see only a visit.
+
+The audit report written after a real run lists the same detail names for each broker
+(`details typed: first name, email`), never values, whatever flags you used.
 
 ---
 
@@ -183,6 +230,36 @@ Some opt-out forms have reCAPTCHA. Without CapSolver, those sites go to your man
 > **CapSolver is optional.** Without it, CAPTCHA-protected sites are flagged as
 > manual and opened in your browser for completion. Pass `--no-capsolver` to skip
 > them entirely rather than opening the browser.
+
+### Capping what CapSolver can spend
+
+Every solve is paid for, so a run can be given a ceiling:
+
+```json
+"capsolver": {
+  "apiKey": "CAP-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "maxSolvesPerRun": 25
+}
+```
+
+- `maxSolvesPerRun` is a whole number of 1 or more. Leave it out for no cap.
+- A solve counts when a paid task is created with CapSolver, whether or not it
+  then succeeds. Dry runs and previews never solve, so they never count.
+- One count covers the whole run: the explicit brokers, the 500+ generic brokers
+  and every person in a multi-person config.
+- When the cap is used up the solver is not called again. If you are at a visible
+  browser with manual solving on, you are asked as usual. Otherwise the broker is
+  recorded `captcha_failed` with the reason "solve cap reached (25 of 25 used)",
+  and `aidr captchas` picks it up afterwards.
+- Anything that is not a whole number of 1 or more (0, a negative, a fraction, a
+  string) is reported by `aidr config check` and at the start of a run, and the
+  run then allows no paid solve at all.
+- The run summary prints how many solves were used and the cap. The spend is the
+  difference between your CapSolver balance read before the first solve and again
+  at the end, so it follows whatever CapSolver charges today. If the balance
+  cannot be read, only the count is shown and the spend is reported as unknown.
+  The count and the spend are also written into the run log (`solves`) and the
+  end line of the journal.
 
 ### Solving CAPTCHAs yourself
 
@@ -555,7 +632,7 @@ This tool covers 500+ data brokers in two tiers:
 
 | Tier | Count | Confidence |
 |---|---|---|
-| **Explicit brokers** ([STATUS.md](STATUS.md)) | 51 | Hand-mapped with specific selectors. **None are currently marked `verified`** - the selectors compile and were correct when written, but none has been re-tested against the live site recently, so any of them may have drifted. |
+| **Explicit brokers** ([STATUS.md](STATUS.md)) | 50 | Hand-mapped with specific selectors. **None are currently marked `verified`** - the selectors compile and were correct when written, but none has been re-tested against the live site recently, so any of them may have drifted. |
 | **Generic runner** | ~490 | Best-effort heuristic - tries 4 strategies (Do Not Sell click, OneTrust/TrustArc, generic form, DSAR link). Many succeed; some fail silently. |
 
 Be skeptical of the counts this tool prints. Broker sites change their DOM
@@ -834,13 +911,18 @@ Only brokers tagged `acceptsBogus: true` in `brokers.js` will receive noise subm
 
 ### Refreshing the broker list (`--update-brokers`)
 
-The bundled Markup dataset is from January 2023 and is increasingly stale. Refresh the broker coverage from the official, auto-updating state data-broker registries:
+The bundled Markup dataset is from January 2023 and is increasingly stale. Refresh the broker coverage from the state data-broker registries that publish a file:
 
 ```bash
 node watcher.js --update-brokers
 ```
 
-This fetches the California (SB-362) and Vermont registries over HTTP (no browser is launched), normalizes each entry, dedups it by hostname against the explicit brokers in `brokers.js`, and writes `data/feeds-brokers.json`. The generic runner loads that file alongside the Markup dataset on the next run; the Markup data stays as the fallback, so a failed or skipped refresh never reduces coverage. Override the registry URLs with the `CA_REGISTRY_URL` / `VT_REGISTRY_URL` environment variables if the official endpoints move.
+This reads the California Privacy Protection Agency's current data broker registry over HTTP (no browser is launched), normalizes each entry (preferring the registry's consumer-rights page as the opt-out URL when it is a single http(s) address, otherwise the primary website), dedups it by company against the explicit brokers in `brokers.js`, and writes `data/feeds-brokers.json`. A company is the registrable domain of its primary website, so several brokers whose rights pages share one form platform (a OneTrust portal, a Google Form) stay separate rows. Each broker records which registries list it (`registries`), and the file keeps a `registryHosts` map of the registrable domain of each broker's primary website (never a rights-page host, a shared form platform or a bare suffix like `co.uk`) to the registries that list it, plus a `registries` block with each registry's broker count. The command prints one line per registry with its count or its failure. A registry that fails (an HTML page, an error status, no rows, a file cut off by an unclosed quote, a list under half the size of the earlier one, or, from the official California URL, fewer than 100 brokers) is reported as failed and its rows from the earlier run are kept, with their date; the command exits non-zero only when every registry failed. Other states:
+
+- **Vermont** no longer offers a file export, so it is skipped with a one-line note. Set `VT_REGISTRY_URL` to a CSV of your own to read it.
+- **Texas and Oregon** run their registries as web applications only, with no CSV, spreadsheet or JSON export, so they are not read.
+
+The generic runner loads the file alongside the Markup dataset on the next run; the Markup data stays as the fallback, so a failed or skipped refresh never reduces coverage. Override the California URL with `CA_REGISTRY_URL` if the official endpoint moves.
 
 ---
 
@@ -1034,21 +1116,84 @@ That said: if you're in a situation where even confirming your email address to 
 
 ---
 
-### California residents: DROP delete portal (SB 362)
+### California residents: DROP, the one-request deletion (SB 362)
 
-California's Delete Request and Opt-out Platform (DROP), established by SB 362,
-will eventually let residents submit a single deletion request that all
-California-registered data brokers must honor. The platform is operated by the
-California Privacy Protection Agency (CPPA).
+California's Delete Request and Opt-out Platform (DROP) is **live**. It is run by the
+California Privacy Protection Agency (branded CalPrivacy) and lets a California resident
+send one deletion request that every registered data broker must honor. It has been open
+to consumers since 2026-01-01, and registered brokers have had to access it since
+2026-08-01. The registry lists several hundred brokers; `aidr drop` prints the current
+count once `aidr update-brokers` has run.
 
-**Status as of late 2025: not yet live.** The broker-side compliance deadline
-in SB 362 is August 1, 2026. CPPA has missed several preceding milestones and
-ongoing litigation (Data Brokers Association v. Bonta) may further delay things.
+- Start at https://consumer.drop.privacy.ca.gov (the information page is https://privacy.ca.gov/drop/).
+- It verifies that you live in California through the California Identity Gateway (Socure or
+  Login.gov), and asks for your name, date of birth and email. Phone, ZIP code, mobile ad ID,
+  vehicle VIN and device ID are optional. One request covers one person.
+- You can amend or cancel a request no sooner than 45 days after you submit it.
+- The clock, Cal. Civ. Code 1798.99.86(c)(1): a broker must access the platform at least once
+  every 45 days and, within 45 days after receiving your request, delete your data. So a broker
+  can take up to 90 days from your submission (up to 45 to pick the request up, then up to 45
+  to delete). For a request submitted before 2026-08-01 the clock starts on 2026-08-01. After
+  that, under (d)(1), the broker must keep deleting new data about you at least every 45 days,
+  so one request stays in force.
+- Complaints go through the agency's general CCPA complaint form,
+  https://cppa.ca.gov/webapplications/complaint . There is no DROP-specific form.
 
-See: https://cppa.ca.gov/data_broker_registry/
+Identity verification means DROP cannot be automated, and aidr does not try. What it does is
+described under [`aidr drop`](#aidr-drop-record-your-california-drop-request) below.
 
-Until DROP is live, this tool falls back to per-broker opt-out flows for
-California-registered brokers.
+#### `aidr drop`: record your California DROP request
+
+```
+aidr drop                          # what DROP is, the URL, and where your request stands
+aidr drop --done                   # you submitted it today: record it
+aidr drop --done --on 2026-09-01   # you submitted it on another day (not in the future, not before 2026-01-01)
+aidr drop --done --person "Jane Sample"   # only this person, when config.json lists several
+aidr drop --clear                  # remove the record (works even if you no longer live in California)
+```
+
+Days are your machine's local calendar days, so `--done` at 17:30 Pacific records that day, not
+the next UTC date. `--done` on a request that is already recorded changes nothing and says which
+date is recorded (the 90-day clock hangs on it); `--done --on DATE` replaces it. When
+`config.json` lists more than one California resident, `--done` and `--clear` need `--person`
+so one person's request is never recorded for another. If `--person` matches two configured
+people with the same name, it refuses and says what tells them apart (email, zip code), because
+the record is kept per name: give one of them a different first or last name. A record carries
+the same identity fingerprint as the rest of the state, so a namesake or a replaced person does
+not inherit it.
+
+For each California person (state `CA` or `California`, country US or unset) it prints what
+DROP is, the URL, what the platform asks for, and one of: *not recorded yet*, *submitted on
+DATE and brokers have until DEADLINE*, or *the window passed on DATE*. It also says how many
+registry brokers it knows (counted from the registry's own broker count, not from domains); with
+none known it tells you to run `aidr update-brokers`. A person
+outside California is told DROP is for California residents and nothing changes.
+
+Once a request is recorded:
+
+- The generic pass does not visit a broker that is on the California registry, so fewer companies
+  receive your details. A broker counts as on the registry when its row came from the registry
+  feed, or when its own website is the primary website of a registry broker; a page on a shared
+  form platform (a OneTrust portal, a Google Form) never counts by its host. Each covered row is
+  logged as skipped ("covered by your DROP request of DATE") and the run summary counts them. This needs the registry list from `aidr update-brokers`; with
+  a recorded request and no list the run says so.
+- The explicit brokers in `brokers.js` (the people-search sites) still run: their listings are
+  public and a form is often faster.
+- After the deadline, `aidr complaints` can draft a complaint to the California agency for a
+  registry broker, but only when `aidr verify` saw you still listed after the deadline. It never
+  files from the age of a request alone.
+- `aidr score` shows how many registry brokers your request covers on a separate line. That is not
+  counted as a removal: a broker you have not checked is never treated as verified gone.
+
+To keep submitting to those brokers as well, set `"drop": { "alsoSubmit": true }` in `config.json`.
+A mistyped `drop` block (for example `"alsoSubmit": "true"`) turns the skipping off for that run, so
+every broker is submitted, and the run prints the config warning once at the start.
+
+After a request is recorded, the `CalPrivacy DROP` entry is listed as done with its date instead of
+as a to-do. A complaint treats a listing as seen after the deadline only from 08:00 UTC on the day
+after it (past midnight in California in both standard and daylight time).
+
+A real run for a California person with no recorded request prints one line pointing at `aidr drop`.
 
 ---
 

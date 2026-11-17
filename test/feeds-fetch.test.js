@@ -26,13 +26,13 @@ function makeFetch(byUrl) {
 
 const CA_CSV =
   'Data Broker Name,Website URL\n' +
-  'Acme Data Co,https://acme.example.com/opt-out\n' +
-  'Beta Brokers LLC,https://beta.example.com/\n';
+  'Acme Data Co,https://acme-data.example/opt-out\n' +
+  'Beta Brokers LLC,https://beta-brokers.example/\n';
 
 const VT_CSV =
   'Business Name,Website\n' +
-  'Gamma Insights,https://gamma.example.com/do-not-sell\n' +
-  'Acme Data Co,https://acme.example.com/optout\n';  // duplicate host with CA
+  'Gamma Insights,https://gamma-insights.example/do-not-sell\n' +
+  'Acme Data Co,https://acme-data.example/optout\n';  // duplicate host with CA
 
 test('fetchCaRegistry parses injected CSV into ca-sourced broker entries', async () => {
   const fetchImpl = makeFetch({ 'https://ca.test/registry.csv': CA_CSV });
@@ -76,7 +76,7 @@ test('buildFeedsFile merges both registries and dedups across them and explicit 
   try {
     const result = await feeds.buildFeedsFile({
       fetchImpl,
-      explicitHosts: ['beta.example.com'],  // collides with CA "Beta Brokers LLC"
+      explicitHosts: ['beta-brokers.example'],  // collides with CA "Beta Brokers LLC"
     });
     // CA: Acme + Beta (2). VT: Gamma + Acme-dup (2).
     // Dedup: Beta dropped (explicit), VT Acme dropped (dup of CA Acme).

@@ -37,6 +37,7 @@ const { renderAuditMarkdown, writeAuditFile, timestampForFilename } = require('.
 const { buildStealthScript } = require('./lib/stealth');
 const { buildLaunchOptions, resolveHeadless, isLowMemory, createPersonContexts, createThrowawayContexts, utilityProfileDir, browserConfigProblems, describeProxy } = require('./lib/browser');
 const { installShutdownHandlers } = require('./lib/shutdown');
+const { loadRegistryHostsSafe, loadCaBrokerCountSafe, makeCoveredByDrop, dropRunNotes, brokerAppliesToPerson, recordedDropFor } = require('./lib/drop');
 const { writePrivateFile, mkdirPrivate } = require('./lib/private-fs');
 const { resolveMode } = require('./lib/mode-dispatch');
 const { resolvePaths } = require('./lib/paths');
@@ -46,9 +47,14 @@ const { OFFLINE_HINT } = require('./lib/outage');
 const { applyRetention } = require('./lib/retention');
 const { isPlaceholderKey, detectAndSolveCaptcha } = require('./lib/captcha');
 const { RELAY_BROKER, relaySkippedNames, guardResumePlan } = require('./lib/resume-guard');
+const { budgetForRun, reportSolves, runLogSolves } = require('./lib/solve-budget');
 const { handleCaptcha, resolveManualMode, manualTimeoutSec, captchaFailureDetail, announceCaptchaWait, captchaBrokersFromLog, captchaConfigWarnings } = require('./lib/manual-captcha');
 
 const PREVIEW           = ARGS.preview;
+// aidr preview --fields: which of your details go into which field, by name. Values
+// only with --show-values (lib/field-report.js).
+const FIELD_REPORT      = ARGS.fields ? require('./lib/field-report').createFieldReport({ showValues: ARGS.showValues }) : null;
+const SHOW_VALUES       = ARGS.showValues;
 const DRY_RUN           = ARGS.dryRun; // lib/args: --preview implies --dry-run
 const VERIFY            = ARGS.verify;
 const SERP_SCAN         = ARGS.serpScan;
@@ -85,6 +91,7 @@ const KEEP_PLAINTEXT  = ARGS.keepPlaintext;
 const KNOW_MODE       = ARGS.know;
 const KNOW_STATUS     = ARGS.knowStatus;
 const COMPLAINTS_MODE = ARGS.complaints;
+const DROP_MODE       = ARGS.drop;
 
 // ── Credit / identity freeze guided checklist ────────────────────────────────
 const FREEZE_DONE_KEY  = ARGS.freezeDone;
@@ -358,6 +365,43 @@ function modeFreeze() {
   process.exit(0);
 }
 
+// -- aidr drop: California's DROP request (show, record, clear) ---------------
+// DROP verifies identity itself, so this never submits anything: it prints what to do,
+// and keeps the date the person did it (lib/drop.js).
+function modeDrop() {
+  const { runDrop, todayDay, DROP_URL } = require('./lib/drop');
+  const { persons } = loadConfigOrExit();
+  const state = loadState();
+
+  // Recording and clearing write state.json, so they take the lock like --freeze-done.
+  const isMutation = ARGS.done || ARGS.clear;
+  const guard = isMutation ? acquireRunLock(LOCK_PATH) : null;
+  let result;
+  try {
+    result = runDrop({
+      persons,
+      state,
+      options: { done: ARGS.done, clear: ARGS.clear, on: ARGS.on, person: ARGS.person },
+      registryCount: loadCaBrokerCountSafe(),
+      today: todayDay(),
+      utcToday: todayDay(new Date(), 0),
+    });
+  } finally {
+    if (guard) guard.release();
+  }
+
+  const out = result.code === 0 ? console.log : console.error;
+  out('\n' + result.lines.join('\n') + '\n');
+  // Open the page only for someone sitting at a desktop who still has to file: never in
+  // a scheduled or piped run, and never after they just recorded or cleared something.
+  const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY) && canOpenBrowser();
+  if (result.code === 0 && result.pending && !isMutation && !DRY_RUN && interactive) {
+    console.log(`Opening ${DROP_URL} in your browser...\n`);
+    openInBrowser([DROP_URL]);
+  }
+  process.exit(result.code);
+}
+
 // -- --encrypt-config / --decrypt-config: at-rest encryption migration --------
 function modeEncryption() {
   const { encryptConfigToDisk, decryptConfigToDisk, getPassphrase, PASSPHRASE_ENV, PASSPHRASE_FILE_ENV } = require('./lib/config');
@@ -455,7 +499,12 @@ function modeScore() {
 
   // The SERP signal is the latest conclusive scan and the breach count is the
   // last real HIBP result, not the hard-coded 0 this used to pass.
-  const summary = computeExposureScore({ state, brokers, ...loadPersistedSignals() });
+  // A recorded DROP request is shown beside the score, never inside it (lib/exposure.js).
+  let dropCovered = 0;
+  try {
+    dropCovered = require('./lib/drop').dropCoveredCount({ persons: getPersonsFromConfig(readConfigQuietly()), state, registryCount: loadCaBrokerCountSafe() });
+  } catch (_) { /* no readable config: the score does not need one */ }
+  const summary = computeExposureScore({ state, brokers, dropCovered, ...loadPersistedSignals() });
 
   const priorHistory = loadExposureHistory();
   console.log('\n' + formatScoreReport(summary, priorHistory));
@@ -568,7 +617,7 @@ async function modeBreachCheck() {
 //    response window (CCPA 45d / GDPR 30d) and write text + PDF to logs/. ─────
 async function modeComplaints() {
   const brokers = require('./brokers');
-  const { findOverdue, findOverdueKnowRequests, formatOverdueKnowNote, complainantFor, buildComplaintsForBroker, writeComplaintFiles } = require('./lib/complaint');
+  const { findOverdue, findOverdueKnowRequests, formatOverdueKnowNote, complainantFor, buildComplaintsForBroker, writeComplaintFiles, findDropOverdue, buildDropComplaint } = require('./lib/complaint');
 
   const { config, persons } = loadConfigOrExit();
   const state   = loadState();
@@ -580,7 +629,13 @@ async function modeComplaints() {
   if (knowNote) console.log('\n' + knowNote);
 
   const overdueList = findOverdue(state, { persons });
-  if (overdueList.length === 0) {
+  // California DROP: a registry broker still listing someone after the request's window.
+  const dropOverdue = findDropOverdue(state, {
+    persons,
+    registryHosts: loadRegistryHostsSafe(),
+    hostFor: (name) => { const b = brokerMap.get(name); return b && (b.optOutUrl || b.searchUrl); },
+  });
+  if (overdueList.length === 0 && dropOverdue.length === 0) {
     console.log('\nNo broker qualifies for a complaint: it needs a deletion request past its response window and a verification (run --verify) that your data is still listed.\n');
     process.exit(0);
   }
@@ -595,7 +650,7 @@ async function modeComplaints() {
     for (const { overdue } of unmatched) console.log(`  - ${overdue.broker}${overdue.person ? ` (${overdue.person})` : ''}`);
   }
   const matched = complainants.filter(c => c.person);
-  if (matched.length === 0) {
+  if (matched.length === 0 && dropOverdue.length === 0) {
     console.log('\nNo complaint was written.\n');
     process.exit(0);
   }
@@ -615,6 +670,14 @@ async function modeComplaints() {
     );
     return { broker: overdue.broker, person: overdue.person, complaints: buildComplaintsForBroker({ person, broker, overdue }) };
   });
+
+  for (const row of dropOverdue) {
+    const person = complainantFor(row, persons);
+    if (!person) continue;
+    const broker = brokerMap.get(row.broker) || { name: row.broker };
+    console.log(pad(row.broker, 32) + pad('DROP', 8) + pad(String(row.daysOverdue), 14) + row.submittedAt);
+    entries.push({ broker: row.broker, person: row.person, complaints: [buildDropComplaint({ person, broker, overdue: row })] });
+  }
 
   // Complaints carry the complainant's name, address, email and phone.
   mkdirPrivate(outDir);
@@ -815,8 +878,8 @@ async function modeDoctor() {
 async function modeUpdateBrokers() {
   const brokers = require('./brokers');
   const { runUpdateBrokers } = require('./lib/feeds');
-  await runUpdateBrokers({ brokers, logFn: (m) => console.log(m) });
-  process.exit(0);
+  const outcome = await runUpdateBrokers({ brokers, logFn: (m) => console.log(m) });
+  process.exit(outcome.exitCode);
 }
 
 // ── --install-scheduler: register with OS scheduler and exit ─────────────────
@@ -1043,6 +1106,7 @@ async function runWithBrowser({ config, persons, state, guard, captchaNames }) {
   if (POLLUTE_COUNT) console.log(`⚠️  NOISE MODE - ${POLLUTE_COUNT} bogus record(s) will be submitted to acceptsBogus brokers.`);
   console.log(`📅 ${new Date().toLocaleString()}`);
   console.log(`📋 ${brokers.length} explicit brokers + 500+ generic | re-check window: ${RECHECK_DAYS} days\n`);
+  if (SHOW_VALUES) console.log('--show-values: the values below are your real details, printed on this terminal only. Do not paste this output anywhere public.\n');
 
   brokerRunner.configure({ dryRun: DRY_RUN, preview: PREVIEW, person: persons[0], personIndex: 0, capsolver: config.capsolver, noCapsolver: NO_CAPSOLVER, snapshot: SNAPSHOT, personCount: persons.length, config, partial: FILTERED });
 
@@ -1076,7 +1140,7 @@ async function runWithBrowser({ config, persons, state, guard, captchaNames }) {
   // CAPTCHAs: decided once, here, from the run's own conditions (R1). The explicit
   // runner and the generic pass both read the answer, so they cannot disagree.
   const captcha = resolveCaptchaPlan({ config, headless });
-  brokerRunner.configure({ manual: captcha.manual, headless, isTTY: captcha.isTTY });
+  brokerRunner.configure({ manual: captcha.manual, headless, isTTY: captcha.isTTY, capsolver: captcha.capsolver });
   // A mistyped setting is worth knowing about in any run; who would solve a CAPTCHA
   // only matters to a run that submits (a dry run never waits, and --verify and the
   // SERP modes have no forms).
@@ -1137,7 +1201,10 @@ function resolveCaptchaPlan({ config, headless }) {
   } else {
     modeLine = `🧩 CAPTCHAs: solver only (${isTTY ? 'captcha.manual is false' : 'no interactive terminal'}). To solve them yourself afterwards: aidr captchas`;
   }
-  return { manual, isTTY, warnings, modeLine };
+  // One solve budget for the run, shared by the explicit runner, the generic pass and
+  // every person (Q2). Its config warnings are already in `warnings` above.
+  const { budget: solveBudget, capsolver } = budgetForRun(config);
+  return { manual, isTTY, warnings, modeLine, solveBudget, capsolver };
 }
 
 // ── Verify mode: T+7 post-submit verification loop ───────────────────────────
@@ -1360,7 +1427,9 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
     }
 
     const submissionEmail = submissionEmails.get(person);
-    brokerRunner.configure({ dryRun: DRY_RUN, preview: PREVIEW, person, personIndex: index, capsolver: config.capsolver, noCapsolver: NO_CAPSOLVER, snapshot: SNAPSHOT, personCount: persons.length, config, submissionEmail, partial: FILTERED });
+    // `captcha.capsolver` is the solver config that carries the run's one solve budget (Q2).
+    brokerRunner.configure({ dryRun: DRY_RUN, preview: PREVIEW, person, personIndex: index, capsolver: captcha.capsolver, noCapsolver: NO_CAPSOLVER, snapshot: SNAPSHOT, personCount: persons.length, config, submissionEmail, partial: FILTERED, fieldReport: FIELD_REPORT, showValues: SHOW_VALUES });
+    if (FIELD_REPORT) FIELD_REPORT.setPerson(persons.length > 1 ? personName(person) : '');
 
     // Rebuild the broker list for THIS person. brokers.js interpolates names,
     // city, state, zip and email into searchUrl and formFields, so reusing the
@@ -1375,9 +1444,14 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
     console.log('── Email opt-outs ─────────────────────────────────────────');
     await sendOptOutEmails(brokers, config, undefined, { submissionEmailFor: (p) => submissionEmails.get(p), onlyPerson: person, dryRun: DRY_RUN, include });
 
+    // The manual DROP entry is a to-do only until the request is recorded; after that it is listed
+    // as done, with the date, and never offered again (lib/drop.js).
+    const dropDone = new Map();
     let sorted = personBrokers
-      .filter(b => b.method !== 'email' && include(b.name))
+      .filter(b => b.method !== 'email' && include(b.name) && brokerAppliesToPerson(b, person))
+      .filter(b => { const day = recordedDropFor(b, person, state); if (day) dropDone.set(b, day); return !day; })
       .sort((a, b) => (a.priority || 9) - (b.priority || 9));
+    for (const [broker, day] of dropDone) logResult(broker.name, 'skipped', `already done: your DROP request was recorded on ${day}`);
 
     if (RESUME) {
       // Only the person the explicit checkpoint belongs to resumes mid-list; planResume
@@ -1481,7 +1555,7 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
   // for the whole run, and an unsolved one is worded exactly like an explicit one.
   const timeoutSec = manualTimeoutSec(config);
   const genericHandleCaptcha = (page, ctx) => handleCaptcha(page, {
-    capsolver: NO_CAPSOLVER ? null : config.capsolver,
+    capsolver: NO_CAPSOLVER ? null : captcha.capsolver,
     manual: captcha.manual,
     onWaiting: (info) => announceCaptchaWait(info, { notify: desktopNotify }),
     timeoutMs: timeoutSec * 1000,
@@ -1496,7 +1570,12 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
     isTTY: captcha.isTTY,
     config,
     noSolver: NO_CAPSOLVER,
+    budget: captcha.solveBudget,
   });
+
+  // DROP: what the person should know once per run, and the registry list the generic pass skips by.
+  const dropRegistryHosts = loadRegistryHostsSafe();
+  for (const line of dropRunNotes({ persons, state, config, registryHosts: dropRegistryHosts })) console.log(`\n${line}`);
 
   const genericTotals = {};
   for (const [index, person] of persons.entries()) {
@@ -1519,8 +1598,11 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
       logResult('Generic brokers', 'error', `browser unavailable (${safeMessage(err)}); the generic pass for ${personName(person)} was not run`);
       continue;
     }
+    if (FIELD_REPORT) FIELD_REPORT.setPerson(persons.length > 1 ? personName(person) : '');
     const genericResult = await runGenericBrokers(context, explicitHosts, state, logResult, recordSuccess, {
       dryRun: DRY_RUN,
+      fieldReport: FIELD_REPORT || undefined,
+      showValues: SHOW_VALUES,
       person,
       personCount: persons.length,
       personIndex: index,
@@ -1530,6 +1612,8 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
       include,
       // Lets the generic pass drop rows that are the same company as an explicit broker.
       explicitBrokers: brokers,
+      // California DROP: rows the person's recorded request already covers are not visited.
+      coveredByDrop: makeCoveredByDrop({ person, state, config, registryHosts: dropRegistryHosts }) || undefined,
       // R2: write a resume point as the pass advances, and pick one back up. A filtered
       // run writes none: its rows are not the interrupted full run's, and a checkpoint
       // of its own would replace the one a killed full run is waiting on (CLI2-10).
@@ -1550,6 +1634,7 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
   }
   setCurrentPerson(null);
   results.genericStats = genericTotals;
+  if (FIELD_REPORT) for (const line of FIELD_REPORT.renderTables()) console.log(line);
 
   // Clear checkpoint now that the run completed successfully (a no-op in dry-run,
   // so a preview never deletes the checkpoint of an interrupted real run). A filtered
@@ -1558,6 +1643,12 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
 
   await contexts.close();
 
+  // CapSolver solves and spend (Q2): settled before the log is written so the log, the
+  // journal and the printed summary carry the same numbers. A dry run never solves.
+  const solveEnd = await captcha.solveBudget.finish();
+  const solvesForLog = runLogSolves(solveEnd);
+  if (solvesForLog) results.solves = solvesForLog;
+
   // Save run log (skipped in dry-run); `partial` and `runFilter` were fixed at the top.
   const logBody = partial ? { ...results, partial: true, filter: runFilter } : results;
   if (!DRY_RUN) {
@@ -1565,7 +1656,7 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
     mkdirPrivate(LOG_DIR);
     writePrivateFile(logFile, JSON.stringify(logBody, null, 2));
     // The summary is the record now; the journal is closed with the same counts.
-    journal.close({ counts: countResults(results) });
+    journal.close({ counts: countResults(results), ...(solvesForLog ? { solves: solvesForLog } : {}) });
     setJournal(null);
   }
 
@@ -1621,6 +1712,7 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
   console.log('\n' + '═'.repeat(54));
   console.log(summary);
   console.log('═'.repeat(54));
+  await reportSolves(captcha.solveBudget, (line) => console.log(`🧩 ${line}`));
   console.log(DRY_RUN ? '\n📄 Log: not written (dry run)' : `\n📄 Log: ${logFile}`);
   console.log(DRY_RUN ? '💾 State: not saved (dry run)\n' : `💾 State: ${STATE_PATH}\n`);
 
@@ -1704,6 +1796,7 @@ async function dispatch() {
   }
 
   if (FREEZE_MODE)                     return modeFreeze();
+  if (DROP_MODE)                       return modeDrop();
   if (ENCRYPT_CONFIG || DECRYPT_CONFIG) return modeEncryption();
   if (LIST_MODE)                       return modeList();
   if (SCORE_MODE)                      return modeScore();

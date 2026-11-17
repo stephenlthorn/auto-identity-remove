@@ -2,6 +2,36 @@
 
 A release is cut by bumping `version` in `package.json` on main. The section here for that version becomes the release notes, so every version needs one.
 
+## 2.1.0 - 2026-11-17
+
+California's one-request deletion platform, broker lists that are current again, a cap on CAPTCHA spend, and a way to see what would be sent before it is sent. An existing install behaves as before until you use the new commands or settings, apart from the two items under **Changed**.
+
+### New
+
+- **`aidr drop`** (F1), for California residents. California's Delete Request and Opt-out Platform (DROP) lets one request cover every data broker on the state registry. The state verifies who you are, so the tool cannot file it for you. What it does:
+  - `aidr drop` explains the platform, links to it and shows where your request stands. `aidr drop --done` records that you filed it (`--on YYYY-MM-DD` for another day, `--person "First Last"` when several California residents are configured, `--clear` to undo).
+  - Once a request is recorded, the generic pass skips the brokers on the California registry for that person and says how many. Against the registry on the day of this release that was 383 of the 519 bundled generic brokers. The explicit people-search brokers still run. `drop.alsoSubmit: true` keeps sending to everyone.
+  - Brokers have up to 90 days: 45 to pick a request up and 45 to delete (Cal. Civ. Code 1798.99.86). After that, `aidr complaints` can draft a complaint to the California privacy agency, but only for a registry broker that `aidr verify` found still listing you after the deadline. It never drafts one from the age of a request.
+  - Run `aidr update-brokers` once so the tool knows the registry.
+- **`aidr preview --fields`** (Q4): for each broker, which of your details would go into which field, what its search URL and opt-out URL carry, and a closing table with totals. Names of details only; `--show-values` prints the values on your terminal. With `--fields`, nothing is typed into the generic brokers' forms. The audit report of a real run now lists the details typed for each broker, names only.
+- **`capsolver.maxSolvesPerRun`** (Q2): a ceiling on paid CAPTCHA solves in one run, shared by every person and both passes. When it is reached, the remaining CAPTCHA brokers are left for `aidr captchas`. The run summary shows the solves used and the spend, read from your CapSolver balance before and after.
+- **Registries per broker** (Q3): each registry row records which state registries list it.
+
+### Changed
+
+- **`aidr update-brokers` reads California's current registry** (Q3). The address it used before now answers 403, so the command had been getting nothing from California. It now prints a count or a failure per registry, keeps the earlier rows of a registry that fails, and exits 1 only when every registry failed (it always exited 0 before). Vermont's export stopped serving a file and is skipped with one line; set `VT_REGISTRY_URL` if you have a working export. Texas and Oregon publish no export, so they are not read.
+- `data/feeds-brokers.json` is now an object (`brokers`, `registryHosts`, `registries`, `updatedAt`). A file in the old array shape is still read.
+- One accurate `CalPrivacy DROP` manual entry replaces two stale ones and is shown only to California residents, so `brokers.js` lists 50 explicit brokers.
+
+### Fixed
+
+- The README, `STATUS.md` and `brokers.js` said DROP was "not yet live". It opened to consumers on 2026-01-01 and brokers have had to act on requests since 2026-08-01.
+- The README described the old Attorney General export (2020 to 2023) as the current California registry.
+
+### How it was checked
+
+Written test-first. An independent review of the release branch found 2 P1, 4 P2 and 7 P3 issues before release; all are fixed, each with a test that failed first. A mutation check then planted 22 chosen bugs in the new rules, all of which the tests caught, and about 27 more: 7 slipped through and now have tests.
+
 ## 2.0.1 - 2026-10-30
 
 A prebuilt Docker image, so a NAS no longer has to build one. The tool itself is the same as 2.0.0.
