@@ -245,14 +245,29 @@ test('runDrop with no flags prints each person and changes nothing', () => {
   assert.equal(r.state.drop, undefined);
 });
 
-test('runDrop --done records today for the California people only', () => {
-  const r = runDrop({ persons: [JANE, BOB, JANET], options: { done: true } });
+test('runDrop --done records today for the one California person (others are not touched)', () => {
+  const r = runDrop({ persons: [JANE, BOB], options: { done: true } });
   assert.equal(r.code, 0);
-  assert.deepEqual(r.state.drop, {
-    'Jane Sample': { submittedAt: '2026-11-17' },
-    'Janet Sample': { submittedAt: '2026-11-17' },
-  });
+  assert.deepEqual(r.state.drop, { 'Jane Sample': { submittedAt: '2026-11-17' } });
   assert.match(r.text, /submitted on 2026-11-17/);
+});
+
+test('runDrop --done or --clear with several California people needs --person (D2)', () => {
+  for (const options of [{ done: true }, { clear: true }, { done: true, on: '2026-09-01' }]) {
+    const state = { optOuts: {}, drop: { 'Jane Sample': { submittedAt: '2026-09-01' } } };
+    const r = runDrop({ persons: [JANE, BOB, JANET], options, state });
+    assert.equal(r.code, 2, JSON.stringify(options));
+    assert.match(r.text, /--person/);
+    assert.match(r.text, /Jane Sample, Janet Sample/, 'lists the California people');
+    assert.doesNotMatch(r.text, /Bob Sample/, 'not the Texan');
+    assert.deepEqual(state.drop, { 'Jane Sample': { submittedAt: '2026-09-01' } }, 'nothing was changed');
+  }
+});
+
+test('runDrop with several California people and no flag still just shows them all', () => {
+  const r = runDrop({ persons: [JANE, JANET] });
+  assert.equal(r.code, 0);
+  assert.match(r.text, /Jane Sample[\s\S]*Janet Sample/);
 });
 
 test('runDrop --done --on records that day and shows the deadline', () => {
@@ -263,7 +278,7 @@ test('runDrop --done --on records that day and shows the deadline', () => {
 
 test('runDrop refuses a bad --on before recording anything', () => {
   for (const on of ['2026-11-18', '2025-12-31', 'soon']) {
-    const r = runDrop({ persons: [JANE, JANET], options: { done: true, on } });
+    const r = runDrop({ persons: [JANE, JANET], options: { done: true, on, person: 'Jane Sample' } });
     assert.equal(r.code, 2, on);
     assert.equal(r.state.drop, undefined, `${on} must record nothing`);
     assert.match(r.text, /Error:/);
