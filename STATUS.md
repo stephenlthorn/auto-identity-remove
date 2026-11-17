@@ -1,12 +1,12 @@
 # Broker Status
 
-> **What this page is:** a weekly health check of the opt-out pages of the 51 explicit brokers in `brokers.js`. A scheduled job loads each page with a plain headless browser and checks that the page answers and that the selectors the definition relies on still exist. It is generated: edit `brokers.js` or let the weekly job refresh `data/broker-health.json`, then run `node scripts/generate-status.js`. Do not edit the table by hand.
+> **What this page is:** a weekly health check of the opt-out pages of the 50 explicit brokers in `brokers.js`. A scheduled job loads each page with a plain headless browser and checks that the page answers and that the selectors the definition relies on still exist. It is generated: edit `brokers.js` or let the weekly job refresh `data/broker-health.json`, then run `node scripts/generate-status.js`. Do not edit the table by hand.
 >
 > **Limits, plainly:** the check looks at the shape of the form. It never types, clicks or submits, so it cannot tell you whether a submission deletes anything. `aidr verify` is the check for that. And the weekly job runs from a data centre address that some sites refuse, so a page can be `blocked` here and fine from your home connection. `aidr doctor --brokers` runs the same check from your own machine.
 
 The last check ran on 2026-11-17, from a run on a developer machine.
 
-**15 ok, 11 drifted, 20 blocked, 0 dead, 1 error** out of 47 brokers with a page to check; 4 n/a (email brokers have no page).
+**14 ok, 11 drifted, 20 blocked, 0 dead, 1 error** out of 46 brokers with a page to check; 4 n/a (email brokers have no page).
 
 ## Health labels
 
@@ -39,7 +39,7 @@ If you encounter a broker that has changed its form, please file a GitHub issue 
 - **US-only** - site indexes US public records / voter data / phone directories; automatically skipped for non-US users.
 - **Search step** - `yes` when the broker has a search URL the runner uses to find your listing first; the date is when that search page was last confirmed to work, if it has been.
 
-**This list covers the 51 explicit brokers in `brokers.js` only.** The other ~490 brokers in `data/markup-parsed.json` and `data/badbool-extra.json` are handled by the heuristic generic runner - every one of those is best-effort. Run `node watcher.js --verify` to spot-check whether opt-outs are still in effect.
+**This list covers the 50 explicit brokers in `brokers.js` only.** The other ~490 brokers in `data/markup-parsed.json` and `data/badbool-extra.json` are handled by the heuristic generic runner - every one of those is best-effort. Run `node watcher.js --verify` to spot-check whether opt-outs are still in effect.
 
 ---
 
@@ -47,7 +47,6 @@ If you encounter a broker that has changed its form, please file a GitHub issue 
 
 | Broker | Method | CAPTCHA | Health | Checked | US-only | Search step |
 |---|---|---|---|---|---|---|
-| California DELETE Portal | manual | n/a | ok | 2026-11-17 | no | no |
 | Spokeo | search-form | no | blocked | 2026-11-17 | yes | yes (not checked) |
 | WhitePages | search-form | no | blocked | 2026-11-17 | yes | yes (not checked) |
 | FastPeopleSearch | search-form | no | ok | 2026-11-17 | yes | yes (not checked) |
