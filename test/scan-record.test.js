@@ -100,6 +100,20 @@ test('hasAnyScan: false with no scans, and a sighting made by an ordinary run is
   assert.equal(hasAnyScan({ optOuts: {}, scans: { A: { at: daysBefore(1), outcome: 'unknown' } } }), true);
 });
 
+test('hasAnyScan: a run\'s sighting written over a real scan does not make the scan disappear', () => {
+  const state = { optOuts: {} };
+  recordScan(state, ref('A'), { outcome: 'not_found', at: daysBefore(5) });
+  recordScan(state, ref('A'), { outcome: 'found', at: daysBefore(1), listingUrl: 'https://a.example/l', source: 'run' });
+  assert.equal(state.scans.A.outcome, 'found');
+  assert.equal(state.scans.A.lastScanAt, daysBefore(5));
+  assert.equal(hasAnyScan(state), true);
+
+  const runOnly = { optOuts: {} };
+  recordScan(runOnly, ref('A'), { outcome: 'found', at: daysBefore(1), listingUrl: 'https://a.example/l', source: 'run' });
+  recordScan(runOnly, ref('A'), { outcome: 'found', at: daysBefore(0), listingUrl: 'https://a.example/l', source: 'run' });
+  assert.equal(hasAnyScan(runOnly), false);
+});
+
 // ── the --found-only decision ────────────────────────────────────────────────
 
 const decide = (over) => decideFoundOnly({ scan: undefined, searchable: true, config: {}, now: NOW, ...over });
@@ -171,4 +185,43 @@ test('decideFoundOnly: a scan with no usable date is treated as stale, and an un
   assert.equal(decide({ scan: { outcome: 'found' } }).basis, 'stale');
   assert.equal(decide({ scan: { at: 'not a date', outcome: 'not_found' } }).basis, 'stale');
   assert.equal(decide({ scan: { at: daysBefore(1), outcome: 'weird' } }).basis, 'unknown');
+});
+
+// ── applying the decision to a person's broker list ──────────────────────────
+
+const { applyFoundOnly } = require('../lib/scan');
+
+const searchable = (name, extra = {}) => ({ name, method: 'search-form', searchUrl: `https://${name}.example/s`, listingPattern: /x/, ...extra });
+const formOnly = (name) => ({ name, method: 'direct-form', optOutUrl: `https://${name}.example/o` });
+
+test('applyFoundOnly: submits found, skips not_found with its reason, and sends the rest through scan.unknown', () => {
+  const state = { optOuts: {}, scans: {
+    Found: { at: daysBefore(2), outcome: 'found' },
+    Absent: { at: '2026-11-10T00:00:00.000Z', outcome: 'not_found' },
+    Blocked: { at: daysBefore(2), outcome: 'unknown', reason: 'search failed: bot wall' },
+  } };
+  const brokers = [searchable('Found'), searchable('Absent'), searchable('Blocked'), searchable('Fresh'), formOnly('Plain')];
+  const base = { brokers, person: jane, personCount: 1, persons: [jane], personIndex: 0, state, now: NOW };
+
+  const submitDefault = applyFoundOnly({ ...base, config: {} });
+  assert.deepEqual(submitDefault.submit.map(b => b.name), ['Found', 'Blocked', 'Fresh', 'Plain']);
+  assert.deepEqual(submitDefault.skipped.map(s => [s.broker.name, s.decision.reason]), [['Absent', 'not listed (scan of 2026-11-10)']]);
+
+  const skipUnknown = applyFoundOnly({ ...base, config: { scan: { unknown: 'skip' } } });
+  assert.deepEqual(skipUnknown.submit.map(b => b.name), ['Found']);
+  assert.deepEqual(skipUnknown.skipped.map(s => s.broker.name), ['Absent', 'Blocked', 'Fresh', 'Plain']);
+  assert.ok(skipUnknown.skipped.every(s => s.decision.reason.length > 0));
+});
+
+test('applyFoundOnly: each person is judged on their own scans, and order is kept', () => {
+  const state = { optOuts: {}, scans: {
+    'A|Jane Sample': { at: daysBefore(1), outcome: 'found', fp: personFingerprint(jane) },
+    'A|Sam Sample': { at: daysBefore(1), outcome: 'not_found', fp: personFingerprint(sam) },
+    'B|Jane Sample': { at: daysBefore(1), outcome: 'not_found', fp: personFingerprint(jane) },
+    'B|Sam Sample': { at: daysBefore(1), outcome: 'found', fp: personFingerprint(sam) },
+  } };
+  const brokers = [searchable('A'), searchable('B')];
+  const run = (person, personIndex) => applyFoundOnly({ brokers, person, personCount: 2, persons: [jane, sam], personIndex, state, config: {}, now: NOW });
+  assert.deepEqual(run(jane, 0).submit.map(b => b.name), ['A']);
+  assert.deepEqual(run(sam, 1).submit.map(b => b.name), ['B']);
 });
