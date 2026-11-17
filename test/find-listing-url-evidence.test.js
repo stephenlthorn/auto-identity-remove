@@ -7,8 +7,8 @@
  * "not listed" for every person. Now:
  *
  *   rule 1  the final URL is on the same registrable domain as the search URL
- *   rule 2  the page text or title contains the searched last name
- *           (skipped when no last name is known at all)
+ *   rule 2  the page text or title contains the searched last name, and the first
+ *           name too when it is known (skipped when no last name is known at all)
  *
  * Missing evidence is "could not tell" (UNVERIFIABLE), never null. A found
  * listing is unaffected. A broker may also state its own no-results page with
@@ -181,4 +181,31 @@ test('without searchNotFound a 404 stays could-not-tell exactly as before', asyn
   const page = makePage({ status: 404, probe: probeResult({ text: NOT_FOUND_TEXT }) });
   const err = await couldNotTell(page, BROKER);
   assert.match(err.message, /HTTP 404/);
+});
+
+// A last name can be an ordinary word. The real radaris.com notice reads "Superior
+// Court of New Jersey, Law Division": for someone called Law, rule 2 on the last name
+// alone would have believed that notice was their results page.
+const COURT_NOTICE = (
+  'This Domain Has Been Transferred by Court Order. Superior Court of New Jersey, Law Division, '
+  + 'Middlesex County. Pursuant to a final judgment the domain name has been transferred and is no '
+  + 'longer under the control of its former operators. Nothing on this page is a search result. '
+).repeat(5);
+
+test('rule 2: a notice that happens to contain the last name as a word is could-not-tell when the first name is missing', async () => {
+  const person = { firstName: 'Jude', lastName: 'Law' };
+  const err = await couldNotTell(makePage({ probe: probeResult({ text: COURT_NOTICE, title: 'Domain Transferred' }) }), BROKER, person);
+  assert.match(err.message, /did not show a results page for this search/);
+  assert.doesNotMatch(err.message, /Jude|Law/, 'the message must not carry the person\'s name');
+});
+
+test('rule 2: a results page that echoes the first and the last name is "not listed"', async () => {
+  const person = { firstName: 'Jude', lastName: 'Law' };
+  const text = 'No results for Jude Law in Texas. Try a different spelling or another state. '.repeat(6);
+  assert.equal(await findListingUrl(makePage({ probe: probeResult({ text }) }), BROKER, person), null);
+});
+
+test('rule 2: with a first name known, the last name alone is not enough', async () => {
+  const person = { firstName: 'Jude', lastName: 'Sample' };
+  await couldNotTell(makePage({ probe: probeResult({ text: 'Records for the Sample family across Texas. '.repeat(10) }) }), BROKER, person);
 });
