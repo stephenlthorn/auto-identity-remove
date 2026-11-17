@@ -108,7 +108,7 @@ ${totalsLine(brokers, results)}
 - \`n/a\` - email brokers. Removal is an email, so there is no page to check.
 - \`not checked yet\` - the broker has no result in \`data/broker-health.json\`.
 
-**Brokers known to be dead or moved as of late 2025:**
+**Brokers known to be dead, moved or removed (as of Nov 2026):**
 - **NationalPublicData**: defunct (Aug 2024 SSN breach + Oct 2024 bankruptcy). Listing kept for historical reference; opt-out flow does not work.
 - **Clearbit**: acquired by HubSpot (Nov 2023), now "Breeze Intelligence". Opt-out runs through a DataGrail request center at preferences.clearbit.com. Now \`manual\`: the form needs a custom dropdown and a second confirm step that the direct-form runner cannot complete.
 - **Acxiom**: live but requires multi-step identity verification at acxiom.com/about-us/privacy/. Single-form POST will fail.
@@ -117,6 +117,8 @@ ${totalsLine(brokers, results)}
 - **Andrews Wharton**: added to \`brokers.js\` as \`manual\` (Oct 2026). It came from the Markup dataset, and the generic runner submitted the marketing sign-up form on its homepage as if it were an opt-out. The explicit entry keeps the generic runner off that host; the real opt-out is Stirista's portal at unsubscribe.stirista.com.
 - **ClustrMaps**: removed from \`brokers.js\` (Oct 2026). Its own DNS points clustrmaps.com at 127.0.0.1 (since about Sep 2026), so the site is unreachable everywhere; the domain is still registered and may return.
 - **PublicDataUSA**: removed from \`brokers.js\` (Oct 2026). The domain no longer resolves; the site appears to have shut down around September 2026.
+- **Radaris**: removed from \`brokers.js\` (Nov 2026). radaris.com was transferred by court order to Atlas Data Privacy Corporation; every URL on it, search URLs included, now shows the same "This Domain Has Been Transferred by Court Order" notice and the opt-out pages no longer exist (confirmed 2026-11-17). The host is in \`data/dead-urls.json\` so no pass visits it.
+- **PeekYou**: removed from \`brokers.js\` (Nov 2026). peekyou.com was transferred by court order to the same company and shows a "Domain Update" notice; the opt-out page no longer exists (confirmed 2026-11-17). The host is in \`data/dead-urls.json\` so no pass visits it.
 
 If you encounter a broker that has changed its form, please file a GitHub issue with the broker name and the new form layout.
 

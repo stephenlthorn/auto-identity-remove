@@ -69,7 +69,7 @@ test('--skip X --pollute leaves X out of the noise', async () => {
 
 test('--only with no acceptsBogus broker in it says the filter left nothing, and sends no noise', async () => {
   await inSandbox(async (sandbox) => {
-    const r = await runWatcher(sandbox, ['--only', 'Radaris', '--pollute', '1', '--dry-run']);
+    const r = await runWatcher(sandbox, ['--only', 'Nuwber', '--pollute', '1', '--dry-run']);
     assert.equal(r.code, 0, r.stderr);
     assert.match(r.stdout, /--pollute: no brokers tagged acceptsBogus: true that match the filter - nothing to do/);
     assert.deepEqual(noiseLines(r.stdout), []);
@@ -116,7 +116,7 @@ test('--verify --only X checks X for each person, not every broker', async () =>
   await inSandbox(async (sandbox) => {
     const all = await runWatcher(sandbox, ['--verify']);
     const allSkipped = Number(all.stdout.match(/skipped\s+: (\d+)/)[1]);
-    const one = await runWatcher(sandbox, ['--verify', '--only', 'Radaris']);
+    const one = await runWatcher(sandbox, ['--verify', '--only', 'Nuwber']);
     assert.equal(one.code, 0, one.stderr);
     assert.equal(Number(one.stdout.match(/skipped\s+: (\d+)/)[1]), 2, 'one broker x two persons');
     assert.ok(allSkipped > 2, 'and the unfiltered verify really covers more');
@@ -126,7 +126,7 @@ test('--verify --only X checks X for each person, not every broker', async () =>
 test('--verify --skip X leaves X out', async () => {
   await inSandbox(async (sandbox) => {
     const all = await runWatcher(sandbox, ['--verify']);
-    const skip = await runWatcher(sandbox, ['--verify', '--skip', 'Radaris']);
+    const skip = await runWatcher(sandbox, ['--verify', '--skip', 'Nuwber']);
     const count = (r) => Number(r.stdout.match(/skipped\s+: (\d+)/)[1]);
     assert.equal(count(skip), count(all) - 2);
   });
@@ -137,13 +137,13 @@ test('--verify --skip X leaves X out', async () => {
 test('--serp-scan --only X looks for X alone, and --serp-watch too', async () => {
   await inSandbox(async (sandbox) => {
     const spy = spying(sandbox);
-    await runWatcher(sandbox, ['--serp-scan', '--only', 'Radaris,Intelius', '--dry-run'], { env: spy.env });
-    await runWatcher(sandbox, ['--serp-watch', '--skip', 'Radaris', '--dry-run'], { env: spy.env });
+    await runWatcher(sandbox, ['--serp-scan', '--only', 'Nuwber,Intelius', '--dry-run'], { env: spy.env });
+    await runWatcher(sandbox, ['--serp-watch', '--skip', 'Nuwber', '--dry-run'], { env: spy.env });
     const seen = spy.events().filter(e => e.event === 'serp-brokers');
     const scan = seen.find(e => e.via === 'scan');
     const watch = seen.find(e => e.via === 'watch');
-    assert.deepEqual(scan.names.sort(), ['Intelius', 'Radaris']);
-    assert.ok(watch.names.length > 10 && !watch.names.includes('Radaris'), '--skip removed Radaris from the watch');
+    assert.deepEqual(scan.names.sort(), ['Intelius', 'Nuwber']);
+    assert.ok(watch.names.length > 10 && !watch.names.includes('Nuwber'), '--skip removed Nuwber from the watch');
   });
 });
 

@@ -27,7 +27,7 @@ const path = require('node:path');
 const { createSandbox, runWatcher, runnableConfig } = require('./helpers/watcher-sandbox');
 
 const PRELOAD = path.join(__dirname, 'helpers', 'cli2-preload.js');
-const BROKERS = ['Radaris', 'Intelius', 'PeopleFinders', 'PeopleSmart', 'MyLife', 'Nuwber', 'FamilyTreeNow', 'CheckPeople'];
+const BROKERS = ['Intelius', 'PeopleFinders', 'PeopleSmart', 'MyLife', 'Nuwber', 'ThatsThem', 'FamilyTreeNow', 'CheckPeople'];
 const PERSONS = ['Ada Lovelace', 'Alan Turing'];
 
 async function inSandbox(fn) {
