@@ -14,7 +14,8 @@
 const { test, describe } = require('node:test');
 const assert = require('node:assert/strict');
 const {
-  planIssueActions, extractMissing, markerFor, titleFor, syncIssues, listOpenDriftIssues, LABEL,
+  planIssueActions, extractMissing, extractBrokerName, markerFor, brokerMarkerFor, titleFor, syncIssues,
+  listDriftIssues, makeGh, makeRun, LABEL, WONTFIX_LABEL,
 } = require('../scripts/ci/broker-health-issues');
 
 const AT = '2026-11-17T06:23:00.000Z';
@@ -214,17 +215,231 @@ describe('syncIssues (the thin gh layer)', () => {
     assert.equal(out[1].ok, true);
   });
 
-  test('listOpenDriftIssues reads the selectors from the body and the comments', async () => {
+  test('listDriftIssues reads the selectors from the body and the comments', async () => {
     const run = async (args) => {
       assert.deepEqual(args.slice(0, 2), ['issue', 'list']);
       assert.ok(args.includes(LABEL));
+      assert.equal(args[args.indexOf('--state') + 1], 'all', 'closed issues are read too (H4b)');
       return JSON.stringify([{
-        number: 7, title: 'Broker drift: Spokeo',
+        number: 7, title: 'Broker drift: Spokeo', state: 'OPEN', labels: [{ name: LABEL }],
+        author: { login: 'app/github-actions' },
         body: `body ${markerFor(['a'])}`,
-        comments: [{ body: `c ${markerFor(['a', 'b'])}` }],
+        comments: [{ body: `c ${markerFor(['a', 'b'])}`, author: { login: 'github-actions' } }],
       }]);
     };
-    const open = await listOpenDriftIssues({ run });
-    assert.deepEqual(open, [{ number: 7, title: 'Broker drift: Spokeo', missing: ['a', 'b'] }]);
+    const open = await listDriftIssues({ run });
+    assert.deepEqual(open, [{
+      number: 7, title: 'Broker drift: Spokeo', state: 'open', labels: [LABEL], brokerName: null, missing: ['a', 'b'],
+    }]);
+  });
+});
+
+
+// ── H4 ───────────────────────────────────────────────────────────────────────
+
+const BOT = { login: 'app/github-actions' };
+const HUMAN = { login: 'some-contributor' };
+const raw = (over) => ({
+  number: 7, title: 'Broker drift: Spokeo', state: 'OPEN', labels: [{ name: LABEL }], author: BOT, body: '', comments: [], ...over,
+});
+const listWith = (issues) => listDriftIssues({ run: async () => JSON.stringify(issues) });
+
+describe('H4a: an issue is identified by a hidden broker-name marker in its body, not by its title', () => {
+  const retitled = (name, over = {}) => ({
+    number: 7, title: `Broker drift: ${name} (domain sold)`, state: 'open', labels: [LABEL], brokerName: name, missing: ['x'], ...over,
+  });
+
+  test('a retitled issue is still the record: no "no longer in the broker list" close, no duplicate', () => {
+    assert.deepEqual(planIssueActions({ openIssues: [retitled('Spokeo')], results: { Spokeo: drifted(['x']) } }), []);
+    assert.deepEqual(planIssueActions({ openIssues: [retitled('Spokeo')], results: { Spokeo: drifted(['x']), Other: res('ok') } }), []);
+  });
+
+  test('a retitled issue still closes when its broker is ok again, and says which broker', () => {
+    const plan = planIssueActions({ openIssues: [retitled('Spokeo')], results: { Spokeo: res('ok') } });
+    assert.equal(plan.length, 1);
+    assert.equal(plan[0].type, 'close');
+    assert.equal(plan[0].number, 7);
+  });
+
+  test('the created issue carries the broker marker in its body, and it reads back', () => {
+    const [a] = planIssueActions({ openIssues: [], results: { 'Spokeo --> x': drifted(['a']) } });
+    assert.equal(extractBrokerName([a.body]), 'Spokeo --> x');
+    const marker = a.body.split('\n').find((line) => line.includes('broker='));
+    assert.equal(marker.slice(0, -3).includes('-->'), false, 'the marker cannot end its own comment early');
+  });
+
+  test('an issue with no marker (made before this) is still matched by its title', () => {
+    const plan = planIssueActions({ openIssues: [issue('Spokeo', ['a'])], results: { Spokeo: res('ok') } });
+    assert.equal(plan[0].type, 'close');
+  });
+
+  test('listDriftIssues takes the broker name from a marker in a body the bot wrote', async () => {
+    const [i] = await listWith([raw({ title: 'Broker drift: Spokeo (domain sold)', body: `text\n${brokerMarkerFor('Spokeo')}` })]);
+    assert.equal(i.brokerName, 'Spokeo');
+  });
+
+  test('a marker in a body a PERSON wrote is not trusted: the title decides', async () => {
+    const [i] = await listWith([raw({ author: HUMAN, title: 'Broker drift: Spokeo', body: brokerMarkerFor('Somebody Else') })]);
+    assert.equal(i.brokerName, null);
+  });
+});
+
+describe('H4b: an issue closed by a person is not recreated every week', () => {
+  const closed = (name, labels, number = 4) => ({
+    number, title: titleFor(name), state: 'closed', labels, brokerName: name, missing: ['x'],
+  });
+
+  test('closed with the wontfix label: left closed, nothing created, nothing reopened', () => {
+    const plan = planIssueActions({ openIssues: [closed('Spokeo', [LABEL, WONTFIX_LABEL])], results: { Spokeo: drifted(['x']) } });
+    assert.deepEqual(plan, []);
+    assert.equal(WONTFIX_LABEL, 'wontfix');
+  });
+
+  test('closed without wontfix: it is REOPENED, never a duplicate created', () => {
+    const plan = planIssueActions({ openIssues: [closed('Spokeo', [LABEL])], results: { Spokeo: drifted(['x']) } });
+    assert.equal(plan.length, 1);
+    assert.equal(plan[0].type, 'reopen');
+    assert.equal(plan[0].number, 4);
+    assert.match(plan[0].body, new RegExp(WONTFIX_LABEL), 'tells the person how to keep it closed');
+    assert.deepEqual(extractMissing([plan[0].body]), ['x']);
+  });
+
+  test('reopening needs the same two drifted checks in a row that opening does', () => {
+    const plan = planIssueActions({ openIssues: [closed('Spokeo', [LABEL])], results: { Spokeo: drifted(['x'], { previousStatus: 'ok' }) } });
+    assert.deepEqual(plan, []);
+  });
+
+  test('the newest closed issue decides, not an older one', () => {
+    const plan = planIssueActions({
+      openIssues: [closed('Spokeo', [LABEL, WONTFIX_LABEL], 3), closed('Spokeo', [LABEL], 9)],
+      results: { Spokeo: drifted(['x']) },
+    });
+    assert.deepEqual(plan.map((a) => [a.type, a.number]), [['reopen', 9]]);
+  });
+
+  test('an open issue wins over a closed one: it is updated, not reopened', () => {
+    const plan = planIssueActions({
+      openIssues: [closed('Spokeo', [LABEL], 3), { ...closed('Spokeo', [LABEL], 8), state: 'open' }],
+      results: { Spokeo: drifted(['y']) },
+    });
+    assert.deepEqual(plan.map((a) => [a.type, a.number]), [['comment', 8]]);
+  });
+
+  test('a closed issue is never closed again, and a broker that left the list is not touched', () => {
+    assert.deepEqual(planIssueActions({ openIssues: [closed('Spokeo', [LABEL])], results: { Spokeo: res('ok') } }), []);
+    assert.deepEqual(planIssueActions({ openIssues: [closed('Gone Co', [LABEL])], results: { Other: res('ok') } }), []);
+  });
+
+  test('the reopen action goes through gh', async () => {
+    const calls = [];
+    const gh = {
+      ensureLabel: async () => {}, create: async () => {}, comment: async () => {}, close: async () => {},
+      reopen: async (n, body) => calls.push([n, body]),
+    };
+    const out = await syncIssues({ gh, plan: [{ type: 'reopen', number: 4, name: 'Spokeo', body: 'again' }] });
+    assert.deepEqual(calls, [[4, 'again']]);
+    assert.equal(out[0].ok, true);
+  });
+});
+
+describe('H4c: only the bot can write a marker the planner believes', () => {
+  test('a marker in a comment by another person is ignored', async () => {
+    const [i] = await listWith([raw({
+      body: `body ${markerFor(['a'])}`,
+      comments: [{ body: `spoof ${markerFor(['zzz'])}`, author: HUMAN }],
+    })]);
+    assert.deepEqual(i.missing, ['a']);
+  });
+
+  test('a marker in a comment by the bot counts, whichever way gh spells the bot login', async () => {
+    for (const login of ['github-actions', 'app/github-actions', 'github-actions[bot]']) {
+      const [i] = await listWith([raw({
+        body: `body ${markerFor(['a'])}`,
+        comments: [{ body: `update ${markerFor(['a', 'b'])}`, author: { login } }],
+      })]);
+      assert.deepEqual(i.missing, ['a', 'b'], login);
+    }
+  });
+
+  test('a marker in the body of an issue a person opened is ignored too', async () => {
+    const [i] = await listWith([raw({ author: HUMAN, body: markerFor(['forged']) })]);
+    assert.equal(i.missing, null);
+  });
+
+  test('a person posting a marker cannot cause a spurious bot comment', async () => {
+    const issues = await listWith([raw({
+      body: `body ${markerFor(['a'])}`,
+      comments: [{ body: markerFor(['something else']), author: HUMAN }],
+    })]);
+    const plan = planIssueActions({ openIssues: issues, results: { Spokeo: drifted(['a']) } });
+    assert.deepEqual(plan, []);
+  });
+});
+
+describe('what reaches gh (argv, never a shell string)', () => {
+  const hostile = '--repo evil; rm -rf / $(id) `id` --body x';
+
+  test('makeRun hands gh an argv array through execFileSync, with no shell', async () => {
+    const seen = [];
+    const run = makeRun({ exec: (file, args, options) => { seen.push({ file, args, options }); return 'out'; } });
+    assert.equal(await run(['issue', 'list']), 'out');
+    assert.equal(seen[0].file, 'gh');
+    assert.ok(Array.isArray(seen[0].args));
+    assert.notEqual(seen[0].options.shell, true);
+  });
+
+  const captured = () => {
+    const calls = [];
+    return { calls, gh: makeGh(async (args) => { calls.push(args); return ''; }) };
+  };
+
+  test('create: every value follows its own flag, and a hostile name stays inside one argument', async () => {
+    const { calls, gh } = captured();
+    const [a] = planIssueActions({ openIssues: [], results: { [hostile]: drifted([hostile]) }, urls: { [hostile]: `https://x.example/?q=${hostile}` } });
+    await gh.create(a);
+    const args = calls[0];
+    assert.deepEqual(args.slice(0, 2), ['issue', 'create']);
+    assert.ok(args.every((x) => typeof x === 'string'));
+    assert.equal(args[args.indexOf('--title') + 1], `Broker drift: ${hostile}`);
+    assert.equal(args[args.indexOf('--body') + 1], a.body);
+    assert.equal(args[args.indexOf('--label') + 1], LABEL);
+    assert.equal(args.filter((x) => x === '--repo').length, 0, 'the name did not become a flag');
+    // Flags appear exactly where the code put them: the four option names, nothing else starting with "--".
+    assert.deepEqual(args.filter((x) => /^--[a-z]/.test(x)), ['--title', '--body', '--label']);
+  });
+
+  test('comment, close and reopen: the number is a plain integer string, the text follows its flag', async () => {
+    const { calls, gh } = captured();
+    await gh.comment(12, hostile);
+    await gh.close(12, hostile);
+    await gh.reopen(12, hostile);
+    assert.deepEqual(calls[0], ['issue', 'comment', '12', '--body', hostile]);
+    assert.deepEqual(calls[1], ['issue', 'close', '12', '--comment', hostile]);
+    assert.deepEqual(calls[2], ['issue', 'reopen', '12', '--comment', hostile]);
+  });
+
+  test('an issue number that is not a positive integer is refused, so it cannot become a flag', async () => {
+    const { calls, gh } = captured();
+    for (const bad of ['--repo evil', '1; id', -1, 1.5, NaN, null]) {
+      assert.throws(() => gh.comment(bad, 'x'), /issue number/, String(bad));
+    }
+    assert.deepEqual(calls, []);
+  });
+
+  test('the issue body never contains page content, only the name, the page URL from brokers.js, selectors and a date', () => {
+    const [a] = planIssueActions({ openIssues: [], results: { Spokeo: drifted(['a']) }, urls: { Spokeo: 'https://www.spokeo.com/optout' } });
+    const visible = a.body.replace(/<!--[^]*?-->/g, '');
+    for (const line of visible.split('\n').filter(Boolean)) {
+      assert.ok(
+        /^(The weekly broker health check|Page: |Selectors that match nothing:|- `|Last checked: |This looks at the shape)/.test(line),
+        `unexpected line in an issue body: ${line}`,
+      );
+    }
+  });
+
+  test('names and selectors sit in code spans, so a hostile one cannot mention a user or break the markdown', () => {
+    const [a] = planIssueActions({ openIssues: [], results: { 'Acme @everyone': drifted(['a`b @octocat']) } });
+    const visible = a.body.replace(/<!--[^]*?-->/g, '');
+    assert.doesNotMatch(visible.replace(/``[^]*?``|`[^`\n]*`/g, ''), /@/, 'every @ is inside a code span');
   });
 });

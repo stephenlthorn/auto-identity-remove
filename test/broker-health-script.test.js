@@ -70,7 +70,7 @@ describe('scripts/broker-health.js', () => {
 
   test('previousStatus is read from the file as it was before the run', async () => {
     const file = tmpFile();
-    fs.writeFileSync(file, JSON.stringify({ results: { A: { status: 'drifted' } } }));
+    fs.writeFileSync(file, JSON.stringify({ runner: 'local', results: { A: { status: 'drifted' } } }));
     await run({ argv: ['--runner', 'local'], file, launch: fakeLauncher().launch, brokers: LIST, now: () => NOW, io: quiet });
     const written = JSON.parse(fs.readFileSync(file, 'utf8'));
     assert.equal(written.runner, 'local');
