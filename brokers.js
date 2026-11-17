@@ -86,6 +86,50 @@ function _isBlankPerson(p) {
   return Object.values(p).every(v => v == null || String(v).trim() === '');
 }
 
+// US state code or name -> the lower-case, hyphenated slug some people-search
+// sites put in their search URL (CA -> "california", New York -> "new-york"),
+// plus a name slug for the same URLs. Only the fifty states are listed: a value
+// that is not one of them has no slug, so a broker whose search URL needs one is
+// simply not searchable for that person (a Canadian province or a typo must never
+// become a guessed URL). These live here, not in lib/, because several tests load
+// a lone copy of this file beside a synthetic config.json.
+const STATE_NAMES = {
+  AL: 'Alabama', AK: 'Alaska', AZ: 'Arizona', AR: 'Arkansas', CA: 'California',
+  CO: 'Colorado', CT: 'Connecticut', DE: 'Delaware', FL: 'Florida', GA: 'Georgia',
+  HI: 'Hawaii', ID: 'Idaho', IL: 'Illinois', IN: 'Indiana', IA: 'Iowa',
+  KS: 'Kansas', KY: 'Kentucky', LA: 'Louisiana', ME: 'Maine', MD: 'Maryland',
+  MA: 'Massachusetts', MI: 'Michigan', MN: 'Minnesota', MS: 'Mississippi', MO: 'Missouri',
+  MT: 'Montana', NE: 'Nebraska', NV: 'Nevada', NH: 'New Hampshire', NJ: 'New Jersey',
+  NM: 'New Mexico', NY: 'New York', NC: 'North Carolina', ND: 'North Dakota', OH: 'Ohio',
+  OK: 'Oklahoma', OR: 'Oregon', PA: 'Pennsylvania', RI: 'Rhode Island', SC: 'South Carolina',
+  SD: 'South Dakota', TN: 'Tennessee', TX: 'Texas', UT: 'Utah', VT: 'Vermont',
+  VA: 'Virginia', WA: 'Washington', WV: 'West Virginia', WI: 'Wisconsin', WY: 'Wyoming',
+};
+
+const hyphenate = (name) => name.toLowerCase().replace(/\s+/g, '-');
+
+const SLUG_BY_KEY = new Map();
+for (const [code, name] of Object.entries(STATE_NAMES)) {
+  SLUG_BY_KEY.set(code.toLowerCase(), hyphenate(name));
+  SLUG_BY_KEY.set(name.toLowerCase(), hyphenate(name));
+}
+
+/** The state slug for a two-letter code or a full name, or '' when it is not a US state. */
+function stateSlug(value) {
+  if (value == null) return '';
+  const key = String(value).trim().toLowerCase().replace(/\s+/g, ' ');
+  return SLUG_BY_KEY.get(key) || '';
+}
+
+/** "Mary Ann O'Neil" -> "mary-ann-oneil": lower-case, spaces to hyphens, only a-z 0-9 and hyphen kept. */
+function nameSlug(value) {
+  return String(value == null ? '' : value)
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9-]/g, '');
+}
+
 // Never interpolate the literal string "undefined" into a URL or a form value.
 // A missing field becomes empty, which fails a lookup honestly (notFound)
 // instead of searching brokers for a person named "undefined".
@@ -155,6 +199,19 @@ function buildBrokers(person) {
   // without one gets a logged skip instead of an empty submission every month.
   const needsPN = PN ? undefined : 'no US phone number in config.json (person.phone)';
   const needsPE = PE ? undefined : 'no phone number with a country code in config.json (e.g. +44 20 7946 0000)';
+
+  // USPhonebook's search page is /<first>-<last>/<state-slug>. Without a usable
+  // name or a US state there is no honest URL to build, so none of the four
+  // search fields is set and canSearch() (lib/searchable.js) says no.
+  const nameSlugs = nameSlug(F) && nameSlug(L) ? `${nameSlug(F)}-${nameSlug(L)}` : '';
+  const stateSlugValue = stateSlug(ST);
+  const usphonebookSearch = nameSlugs && stateSlugValue ? {
+    searchUrl: `https://www.usphonebook.com/${nameSlugs}/${stateSlugValue}`,
+    listingPattern: /usphonebook\.com\/[a-z0-9-]+\/U[A-Za-z0-9]{15,}/i,
+    lastName: L,
+    searchNotFound: { status: 404, text: /0 Public Records Found/i },
+    searchCheckedAt: '2026-11-17',
+  } : {};
 
   return [
 
@@ -236,20 +293,13 @@ function buildBrokers(person) {
     expectedSender: 'noreply@beenverified.com',
   },
 
-  {
-    name: 'Radaris',
-    method: 'search-form',
-    searchUrl: `https://radaris.com/p/${enc(F)}/${enc(L)}/`,
-    listingPattern: /radaris\.com\/p\//i,
-    lastName: L,
-    optOutUrl: 'https://radaris.com/control/privacy',
-    formFields: { 'input[name*="first"],input[placeholder*="first" i]': F, 'input[name*="last"],input[placeholder*="last" i]': L, 'input[type="email"]': E },
-    submitSelector: 'button[type="submit"]',
-    captchaLikely: false,
-    timeoutMs: 30000,
-    priority: 1,
-    expectedSender: 'noreply@radaris.com',
-  },
+  // Radaris removed 2026-11-17: radaris.com was transferred by court order to
+  // Atlas Data Privacy Corporation. Every URL on the domain, including search
+  // URLs, now answers HTTP 200 with the same "This Domain Has Been Transferred
+  // by Court Order" notice, and the opt-out pages no longer exist. Confirmed
+  // 2026-11-17. The old search step read that notice as an empty results page,
+  // so it would have recorded every person as clear. radaris.com is kept in
+  // data/dead-urls.json so the generic runner never visits it either.
 
   {
     name: 'Intelius',
@@ -349,6 +399,15 @@ function buildBrokers(person) {
   {
     name: 'USPhonebook',
     method: 'direct-form',
+    // Search step, so `aidr scan` and `aidr verify` can tell whether the person
+    // is listed. Validated live 2026-11-17 in both directions: "John Smith" in
+    // California gave 200 with 86 person links, a nonsense name gave HTTP 404
+    // with "0 Public Records Found". That 404 is the site's real "no results"
+    // answer, so it is stated in searchNotFound; any other non-2xx stays
+    // "could not tell". The method stays direct-form, so the opt-out below is
+    // unchanged. The search URL needs a US state slug: a person whose state is
+    // not one gets no search step at all and simply cannot be searched.
+    ...usphonebookSearch,
     // /opt-out redirects here. The page also carries name and phone SEARCH
     // boxes, so the selectors name the removal form's own fields.
     optOutUrl: 'https://www.usphonebook.com/removal',
@@ -523,15 +582,11 @@ function buildBrokers(person) {
 
   // ═══ Additional people-search / data broker sites ════════════════════════
 
-  {
-    name: 'PeekYou',
-    method: 'direct-form',
-    optOutUrl: 'https://www.peekyou.com/about/contact/optout/',
-    formFields: { 'input[name*="first" i]': F, 'input[name*="last" i]': L, 'input[type="email"]': E, 'input[name*="city" i]': C, 'input[name*="state" i]': ST },
-    submitSelector: 'button[type="submit"],input[type="submit"]',
-    captchaLikely: false,
-    priority: 1,
-  },
+  // PeekYou removed 2026-11-17: peekyou.com was transferred by court order to
+  // Atlas Data Privacy Corporation, together with radaris.com, and now shows a
+  // "Domain Update" notice; the opt-out page no longer exists. Confirmed
+  // 2026-11-17. peekyou.com is kept in data/dead-urls.json so the generic runner
+  // never visits it.
 
   {
     name: 'Addresses.com',
@@ -778,5 +833,7 @@ function buildBrokers(person) {
 // used by watcher.js inside its persons loop.
 const brokers = buildBrokers();
 brokers.forPerson = buildBrokers;
+brokers.stateSlug = stateSlug;
+brokers.nameSlug = nameSlug;
 
 module.exports = brokers;

@@ -1,12 +1,12 @@
 # Broker Status
 
-> **What this page is:** a weekly health check of the opt-out pages of the 50 explicit brokers in `brokers.js`. A scheduled job loads each page with a plain headless browser and checks that the page answers and that the selectors the definition relies on still exist. It is generated: edit `brokers.js` or let the weekly job refresh `data/broker-health.json`, then run `node scripts/generate-status.js`. Do not edit the table by hand.
+> **What this page is:** a weekly health check of the opt-out pages of the 48 explicit brokers in `brokers.js`. A scheduled job loads each page with a plain headless browser and checks that the page answers and that the selectors the definition relies on still exist. It is generated: edit `brokers.js` or let the weekly job refresh `data/broker-health.json`, then run `node scripts/generate-status.js`. Do not edit the table by hand.
 >
 > **Limits, plainly:** the check looks at the shape of the form. It never types, clicks or submits, so it cannot tell you whether a submission deletes anything. `aidr verify` is the check for that. And the weekly job runs from a data centre address that some sites refuse, so a page can be `blocked` here and fine from your home connection. `aidr doctor --brokers` runs the same check from your own machine.
 
 The last check ran on 2026-11-17, from a run on a developer machine.
 
-**14 ok, 11 drifted, 20 blocked, 0 dead, 1 error** out of 46 brokers with a page to check; 4 n/a (email brokers have no page).
+**14 ok, 9 drifted, 20 blocked, 0 dead, 1 error** out of 44 brokers with a page to check; 4 n/a (email brokers have no page).
 
 ## Health labels
 
@@ -18,7 +18,7 @@ The last check ran on 2026-11-17, from a run on a developer machine.
 - `n/a` - email brokers. Removal is an email, so there is no page to check.
 - `not checked yet` - the broker has no result in `data/broker-health.json`.
 
-**Brokers known to be dead or moved as of late 2025:**
+**Brokers known to be dead, moved or removed (as of Nov 2026):**
 - **NationalPublicData**: defunct (Aug 2024 SSN breach + Oct 2024 bankruptcy). Listing kept for historical reference; opt-out flow does not work.
 - **Clearbit**: acquired by HubSpot (Nov 2023), now "Breeze Intelligence". Opt-out runs through a DataGrail request center at preferences.clearbit.com. Now `manual`: the form needs a custom dropdown and a second confirm step that the direct-form runner cannot complete.
 - **Acxiom**: live but requires multi-step identity verification at acxiom.com/about-us/privacy/. Single-form POST will fail.
@@ -27,6 +27,8 @@ The last check ran on 2026-11-17, from a run on a developer machine.
 - **Andrews Wharton**: added to `brokers.js` as `manual` (Oct 2026). It came from the Markup dataset, and the generic runner submitted the marketing sign-up form on its homepage as if it were an opt-out. The explicit entry keeps the generic runner off that host; the real opt-out is Stirista's portal at unsubscribe.stirista.com.
 - **ClustrMaps**: removed from `brokers.js` (Oct 2026). Its own DNS points clustrmaps.com at 127.0.0.1 (since about Sep 2026), so the site is unreachable everywhere; the domain is still registered and may return.
 - **PublicDataUSA**: removed from `brokers.js` (Oct 2026). The domain no longer resolves; the site appears to have shut down around September 2026.
+- **Radaris**: removed from `brokers.js` (Nov 2026). radaris.com was transferred by court order to Atlas Data Privacy Corporation; every URL on it, search URLs included, now shows the same "This Domain Has Been Transferred by Court Order" notice and the opt-out pages no longer exist (confirmed 2026-11-17). The host is in `data/dead-urls.json` so no pass visits it.
+- **PeekYou**: removed from `brokers.js` (Nov 2026). peekyou.com was transferred by court order to the same company and shows a "Domain Update" notice; the opt-out page no longer exists (confirmed 2026-11-17). The host is in `data/dead-urls.json` so no pass visits it.
 
 If you encounter a broker that has changed its form, please file a GitHub issue with the broker name and the new form layout.
 
@@ -39,7 +41,7 @@ If you encounter a broker that has changed its form, please file a GitHub issue 
 - **US-only** - site indexes US public records / voter data / phone directories; automatically skipped for non-US users.
 - **Search step** - `yes` when the broker has a search URL the runner uses to find your listing first; the date is when that search page was last confirmed to work, if it has been.
 
-**This list covers the 50 explicit brokers in `brokers.js` only.** The other ~490 brokers in `data/markup-parsed.json` and `data/badbool-extra.json` are handled by the heuristic generic runner - every one of those is best-effort. Run `node watcher.js --verify` to spot-check whether opt-outs are still in effect.
+**This list covers the 48 explicit brokers in `brokers.js` only.** The other ~490 brokers in `data/markup-parsed.json` and `data/badbool-extra.json` are handled by the heuristic generic runner - every one of those is best-effort. Run `node watcher.js --verify` to spot-check whether opt-outs are still in effect.
 
 ---
 
@@ -52,7 +54,6 @@ If you encounter a broker that has changed its form, please file a GitHub issue 
 | FastPeopleSearch | search-form | no | ok | 2026-11-17 | yes | yes (not checked) |
 | TruePeopleSearch | direct-form | no | blocked | 2026-11-17 | yes | no |
 | BeenVerified | direct-form | yes | blocked | 2026-11-17 | yes | no |
-| Radaris | search-form | no | drifted | 2026-11-17 | no | yes (not checked) |
 | Intelius | direct-form | no | blocked | 2026-11-17 | no | no |
 | PeopleFinders | direct-form | no | blocked | 2026-11-17 | no | no |
 | PeopleSmart | direct-form | no | drifted | 2026-11-17 | no | no |
@@ -61,7 +62,7 @@ If you encounter a broker that has changed its form, please file a GitHub issue 
 | FamilyTreeNow | direct-form | yes | blocked | 2026-11-17 | no | no |
 | CheckPeople | direct-form | no | ok | 2026-11-17 | no | no |
 | ThatsThem | direct-form | no | blocked | 2026-11-17 | no | no |
-| USPhonebook | direct-form | yes | ok | 2026-11-17 | yes | no |
+| USPhonebook | direct-form | yes | ok | 2026-11-17 | yes | yes (2026-11-17) |
 | SmartBackgroundChecks | direct-form | no | blocked | 2026-11-17 | no | no |
 | SearchPeopleFree | direct-form | no | blocked | 2026-11-17 | no | no |
 | PeopleSearchNow | direct-form | no | ok | 2026-11-17 | no | no |
@@ -74,7 +75,6 @@ If you encounter a broker that has changed its form, please file a GitHub issue 
 | ZoomInfo | manual | n/a | blocked | 2026-11-17 | no | no |
 | Clearbit | manual | n/a | ok | 2026-11-17 | no | no |
 | Andrews Wharton | manual | n/a | ok | 2026-11-17 | no | no |
-| PeekYou | direct-form | no | drifted | 2026-11-17 | no | no |
 | Addresses.com | direct-form | no | blocked | 2026-11-17 | no | no |
 | AnyWho | direct-form | no | blocked | 2026-11-17 | no | no |
 | TruthFinder | direct-form | no | blocked | 2026-11-17 | no | no |

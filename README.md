@@ -629,7 +629,7 @@ This tool covers 500+ data brokers in two tiers:
 
 | Tier | Count | Confidence |
 |---|---|---|
-| **Explicit brokers** ([STATUS.md](STATUS.md)) | 50 | Hand-mapped with specific selectors. **None are currently marked `verified`** - the selectors compile and were correct when written, but none has been re-tested against the live site recently, so any of them may have drifted. |
+| **Explicit brokers** ([STATUS.md](STATUS.md)) | 48 | Hand-mapped with specific selectors. **None are currently marked `verified`** - the selectors compile and were correct when written, but none has been re-tested against the live site recently, so any of them may have drifted. |
 | **Generic runner** | ~490 | Best-effort heuristic - tries 4 strategies (Do Not Sell click, OneTrust/TrustArc, generic form, DSAR link). Many succeed; some fail silently. |
 
 Be skeptical of the counts this tool prints. Broker sites change their DOM
@@ -656,7 +656,6 @@ If you want to know exactly which brokers are hand-verified vs heuristic, see [S
 | FastPeopleSearch | Search → opt-out form |
 | TruePeopleSearch | Direct opt-out form |
 | BeenVerified | Opt-out search form |
-| Radaris | Search → privacy form |
 | Intelius | Direct opt-out form |
 | PeopleFinders | Direct opt-out form |
 | PeopleSmart | Direct opt-out form |
@@ -665,7 +664,7 @@ If you want to know exactly which brokers are hand-verified vs heuristic, see [S
 | FamilyTreeNow | Direct opt-out form |
 | CheckPeople | Direct opt-out form |
 | ThatsThem | Direct opt-out form |
-| USPhonebook | Direct opt-out form |
+| USPhonebook | Direct opt-out form (also searchable by `aidr scan`) |
 | SmartBackgroundChecks | Direct opt-out form |
 | SearchPeopleFree | Direct opt-out form |
 | PeopleSearchNow | Direct opt-out form |
@@ -884,7 +883,7 @@ for you. `aidr scan` finds out first:
 
 ```bash
 aidr scan                       # every broker that can be searched, for each person
-aidr scan --only Spokeo,Radaris
+aidr scan --only Spokeo,USPhonebook
 aidr run --found-only           # submit only where the scan found you
 ```
 
@@ -1137,7 +1136,7 @@ This tool supports non-US users with a few important caveats.
 - Phone numbers for non-US users are stored verbatim - no `(xxx) xxx-xxxx` reformatting is applied.
 - `lib/forms.js` automatically tries province/postal/postcode HTML field variants (e.g. `input[name*="province"]`, `input[name*="postcode"]`) when filling forms for non-US users, with no change needed in broker definitions.
 - A country `<select>` on opt-out forms is targeted and filled with your 2-letter country code when present.
-- Global brokers (ZoomInfo, Clearbit, Acxiom, Radaris, etc.) are attempted for all users.
+- Global brokers (ZoomInfo, Clearbit, Acxiom, etc.) are attempted for all users.
 
 ### US-only brokers (automatically skipped for non-US users)
 

@@ -120,27 +120,27 @@ test('scan then run --found-only: found is submitted, not found is skipped, and 
     assert.match(scan.stdout, /found          : 1/);
     assert.match(scan.stdout, /not found      : 5/);
     assert.match(scan.stdout, /Where you were found:\n\s+- Spokeo: https:\/\/listing\.example\/Spokeo/);
-    assert.match(scan.stdout, /Where you were not found:\n\s+.*Radaris/);
+    assert.match(scan.stdout, /Where you were not found:\n\s+.*USPhonebook/);
     assert.deepEqual(gotos(sandbox), [], 'a scan opens no opt-out page (the search was answered by the preload)');
     const scans = sandbox.readState().scans;
     assert.equal(scans.Spokeo.outcome, 'found');
     assert.equal(scans.Spokeo.listingUrl, 'https://listing.example/Spokeo');
-    assert.equal(scans.Radaris.outcome, 'not_found');
+    assert.equal(scans.USPhonebook.outcome, 'not_found');
 
-    const run = await runWatcher(sandbox, ['--found-only', '--only', 'Spokeo,Radaris'], answers);
+    const run = await runWatcher(sandbox, ['--found-only', '--only', 'Spokeo,USPhonebook'], answers);
     assert.equal(run.code, 0, run.stderr);
-    assert.match(run.stdout, /\[Radaris\] skipped - not listed \(scan of \d{4}-\d{2}-\d{2}\)/);
+    assert.match(run.stdout, /\[USPhonebook\] skipped - not listed \(scan of \d{4}-\d{2}-\d{2}\)/);
     const opened = gotos(sandbox);
     assert.ok(opened.some(u => u.includes('spokeo.com')), 'the found broker was submitted to');
-    assert.ok(!opened.some(u => u.includes('radaris.com')), 'the not_found broker was left alone');
+    assert.ok(!opened.some(u => u.includes('usphonebook.com')), 'the not_found broker was left alone');
   });
 });
 
 test('verify: an empty search is "never seen" with no sighting and "verified_clear" with one', async () => {
   const state = { optOuts: {
     Spokeo: { lastSuccess: daysAgo(10), lastAttempt: daysAgo(10) },
-    Radaris: { lastSuccess: daysAgo(10), lastAttempt: daysAgo(10) },
-  }, scans: { Radaris: { at: daysAgo(20), outcome: 'found', lastFoundAt: daysAgo(20), listingUrl: 'https://listing.example/Radaris' } } };
+    USPhonebook: { lastSuccess: daysAgo(10), lastAttempt: daysAgo(10) },
+  }, scans: { USPhonebook: { at: daysAgo(20), outcome: 'found', lastFoundAt: daysAgo(20), listingUrl: 'https://listing.example/USPhonebook' } } };
   await inSandbox({ config: oneAda(), state }, async (sandbox) => {
     const r = await runWatcher(sandbox, ['--verify'], withSearchAnswers(sandbox, []));
     assert.equal(r.code, 0, r.stderr);
@@ -148,7 +148,7 @@ test('verify: an empty search is "never seen" with no sighting and "verified_cle
     assert.match(r.stdout, /never_seen     : 1/);
     assert.match(r.stdout, /Never seen \(nothing there now[^\n]*\n\s+- Spokeo/);
     const after = sandbox.readState().optOuts;
-    assert.ok(after.Radaris.verifiedDeletedAt, 'seen before, gone now: a removal');
+    assert.ok(after.USPhonebook.verifiedDeletedAt, 'seen before, gone now: a removal');
     assert.ok(after.Spokeo.verifiedAbsentAt, 'never seen: recorded apart');
     assert.equal(after.Spokeo.verifiedDeletedAt, undefined);
   });
@@ -177,24 +177,24 @@ test('found-only: a sighting made by an ordinary run is not a scan, so it still 
 test('found-only: found is submitted, not_found is skipped with its reason, an unscanned broker follows scan.unknown', async () => {
   const state = { optOuts: {}, scans: {
     Spokeo: { at: daysAgo(2), outcome: 'found', listingUrl: 'https://www.spokeo.com/Ada-Lovelace', fp: require('../lib/identity').personFingerprint(ADA) },
-    Radaris: { at: '2026-11-10T08:00:00.000Z', outcome: 'not_found', fp: require('../lib/identity').personFingerprint(ADA) },
+    USPhonebook: { at: '2026-11-10T08:00:00.000Z', outcome: 'not_found', fp: require('../lib/identity').personFingerprint(ADA) },
   } };
   // not_found is only fresh relative to now: pin the scan inside the default 30 days.
-  state.scans.Radaris.at = daysAgo(3);
+  state.scans.USPhonebook.at = daysAgo(3);
 
   await inSandbox({ config: oneAda({ scan: { unknown: 'skip' } }), state }, async (sandbox) => {
-    const r = await runWatcher(sandbox, ['--found-only', '--only', 'Spokeo,Radaris,Nuwber']);
+    const r = await runWatcher(sandbox, ['--found-only', '--only', 'Spokeo,USPhonebook,Nuwber']);
     assert.equal(r.code, 0, r.stderr);
 
     const opened = gotos(sandbox);
     assert.ok(opened.some(u => u.includes('spokeo.com')), 'the found broker was attempted');
-    assert.ok(!opened.some(u => u.includes('radaris.com')), 'the not_found broker was not touched');
+    assert.ok(!opened.some(u => u.includes('usphonebook.com')), 'the not_found broker was not touched');
     assert.ok(!opened.some(u => u.includes('nuwber.com')), 'the unscanned broker was skipped (scan.unknown is skip)');
 
     const [logName] = sandbox.runLogs();
     const log = JSON.parse(fs.readFileSync(`${sandbox.logs}/${logName}`, 'utf8'));
     const skipped = Object.fromEntries(log.skipped.map(s => [s.broker, s.detail]));
-    assert.match(skipped.Radaris, /not listed \(scan of \d{4}-\d{2}-\d{2}\)/);
+    assert.match(skipped.USPhonebook, /not listed \(scan of \d{4}-\d{2}-\d{2}\)/);
     assert.match(skipped.Nuwber, /never scanned/);
     assert.equal(log.partial, true, 'a filtered run is partial');
     assert.equal(log.filter.foundOnly, true);

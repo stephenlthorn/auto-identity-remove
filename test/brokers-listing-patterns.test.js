@@ -83,17 +83,20 @@ test('search-form brokers carry the last name so the listing choice can prefer t
 // normal results page with none), and it carries searchCheckedAt to say when.
 // ---------------------------------------------------------------------------
 
-// These six search steps predate the validation rule. Each was re-checked on
-// 2026-11-17 and could NOT be validated (a bot wall answered every request, or
-// the site is gone), so they stay as they were and are listed here on purpose.
+// These five search steps predate the validation rule. Each was re-checked on
+// 2026-11-17 and could NOT be validated (a bot wall answered every request), so
+// they stay as they were and are listed here on purpose. Radaris was on this list
+// until its domain was transferred by court order and the entry was removed.
 // A broker not in this list and without searchCheckedAt fails the test below.
-const LEGACY_UNVALIDATED = ['Spokeo', 'WhitePages', 'FastPeopleSearch', 'Radaris', 'MyLife', 'Nuwber'];
+const LEGACY_UNVALIDATED = ['Spokeo', 'WhitePages', 'FastPeopleSearch', 'MyLife', 'Nuwber'];
 
 // A realistically shaped result link for each validated broker, taken from the
-// live results page shape (made-up person). Empty today: no new search step
-// passed both directions on 2026-11-17 (see the report that came with this
-// change). The per-broker tests below start running as soon as one is added.
-const LISTING_EXAMPLES = {};
+// live results page shape (made-up id). The per-broker tests below start running
+// as soon as a validated search step is added. USPhonebook passed both directions
+// live on 2026-11-17 (a common name gave person links; a nonsense name gave its 404).
+const LISTING_EXAMPLES = {
+  USPhonebook: 'https://www.usphonebook.com/jane-doe/U4ab12cd34ef56gh78ij',
+};
 
 const withSearchStep = list.filter(b => b.searchUrl && b.listingPattern);
 const validated = withSearchStep.filter(b => b.searchCheckedAt);
