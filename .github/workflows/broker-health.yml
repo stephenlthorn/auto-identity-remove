@@ -1,0 +1,111 @@
+name: Broker health
+
+# Every week, load each explicit broker's opt-out page and check that it still
+# has the form brokers.js expects. See STATUS.md for what the labels mean and
+# what the check cannot tell you.
+#
+# Two jobs, so that no job holds a write token while it runs untrusted code:
+#
+#   check    read-only token, git credentials NOT persisted. It runs `npm ci`
+#            (dependency lifecycle scripts), `playwright install`, and a browser
+#            that loads about 46 third-party sites. Its only output is
+#            data/broker-health.json, uploaded as an artifact.
+#   publish  the only job with `contents: write` and `issues: write`. It installs
+#            nothing from npm, starts no browser and loads no third-party page:
+#            it downloads the artifact, regenerates STATUS.md (standard library
+#            only), commits, and syncs the drift issues.
+#
+# A plain headless Chromium: no stealth script, no CAPTCHA solving, no proxy. A
+# site that refuses this data centre address is recorded as `blocked`.
+# No personal data is involved, and no secret other than the built-in token.
+#
+# Both jobs only run in the real repository: on a fork with Actions enabled the
+# schedule would otherwise commit to the fork's main every week and try to open
+# issues there.
+
+on:
+  schedule:
+    # Mondays 05:47 UTC. Not on the hour: that is when every scheduled job starts.
+    - cron: '47 5 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: broker-health
+  cancel-in-progress: false
+
+jobs:
+  check:
+    if: github.repository == 'stephenlthorn/auto-identity-remove'
+    # A named image, not ubuntu-latest: the pinned Playwright only installs
+    # Chromium on the Ubuntu releases it knows (see test/chromium-runner.test.js).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Check every broker
+        run: node scripts/broker-health.js --runner ci
+
+      - name: Keep the result
+        uses: actions/upload-artifact@v4
+        with:
+          name: broker-health
+          path: data/broker-health.json
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: check
+    if: github.repository == 'stephenlthorn/auto-identity-remove' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      issues: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Download the result
+        uses: actions/download-artifact@v4
+        with:
+          name: broker-health
+          path: data
+
+      - name: Regenerate STATUS.md
+        run: node scripts/generate-status.js
+
+      - name: Commit the results
+        run: bash scripts/ci/commit-health.sh
+
+      - name: Sync drift issues
+        if: ${{ !cancelled() }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: node scripts/ci/broker-health-issues.js

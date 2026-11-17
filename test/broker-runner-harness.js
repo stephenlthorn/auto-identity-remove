@@ -130,7 +130,7 @@ function stateKeyOf(brokerName, person, total) {
 
 function loadRunner(stubs = {}) {
   const logged = [];
-  const recorded = { success: [], pending: [], failure: [], checkpoints: [], skipChecks: [], skipOpts: [], stamps: [] };
+  const recorded = { success: [], pending: [], failure: [], checkpoints: [], skipChecks: [], skipOpts: [], stamps: [], sightings: [] };
   const calls = { fillForm: [], findListingUrl: [], captcha: [] };
 
   const map = {
@@ -148,6 +148,8 @@ function loadRunner(stubs = {}) {
         recorded.skipChecks.push(o && o.person ? stateKeyOf(name, o.person, o.personCount) : name);
         return null;
       },
+      // recordSighting(brokerName, listingUrl, { person, personCount, personIndex }): a listing the run's own search step saw.
+      recordSighting: (name, listingUrl, o) => recorded.sightings.push({ name, listingUrl, opts: o }),
       saveCheckpoint: (key) => recorded.checkpoints.push(key),
       stateKey: stateKeyOf,
     },

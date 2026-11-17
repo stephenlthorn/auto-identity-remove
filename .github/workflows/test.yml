@@ -10,7 +10,11 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # A named image, not ubuntu-latest: the Node 22 leg installs Playwright's
+    # Chromium, and the pinned Playwright only installs it on the Ubuntu releases
+    # it knows. Move this when Playwright is upgraded to one that knows a newer
+    # release. test/chromium-runner.test.js pins it.
+    runs-on: ubuntu-24.04
 
     strategy:
       matrix:
@@ -34,6 +38,13 @@ jobs:
       - name: Install dashboard dependencies
         working-directory: dashboard
         run: npm ci
+
+      # test/broker-health-check.test.js drives a real headless Chromium against
+      # local fixture pages. Without a browser it skips itself, and the broker health
+      # check would go untested exactly where it runs.
+      - name: Install Chromium
+        if: matrix.node-version == 22
+        run: npx playwright install --with-deps chromium
 
       - name: Run tests
         run: node --test test/*.test.js dashboard/validate.test.js dashboard/config-status.test.js

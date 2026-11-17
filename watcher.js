@@ -44,6 +44,9 @@ const { resolvePaths } = require('./lib/paths');
 const { openJournal, journalPathFor, countResults } = require('./lib/journal');
 const { startHeartbeat, defaultHeartbeatPath, outcomeFromResults } = require('./lib/heartbeat');
 const { OFFLINE_HINT } = require('./lib/outage');
+const { applyFoundOnly, hasUsableScan, foundOnlyEmailPlan } = require('./lib/scan');
+const { scanReportLines, foundOnlyOverview } = require('./lib/scan-report');
+const { scanSettings } = require('./lib/scan-config');
 const { applyRetention } = require('./lib/retention');
 const { isPlaceholderKey, detectAndSolveCaptcha } = require('./lib/captcha');
 const { RELAY_BROKER, relaySkippedNames, guardResumePlan } = require('./lib/resume-guard');
@@ -57,6 +60,8 @@ const FIELD_REPORT      = ARGS.fields ? require('./lib/field-report').createFiel
 const SHOW_VALUES       = ARGS.showValues;
 const DRY_RUN           = ARGS.dryRun; // lib/args: --preview implies --dry-run
 const VERIFY            = ARGS.verify;
+const SCAN              = ARGS.scan;             // aidr scan: search every searchable broker, submit nothing
+const FOUND_ONLY        = ARGS.foundOnly;        // aidr run --found-only: submit only where the latest scan found you
 const SERP_SCAN         = ARGS.serpScan;
 const SERP_WATCH        = ARGS.serpWatch;
 const INSTALL_SCHEDULER = ARGS.installScheduler;
@@ -865,9 +870,11 @@ async function modeReport() {
 
 // ── --doctor: self-diagnose and exit ─────────────────────────────────────────
 async function modeDoctor() {
-  const { runDoctor } = require('./lib/doctor');
+  const { runDoctor, runBrokerHealthDoctor } = require('./lib/doctor');
   const outcome = await runDoctor();
-  process.exit(outcome.exitCode);
+  // --brokers adds the broker health check from this machine; it loads pages only.
+  const brokerOutcome = ARGS.brokers ? await runBrokerHealthDoctor() : { exitCode: 0 };
+  process.exit(Math.max(outcome.exitCode, brokerOutcome.exitCode));
 }
 
 // ── --update-brokers: refresh data/feeds-brokers.json from live registries ───
@@ -1057,16 +1064,16 @@ async function modeKnow({ config, persons, state }) {
 
 // A real opt-out run leaves a heartbeat (R4); a preview, a verification and the
 // SERP modes do not, so `aidr schedule status` reports when the job last really ran.
-const isOptOutRun = () => !DRY_RUN && !VERIFY && !SERP_SCAN && !SERP_WATCH;
+const isOptOutRun = () => !DRY_RUN && !VERIFY && !SCAN && !SERP_SCAN && !SERP_WATCH;
 
 // A FILTERED run covers part of the broker list: --only, --skip, --retry-failed,
 // --captchas. It must not write or clear the resume checkpoint of an interrupted full
 // run, and its heartbeat must not stand in for the monthly run's (CLI2-10). --resume
 // is deliberately not one: it finishes the interrupted full run.
-const FILTERED = !!(ONLY_ARG || SKIP_ARG || RETRY_FAILED || CAPTCHAS);
+const FILTERED = !!(ONLY_ARG || SKIP_ARG || RETRY_FAILED || CAPTCHAS || FOUND_ONLY);
 
 // The include test for the modes that act on the broker list but are not the opt-out
-// pass: --verify, --serp-scan, --serp-watch, --know and --pollute. They honour --only
+// pass: --verify, --scan, --serp-scan, --serp-watch, --know and --pollute. They honour --only
 // and --skip like the run does; --retry-failed reads a run log none of them has, and
 // lib/args.js refuses it with them (CLI2-8).
 const modeInclude = () => makeBrokerPredicate({ only: ONLY_ARG, skip: SKIP_ARG });
@@ -1103,6 +1110,7 @@ async function runWithBrowser({ config, persons, state, guard, captchaNames }) {
   if (PREVIEW)       console.log('👀 PREVIEW - field values and target URLs will be printed before submit. No state will be saved.');
   else if (DRY_RUN)  console.log('🧪 DRY RUN - forms will be filled but NOT submitted. No state will be saved.');
   if (VERIFY)        console.log('🔍 VERIFY - re-checking listings. No forms submitted. Verification results are saved.');
+  if (SCAN)          console.log('🔎 SCAN - looking for your listings. Nothing is submitted and no email is sent. Scan results are saved.');
   if (POLLUTE_COUNT) console.log(`⚠️  NOISE MODE - ${POLLUTE_COUNT} bogus record(s) will be submitted to acceptsBogus brokers.`);
   console.log(`📅 ${new Date().toLocaleString()}`);
   console.log(`📋 ${brokers.length} explicit brokers + 500+ generic | re-check window: ${RECHECK_DAYS} days\n`);
@@ -1169,6 +1177,7 @@ async function runWithBrowser({ config, persons, state, guard, captchaNames }) {
 
   try {
     if (VERIFY)     return await runVerifyMode(contexts, { brokers, persons, state, config });
+    if (SCAN)       return await runScanMode(contexts, { brokers, persons, state, config });
     if (SERP_SCAN)  return await runSerpScanMode(contexts, { brokers, persons });
     if (SERP_WATCH) return await runSerpWatchMode(contexts, { brokers, persons, config });
     return await runSubmissions(contexts, { brokers, persons, state, config, guard, captchaNames, captcha, headless });
@@ -1229,6 +1238,7 @@ async function runVerifyMode(contexts, { brokers, persons, state, config }) {
   console.log('Verification results - ' + new Date().toLocaleString());
   console.log('='.repeat(54));
   console.log(`  verified_clear : ${result.verified_clear.length}`);
+  console.log(`  never_seen     : ${result.never_seen.length}`);
   console.log(`  still_listed   : ${result.still_listed.length}`);
   console.log(`  unverifiable   : ${result.unverifiable.length}`);
   console.log(`  skipped        : ${result.skipped.length}`);
@@ -1239,7 +1249,42 @@ async function runVerifyMode(contexts, { brokers, persons, state, config }) {
       console.log(`  - ${e.broker}${name ? ` (${name})` : ''}`);
     }
   }
+  // Not a removal: a listing was never seen there, so nothing was proved gone.
+  if (result.never_seen.length > 0) {
+    console.log('\nNever seen (nothing there now, and no listing was ever seen, so this is not counted as a removal):');
+    for (const e of result.never_seen) {
+      const name = e.person ? personName(e.person) : '';
+      console.log(`  - ${e.broker}${name ? ` (${name})` : ''}`);
+    }
+  }
   console.log('='.repeat(54) + '\n');
+}
+
+// ── Scan mode: where are you listed? Searches only; submits nothing ──────────
+async function runScanMode(contexts, { brokers, persons, state, config }) {
+  const { runScan } = require('./lib/scan');
+  const include = modeInclude();
+  const result = await runScan(null, brokers.filter(b => include(b.name)), persons, {
+    state,
+    config,
+    brokersFor: (person) => brokers.forPerson(person).filter(b => include(b.name)),
+    contextFor: (person, index) => contexts.forPerson(index),
+    // A dry run keeps its promise of writing nothing: no screenshot either.
+    ...(DRY_RUN ? { snapshot: async () => null } : {}),
+  });
+  saveState();
+  await contexts.close();
+
+  const label = (e) => (persons.length > 1 && e.person ? `${e.broker} (${personName(e.person)})` : e.broker);
+  console.log('\n' + '='.repeat(54));
+  console.log('Scan results - ' + new Date().toLocaleString());
+  console.log('='.repeat(54));
+  for (const line of scanReportLines(result, { label, interactive: Boolean(process.stdout.isTTY), statePath: STATE_PATH })) console.log(line);
+  console.log(DRY_RUN ? '\nDry run: results not saved.' : `\nSaved to ${STATE_PATH}. Next: aidr run --found-only`);
+  console.log('='.repeat(54) + '\n');
+  // A scan that learned nothing at all (everything could not be told) should not look like a clean one.
+  const searched = result.found.length + result.not_found.length + result.unvalidated.length + result.unknown.length;
+  if (searched > 0 && result.unknown.length === searched) process.exitCode = 2;
 }
 
 // ── SERP scan mode: search-engine broker visibility audit ────────────────────
@@ -1333,8 +1378,8 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
   // A filtered, resumed or CAPTCHA-only run covers part of the broker list, so its
   // log is marked: diffing the next full run against it would report hundreds of
   // "newly removed" brokers. The same marker goes in the journal.
-  const partial = !!(ONLY_ARG || SKIP_ARG || RETRY_FAILED || RESUME || CAPTCHAS);
-  const runFilter = { only: ONLY_ARG || null, skip: SKIP_ARG || null, retryFailed: !!RETRY_FAILED, resume: !!RESUME, ...(CAPTCHAS ? { captchas: true } : {}) };
+  const partial = !!(ONLY_ARG || SKIP_ARG || RETRY_FAILED || RESUME || CAPTCHAS || FOUND_ONLY);
+  const runFilter = { only: ONLY_ARG || null, skip: SKIP_ARG || null, retryFailed: !!RETRY_FAILED, resume: !!RESUME, ...(CAPTCHAS ? { captchas: true } : {}), ...(FOUND_ONLY ? { foundOnly: true } : {}) };
 
   // ── Resolve the --retry-failed / --captchas broker set ─────────────────────
   let retryFailedFromLog;
@@ -1408,6 +1453,14 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
 
   const contextFor = makeContextProvider(contexts);
 
+  // --found-only: the generic pass cannot be searched, so it follows scan.unknown as a whole
+  // (the explicit brokers are judged one by one below, and an email opt-out follows the
+  // searchable entry for the same company when there is one: see foundOnlyEmailPlan).
+  const skipUnsearchablePasses = FOUND_ONLY && scanSettings(config).unknown === 'skip';
+  if (skipUnsearchablePasses) {
+    console.log('\n--found-only: the generic brokers (and the email opt-outs with no searchable entry for the same company) cannot be searched, so scan.unknown "skip" leaves them out of this run (set it to "submit" to include them).');
+  }
+
   for (const [index, person] of persons.entries()) {
     if (relaySkipped.has(person)) continue;
 
@@ -1442,7 +1495,20 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
     // it once per person in this loop multiplied real sends by persons.length.
     // dryRun: --dry-run must not send real opt-out emails either.
     console.log('── Email opt-outs ─────────────────────────────────────────');
-    await sendOptOutEmails(brokers, config, undefined, { submissionEmailFor: (p) => submissionEmails.get(p), onlyPerson: person, dryRun: DRY_RUN, include });
+    // --found-only: each email opt-out follows the scan's decision for the same company's
+    // searchable entry (judged on ALL of this person's searchable entries, whatever --only
+    // narrows), so the Spokeo email does not go out while the Spokeo form is skipped (S7).
+    let emailInclude = include;
+    if (FOUND_ONLY) {
+      const siblings = applyFoundOnly({
+        brokers: personBrokers.filter(b => b.method !== 'email' && brokerAppliesToPerson(b, person)),
+        person, personCount: persons.length, persons, personIndex: index, state, config, now: new Date(),
+      }).decisions;
+      const emailPlan = foundOnlyEmailPlan({ emailBrokers: personBrokers.filter(b => b.method === 'email' && include(b.name)), decisions: siblings, config });
+      for (const { broker, reason } of emailPlan.skipped) logResult(broker.name, 'skipped', reason);
+      emailInclude = (name) => include(name) && emailPlan.send.has(name);
+    }
+    await sendOptOutEmails(brokers, config, undefined, { submissionEmailFor: (p) => submissionEmails.get(p), onlyPerson: person, dryRun: DRY_RUN, include: emailInclude });
 
     // The manual DROP entry is a to-do only until the request is recorded; after that it is listed
     // as done, with the date, and never offered again (lib/drop.js).
@@ -1469,11 +1535,24 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
       }
     }
 
-    if (ONLY_ARG || SKIP_ARG || RETRY_FAILED || CAPTCHAS) {
+    // --found-only: this person's latest scan decides each broker. The skips are logged
+    // with their reason, so the run log shows why nothing was sent there.
+    let foundOnlySkips = [];
+    if (FOUND_ONLY) {
+      const plan = applyFoundOnly({ brokers: sorted, person, personCount: persons.length, persons, personIndex: index, state, config, now: new Date() });
+      foundOnlySkips = plan.skipped;
+      sorted = plan.submit;
+      // What the scan gave this run to go by, said before the pass: a full run must not be
+      // able to pass for a filtered one without a word (S2).
+      for (const line of foundOnlyOverview({ plan, config, name: persons.length > 1 ? personName(person) : '' })) console.log(line);
+    }
+
+    if (ONLY_ARG || SKIP_ARG || RETRY_FAILED || CAPTCHAS || FOUND_ONLY) {
       console.log(`🔎 Filter applied - ${sorted.length} broker(s) will run`);
     }
 
     console.log('\n── Explicit broker opt-outs ───────────────────────────────');
+    for (const { broker, decision } of foundOnlySkips) logResult(broker.name, 'skipped', decision.reason);
     // This person's own browser, launched only when there is something to open it for.
     // Asked for again before EVERY broker: a Chromium that died mid-pass is relaunched
     // here instead of failing every later newPage() (CLI2-5), and a broker whose
@@ -1580,6 +1659,7 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
   const genericTotals = {};
   for (const [index, person] of persons.entries()) {
     if (relaySkipped.has(person)) continue;
+    if (skipUnsearchablePasses) continue;
     const resume = planFor(index);
     if (resume.skipGeneric) {
       console.log(`\n--resume: the generic pass for ${personName(person)} is already done, skipping`);
@@ -1827,6 +1907,15 @@ async function dispatch() {
   const { config, persons } = loadRunnableConfigOrExit();
   if (!DRY_RUN) exitOnUnreadableState();
   const state = loadState();
+
+  // --found-only judges each broker by the latest scan. With no usable result for anyone (none
+  // recorded, or every one too old, could not tell, or made for other details) that would be
+  // every broker "never scanned" and a full run dressed up as a filtered one, so say how to get
+  // one instead of starting.
+  if (FOUND_ONLY && !hasUsableScan({ brokersFor: (p) => require('./brokers').forPerson(p), persons, state, config, now: new Date() })) {
+    console.error('Error: --found-only has no usable scan result to go by (none recorded, or every one is older than scan.maxAgeDays, could not tell, or was made for different details). Run `aidr scan` first.');
+    process.exit(1);
+  }
 
   if (KNOW_MODE)                       return modeKnow({ config, persons, state });
   return main({ config, persons, state, captchaNames });

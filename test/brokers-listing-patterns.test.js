@@ -71,3 +71,72 @@ test('search-form brokers carry the last name so the listing choice can prefer t
     assert.equal(broker.lastName, 'Doe', `${broker.name} should expose lastName`);
   }
 });
+
+// ---------------------------------------------------------------------------
+// Search steps and how they were validated (roadmap F2).
+//
+// A pattern that wrongly says "found" only causes a submission that would have
+// happened anyway. A pattern that wrongly says "not found" makes `aidr run
+// --found-only` skip a broker that really lists the person. So a search step is
+// only added after it has been seen to work in BOTH directions on the live site
+// (a very common name must give a matching link; a nonsense name must load a
+// normal results page with none), and it carries searchCheckedAt to say when.
+// ---------------------------------------------------------------------------
+
+// These five search steps predate the validation rule. Each was re-checked on
+// 2026-11-17 and could NOT be validated (a bot wall answered every request), so
+// they stay as they were and are listed here on purpose. Radaris was on this list
+// until its domain was transferred by court order and the entry was removed.
+// A broker not in this list and without searchCheckedAt fails the test below.
+const LEGACY_UNVALIDATED = ['Spokeo', 'WhitePages', 'FastPeopleSearch', 'MyLife', 'Nuwber'];
+
+// A realistically shaped result link for each validated broker, taken from the
+// live results page shape (made-up id). The per-broker tests below start running
+// as soon as a validated search step is added. USPhonebook passed both directions
+// live on 2026-11-17 (a common name gave person links; a nonsense name gave its 404).
+const LISTING_EXAMPLES = {
+  USPhonebook: 'https://www.usphonebook.com/jane-doe/U4ab12cd34ef56gh78ij',
+};
+
+const withSearchStep = list.filter(b => b.searchUrl && b.listingPattern);
+const validated = withSearchStep.filter(b => b.searchCheckedAt);
+
+test('every search step is either validated live (searchCheckedAt) or on the explicit legacy list', () => {
+  for (const broker of withSearchStep) {
+    if (broker.searchCheckedAt) continue;
+    assert.ok(LEGACY_UNVALIDATED.includes(broker.name),
+      `${broker.name} has a search step but no searchCheckedAt: validate it live in both directions first`);
+  }
+});
+
+test('searchCheckedAt is an ISO date and never sits on a broker without a search step', () => {
+  for (const broker of list.filter(b => b.searchCheckedAt)) {
+    assert.match(broker.searchCheckedAt, /^\d{4}-\d{2}-\d{2}$/, broker.name);
+    assert.ok(broker.searchUrl && broker.listingPattern, `${broker.name} has searchCheckedAt but no search step`);
+  }
+});
+
+for (const broker of validated) {
+  test(`${broker.name}: has a listing example and the pattern matches it`, () => {
+    const example = LISTING_EXAMPLES[broker.name];
+    assert.ok(example, `add a realistic listing URL for ${broker.name} to LISTING_EXAMPLES`);
+    assert.equal(broker.listingPattern.test(example), true, `${broker.listingPattern} must match ${example}`);
+  });
+
+  test(`${broker.name}: the pattern does not match its own search page, for any person`, () => {
+    const other = brokers.forPerson({ ...PERSON, firstName: 'Mary Ann', lastName: "O'Neil", fullName: "Mary Ann O'Neil", state: 'NC' });
+    for (const b of [broker, other.find(x => x.name === broker.name)]) {
+      assert.equal(b.listingPattern.test(b.searchUrl), false, `${b.listingPattern} matches ${b.searchUrl}`);
+    }
+  });
+
+  test(`${broker.name}: the pattern does not match the homepage`, () => {
+    for (const home of homepages(broker.searchUrl)) {
+      assert.equal(broker.listingPattern.test(home), false, `${broker.listingPattern} matches ${home}`);
+    }
+  });
+
+  test(`${broker.name}: the pattern has no global or sticky flag (RegExp.test would keep state)`, () => {
+    assert.doesNotMatch(broker.listingPattern.flags, /[gy]/);
+  });
+}
