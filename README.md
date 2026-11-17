@@ -952,6 +952,12 @@ without looking (USPhonebook) does not get that credit. If `aidr verify`
 finds an empty search page and no listing was ever seen, it reports `never seen`, which
 is not counted as a removal in the exposure score, the monthly report or the complaints.
 
+A sighting that is NEWER than a "found nothing" check wins: if `aidr verify` saw an empty page on
+day 8 and `aidr scan` found the listing on day 18, the score counts it as listed, the report
+lists it as listed (not under "Never seen"), and `aidr verify` searches it again instead of
+skipping it as already found absent. A scan that finds a listing for someone with no opt-out
+history yet also counts as listed in the score.
+
 ### Continuous SERP monitoring (`--serp-watch`)
 
 `node watcher.js --serp-watch` runs a search-engine scan, diffs the broker domains it finds against the previous `data/serp-history.json` snapshot, and dispatches an alert (via `lib/notify.js` `dispatchNotify`: macOS toast/iMessage, Linux `notify-send`, and/or the `notify.webhook` URL) only when your name appears on a NEW domain. Because the scan appends to `data/serp-history.json`, repeated runs diff against the prior run. Add `--serp-watch` to `run.sh` to have the existing monthly scheduler watch for new exposures.
