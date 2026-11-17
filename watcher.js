@@ -37,7 +37,7 @@ const { renderAuditMarkdown, writeAuditFile, timestampForFilename } = require('.
 const { buildStealthScript } = require('./lib/stealth');
 const { buildLaunchOptions, resolveHeadless, isLowMemory, createPersonContexts, createThrowawayContexts, utilityProfileDir, browserConfigProblems, describeProxy } = require('./lib/browser');
 const { installShutdownHandlers } = require('./lib/shutdown');
-const { loadRegistryHosts, makeCoveredByDrop, dropRunNotes, brokerAppliesToPerson } = require('./lib/drop');
+const { loadRegistryHostsSafe, makeCoveredByDrop, dropRunNotes, brokerAppliesToPerson } = require('./lib/drop');
 const { writePrivateFile, mkdirPrivate } = require('./lib/private-fs');
 const { resolveMode } = require('./lib/mode-dispatch');
 const { resolvePaths } = require('./lib/paths');
@@ -382,7 +382,7 @@ function modeDrop() {
       persons,
       state,
       options: { done: ARGS.done, clear: ARGS.clear, on: ARGS.on, person: ARGS.person },
-      registryCount: californiaDomains(loadRegistryHosts()).size,
+      registryCount: californiaDomains(loadRegistryHostsSafe()).size,
       today: todayDay(),
     });
   } finally {
@@ -501,7 +501,7 @@ function modeScore() {
   // A recorded DROP request is shown beside the score, never inside it (lib/exposure.js).
   let dropCovered = 0;
   try {
-    dropCovered = require('./lib/drop').dropCoveredCount({ persons: getPersonsFromConfig(readConfigQuietly()), state, registryHosts: loadRegistryHosts() });
+    dropCovered = require('./lib/drop').dropCoveredCount({ persons: getPersonsFromConfig(readConfigQuietly()), state, registryHosts: loadRegistryHostsSafe() });
   } catch (_) { /* no readable config: the score does not need one */ }
   const summary = computeExposureScore({ state, brokers, dropCovered, ...loadPersistedSignals() });
 
@@ -631,7 +631,7 @@ async function modeComplaints() {
   // California DROP: a registry broker still listing someone after the request's window.
   const dropOverdue = findDropOverdue(state, {
     persons,
-    registryHosts: loadRegistryHosts(),
+    registryHosts: loadRegistryHostsSafe(),
     hostFor: (name) => { const b = brokerMap.get(name); return b && (b.optOutUrl || b.searchUrl); },
   });
   if (overdueList.length === 0 && dropOverdue.length === 0) {
@@ -1568,7 +1568,7 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
   });
 
   // DROP: what the person should know once per run, and the registry list the generic pass skips by.
-  const dropRegistryHosts = loadRegistryHosts();
+  const dropRegistryHosts = loadRegistryHostsSafe();
   for (const line of dropRunNotes({ persons, state, config, registryHosts: dropRegistryHosts })) console.log(`\n${line}`);
 
   const genericTotals = {};
