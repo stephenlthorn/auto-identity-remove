@@ -164,3 +164,34 @@ test('entriesFromGeneric names the detail the generic field map chose', () => {
   ]);
   assert.deepEqual(fr.entriesFromGeneric(typed, { showValues: true }).map(e => e.value), ['alias@relay.example', 'Jane']);
 });
+
+test('searchDetailsFor reads which details the search URL carries, with no network', () => {
+  const build = (p) => [
+    { name: 'Finder', method: 'search-form', searchUrl: `https://f.example/search?q=${encodeURIComponent(p.fullName)}&state=${p.state}`, formFields: {} },
+    { name: 'Path', method: 'search-form', searchUrl: `https://p.example/name/${encodeURIComponent(p.firstName)}-${encodeURIComponent(p.lastName)}/${p.state}`, formFields: {} },
+    { name: 'Plain', method: 'direct-form', formFields: {} },
+  ];
+  assert.deepEqual(fr.searchDetailsFor('Finder', build, PERSON), ['fullName', 'state']);
+  assert.deepEqual(fr.searchDetailsFor('Path', build, PERSON), ['firstName', 'lastName', 'state']);
+  assert.deepEqual(fr.searchDetailsFor('Plain', build, PERSON), []);
+  assert.equal(fr.searchDetailsFor('Nope', build, PERSON), null);
+});
+
+test('the table marks what the search step sends and counts it in the totals', () => {
+  const report = fr.createFieldReport({ log() {} });
+  report.addSearch('Finder', ['full name', 'state']);
+  report.add('Finder', [{ field: 'email', details: ['email'] }]);
+  report.addSearch('Other', ['full name']);
+  const table = report.renderTables().join('\n');
+  assert.match(table, /Finder\s+\|\s+email; search: full name, state/);
+  assert.match(table, /Other\s+\|\s+search: full name$/m);
+  assert.match(table, /search sends full name: 2 of 2/);
+  assert.match(table, /search sends state: 1 of 2/);
+  assert.match(table, /email: 1 of 2/);
+});
+
+test('a search-only broker is not described as "nothing typed"', () => {
+  const report = fr.createFieldReport({ log() {} });
+  report.addSearch('Other', ['full name']);
+  assert.ok(!/nothing typed/.test(report.renderTables().join('\n')));
+});

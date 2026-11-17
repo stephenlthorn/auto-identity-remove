@@ -204,3 +204,32 @@ test('a real run attaches the names of the details it typed to every result, nev
   const all = JSON.stringify(s.loggedWithExtra);
   for (const v of VALUES) assert.ok(!all.includes(v), `"${v}" leaked into a logged result`);
 });
+
+// ── the search step ──────────────────────────────────────────────────────────
+
+test('the preview shows which details the search URL sends, even when no listing is found', async () => {
+  const searchBuild = (p) => [{
+    name: 'SearchSite', method: 'search-form',
+    searchUrl: `https://search.example/find?q=${encodeURIComponent(p.fullName)}&state=${p.state}`,
+    optOutUrl: 'https://search.example/optout', submitSelector: 'button',
+    formFields: {},
+  }];
+  const searched = [];
+  const h = loadRunner({
+    './forms': { ...realForms, findListingUrl: async (page, broker) => { searched.push(broker.name); return null; } },
+  });
+  const lines = [];
+  const report = fr.createFieldReport({ log: (l) => lines.push(l) });
+  h.runner.configure({ dryRun: true, preview: true, person: PERSON, personCount: 1, capsolver: null, brokersFor: searchBuild, fieldReport: report });
+  const realLog = console.log;
+  console.log = () => {};
+  try {
+    await h.runner.processBrokerWithPerson(makeContext(makePage()), searchBuild(PERSON)[0], PERSON);
+  } finally {
+    console.log = realLog;
+  }
+  assert.deepEqual(searched, ['SearchSite'], 'the search still runs');
+  const out = [...lines, ...report.renderTables()].join('\n');
+  assert.match(report.renderTables().join('\n'), /SearchSite\s+\|\s+search: full name, state/);
+  for (const v of VALUES) assert.ok(!out.includes(v), `"${v}" leaked`);
+});
