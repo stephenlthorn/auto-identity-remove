@@ -14,6 +14,10 @@
  *  8. verifyHistory appended on each outcome
  *  9. verifiedDeletedAt already set but older than lastSuccess → re-checks
  * 10. verifiedDeletedAt set and newer than lastSuccess → skipped
+ *
+ * A clear search is verified_clear only when a listing was seen before (here: an
+ * earlier verify's verifiedStillListedAt). Without one it is never_seen: see
+ * test/verify-never-seen.test.js.
  */
 
 'use strict';
@@ -87,7 +91,8 @@ const { runVerify } = require('../lib/verify-loop');
 test('lastSuccess 8d ago, listing absent → verified_clear and verifiedDeletedAt written', async () => {
   const broker  = searchBroker('ClearBroker');
   const person  = { firstName: 'Jane', lastName: 'Doe' };
-  const state   = makeState('ClearBroker', 8);
+  // A listing was seen before (an earlier verify found it), so an empty search is a removal.
+  const state   = makeState('ClearBroker', 8, { verifiedStillListedAt: daysAgo(30) });
   const context = makeContext();
 
   const fakeFind = async () => null; // listing not found
@@ -196,7 +201,7 @@ test('multi-person: each person is verified independently for the same broker', 
   // Each person gets their own state entry
   const state = {
     optOuts: {
-      'MultiPerson|Alice Smith': { lastSuccess: daysAgo(10), totalRuns: 1 },
+      'MultiPerson|Alice Smith': { lastSuccess: daysAgo(10), totalRuns: 1, verifiedStillListedAt: daysAgo(40) },
       'MultiPerson|Bob Jones':   { lastSuccess: daysAgo(10), totalRuns: 1 },
     },
   };
@@ -281,6 +286,7 @@ test('verifiedDeletedAt older than lastSuccess → re-checks (new submit since l
   // verifiedDeletedAt set 20d ago, lastSuccess set 8d ago (more recent - re-check needed)
   const state   = makeState('StaleVerifyBroker', 8, {
     verifiedDeletedAt: daysAgo(20),
+    verifiedStillListedAt: daysAgo(40),
   });
   const context = makeContext();
 
@@ -335,7 +341,7 @@ test('findListingUrl throws → unverifiable (not a false positive)', async () =
 test('H2: verified_clear outcome writes verifiedDeletedAt on the state object', async () => {
   const broker  = searchBroker('MutationBroker');
   const person  = { firstName: 'Jane', lastName: 'Doe' };
-  const state   = makeState('MutationBroker', 8);
+  const state   = makeState('MutationBroker', 8, { verifiedStillListedAt: daysAgo(30) });
   const context = makeContext();
 
   const fakeFind = async () => null; // listing gone
