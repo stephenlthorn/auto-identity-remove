@@ -39,7 +39,9 @@ concurrency:
 jobs:
   check:
     if: github.repository == 'stephenlthorn/auto-identity-remove'
-    runs-on: ubuntu-latest
+    # A named image, not ubuntu-latest: the pinned Playwright only installs
+    # Chromium on the Ubuntu releases it knows (see test/chromium-runner.test.js).
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
       contents: read

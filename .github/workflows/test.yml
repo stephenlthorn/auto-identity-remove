@@ -10,7 +10,11 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # A named image, not ubuntu-latest: the Node 22 leg installs Playwright's
+    # Chromium, and the pinned Playwright only installs it on the Ubuntu releases
+    # it knows. Move this when Playwright is upgraded to one that knows a newer
+    # release. test/chromium-runner.test.js pins it.
+    runs-on: ubuntu-24.04
 
     strategy:
       matrix:
