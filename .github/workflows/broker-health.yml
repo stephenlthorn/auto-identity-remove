@@ -4,9 +4,24 @@ name: Broker health
 # has the form brokers.js expects. See STATUS.md for what the labels mean and
 # what the check cannot tell you.
 #
+# Two jobs, so that no job holds a write token while it runs untrusted code:
+#
+#   check    read-only token, git credentials NOT persisted. It runs `npm ci`
+#            (dependency lifecycle scripts), `playwright install`, and a browser
+#            that loads about 46 third-party sites. Its only output is
+#            data/broker-health.json, uploaded as an artifact.
+#   publish  the only job with `contents: write` and `issues: write`. It installs
+#            nothing from npm, starts no browser and loads no third-party page:
+#            it downloads the artifact, regenerates STATUS.md (standard library
+#            only), commits, and syncs the drift issues.
+#
 # A plain headless Chromium: no stealth script, no CAPTCHA solving, no proxy. A
 # site that refuses this data centre address is recorded as `blocked`.
 # No personal data is involved, and no secret other than the built-in token.
+#
+# Both jobs only run in the real repository: on a fork with Actions enabled the
+# schedule would otherwise commit to the fork's main every week and try to open
+# issues there.
 
 on:
   schedule:
@@ -15,20 +30,24 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
-  issues: write
+  contents: read
 
 concurrency:
   group: broker-health
   cancel-in-progress: false
 
 jobs:
-  health:
+  check:
+    if: github.repository == 'stephenlthorn/auto-identity-remove'
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    permissions:
+      contents: read
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -45,24 +64,45 @@ jobs:
       - name: Check every broker
         run: node scripts/broker-health.js --runner ci
 
+      - name: Keep the result
+        uses: actions/upload-artifact@v4
+        with:
+          name: broker-health
+          path: data/broker-health.json
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: check
+    if: github.repository == 'stephenlthorn/auto-identity-remove' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      issues: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Download the result
+        uses: actions/download-artifact@v4
+        with:
+          name: broker-health
+          path: data
+
       - name: Regenerate STATUS.md
         run: node scripts/generate-status.js
 
       - name: Commit the results
-        if: github.ref == 'refs/heads/main'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/broker-health.json STATUS.md
-          if git diff --cached --quiet; then
-            echo "nothing changed"
-          else
-            git commit -m "chore(health): weekly broker health check"
-            git push origin HEAD:main
-          fi
+        run: bash scripts/ci/commit-health.sh
 
       - name: Sync drift issues
-        if: github.ref == 'refs/heads/main'
+        if: ${{ !cancelled() }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
