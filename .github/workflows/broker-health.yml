@@ -1,0 +1,69 @@
+name: Broker health
+
+# Every week, load each explicit broker's opt-out page and check that it still
+# has the form brokers.js expects. See STATUS.md for what the labels mean and
+# what the check cannot tell you.
+#
+# A plain headless Chromium: no stealth script, no CAPTCHA solving, no proxy. A
+# site that refuses this data centre address is recorded as `blocked`.
+# No personal data is involved, and no secret other than the built-in token.
+
+on:
+  schedule:
+    # Mondays 05:47 UTC. Not on the hour: that is when every scheduled job starts.
+    - cron: '47 5 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: broker-health
+  cancel-in-progress: false
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Check every broker
+        run: node scripts/broker-health.js --runner ci
+
+      - name: Regenerate STATUS.md
+        run: node scripts/generate-status.js
+
+      - name: Commit the results
+        if: github.ref == 'refs/heads/main'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/broker-health.json STATUS.md
+          if git diff --cached --quiet; then
+            echo "nothing changed"
+          else
+            git commit -m "chore(health): weekly broker health check"
+            git push origin HEAD:main
+          fi
+
+      - name: Sync drift issues
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: node scripts/ci/broker-health-issues.js

@@ -2,6 +2,7 @@
 
 ![CI](https://github.com/stephenlthorn/auto-identity-remove/actions/workflows/test.yml/badge.svg)
 [![Hacker News points via HackerGit](https://hackergit.org/badge/stephenlthorn/auto-identity-remove.svg?style=card)](https://news.ycombinator.com/item?id=48178184)
+[![brokers ok](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fstephenlthorn%2Fauto-identity-remove%2Fmain%2Fdata%2Fbroker-health.json&query=%24.summary.ok&label=brokers%20ok&cacheSeconds=3600)](STATUS.md) [![brokers checked](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fstephenlthorn%2Fauto-identity-remove%2Fmain%2Fdata%2Fbroker-health.json&query=%24.summary.total&label=brokers%20checked&cacheSeconds=3600)](STATUS.md)
 
 Automated data broker opt-out runner for macOS, Linux, and Windows. Removes your personal information from **500+ people-search sites and data broker databases** on a monthly schedule - with CAPTCHA solving, persistent state tracking (so completed opt-outs aren't resubmitted every run), and an iMessage notification when done. [**Privacy & data flow ->**](docs/PRIVACY.md)
 
@@ -613,6 +614,12 @@ root-owned by a `sudo` run, say), a run refuses to save over it rather than repl
 your whole history; `aidr config check` reports it and tells you how to fix the owner.
 
 > **Submitted ≠ confirmed deleted.** Use `node watcher.js --verify` for spot-check verification. See [STATUS.md](STATUS.md) for a per-broker confidence table.
+
+## Broker health
+
+[STATUS.md](STATUS.md) shows, for every explicit broker, whether its opt-out page still answers and still has the form the definition expects. A weekly GitHub Actions job loads each page with a plain headless browser (no personal data, nothing typed or submitted) and rewrites `data/broker-health.json`; the badges at the top read their numbers from that file, so this page needs no edit when they change. A broker that is `drifted` twice in a row gets an issue titled `Broker drift: <name>`.
+
+The labels are `ok`, `drifted` (a selector the definition relies on matches nothing), `blocked` (a bot wall or CAPTCHA: the real page was not seen, so it is never called drifted), `dead` (gone or unresolvable) and `error` (a timeout or server error; shown, never an issue). The check looks at the shape of the form, not at whether a submission deletes anything, and a data centre address is refused by some sites, so run `aidr doctor --brokers` to repeat the check from your own connection. It prints one line per broker and writes nothing.
 
 ## How confident should I be?
 
