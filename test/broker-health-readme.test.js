@@ -38,3 +38,13 @@ test('the health file the badges read exists and parses', () => {
   assert.equal(typeof parsed.summary.ok, 'number');
   assert.equal(typeof parsed.summary.total, 'number');
 });
+
+test('the committed health file agrees with brokers.js and with its own summary (H6): the badges, STATUS.md and the file tell one story', () => {
+  const file = path.join(__dirname, '..', 'data', 'broker-health.json');
+  const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const { explicitBrokers, summarize } = require('../lib/broker-health');
+  const names = explicitBrokers(require('../brokers')).map((b) => b.name);
+  const extra = Object.keys(parsed.results).filter((n) => !names.includes(n));
+  assert.deepEqual(extra, [], 'results for brokers that are not in brokers.js: prune them and regenerate STATUS.md');
+  assert.deepEqual(parsed.summary, summarize(parsed.results));
+});

@@ -158,6 +158,16 @@ describe('summarize and buildHealthFile', () => {
     assert.equal('redirectedTo' in file.results.A, false);
   });
 
+  test('results for names that are not in the broker list are dropped, and the summary counts only what is kept (H6)', () => {
+    const file = buildHealthFile({ checked, runner: 'ci', checkedAt: at, known: ['A', 'B', 'F'] });
+    assert.deepEqual(Object.keys(file.results), ['A', 'B', 'F']);
+    assert.deepEqual(file.summary, { ok: 1, drifted: 1, blocked: 0, dead: 0, error: 0, na: 1, total: 2 });
+  });
+
+  test('without a known list nothing is dropped (callers that check a custom list)', () => {
+    assert.equal(Object.keys(buildHealthFile({ checked, runner: 'ci', checkedAt: at }).results).length, 6);
+  });
+
   test('a garbled previous file is treated as no history', () => {
     const file = buildHealthFile({ checked, previous: { results: 'nope' }, runner: 'ci', checkedAt: at });
     assert.equal(file.results.A.previousStatus, null);

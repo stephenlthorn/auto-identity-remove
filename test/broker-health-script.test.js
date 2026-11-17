@@ -68,6 +68,20 @@ describe('scripts/broker-health.js', () => {
     assert.equal(written.results.M.status, 'n/a');
   });
 
+  test('a result for a broker that is no longer in the list is not carried over, and the summary agrees (H6)', async () => {
+    const file = tmpFile();
+    fs.writeFileSync(file, JSON.stringify({
+      runner: 'local',
+      summary: { ok: 1, drifted: 0, blocked: 0, dead: 1, error: 0, na: 0, total: 2 },
+      results: { A: { status: 'ok' }, 'Gone Broker': { status: 'dead' } },
+    }));
+    await run({ argv: [], file, launch: fakeLauncher().launch, brokers: LIST, now: () => NOW, io: quiet });
+    const written = JSON.parse(fs.readFileSync(file, 'utf8'));
+    assert.deepEqual(Object.keys(written.results), ['A', 'B', 'M']);
+    assert.equal(written.summary.dead, 0);
+    assert.equal(written.summary.total, 2);
+  });
+
   test('previousStatus is read from the file as it was before the run', async () => {
     const file = tmpFile();
     fs.writeFileSync(file, JSON.stringify({ runner: 'local', results: { A: { status: 'drifted' } } }));
