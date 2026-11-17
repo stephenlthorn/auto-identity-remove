@@ -59,6 +59,7 @@ const { isAllowlisted } = require('./lib/filter');
 const { acceptOptOutDialogs } = require('./lib/browser');
 const { armSubmitWatch } = require('./lib/submit-watch');
 const { redactIdentity } = require('./lib/redact-identity');
+const fieldReport = require('./lib/field-report');
 
 // Config is loaded lazily so that modules importing only the pure helpers
 // (classifyNavError, isDeadStatus, loadDeadSet) don't require config.json.
@@ -634,23 +635,24 @@ function getFieldMap(person, opts = {}) {
   const E = opts.submissionEmail || p.email;
   return [
     // email (try first - many sites only need this)
-    { selectors: ['input[type="email"]', 'input[name*="email" i]', 'input[placeholder*="email" i]'], value: E },
+    { selectors: ['input[type="email"]', 'input[name*="email" i]', 'input[placeholder*="email" i]'], value: E, detail: 'email' },
     // first name
-    { selectors: ['input[name="firstName"]', 'input[name*="first" i]', 'input[placeholder*="first name" i]'], value: F },
+    { selectors: ['input[name="firstName"]', 'input[name*="first" i]', 'input[placeholder*="first name" i]'], value: F, detail: 'firstName' },
     // last name
-    { selectors: ['input[name="lastName"]', 'input[name*="last" i]', 'input[placeholder*="last name" i]'], value: L },
+    { selectors: ['input[name="lastName"]', 'input[name*="last" i]', 'input[placeholder*="last name" i]'], value: L, detail: 'lastName' },
     // full name
-    { selectors: ['input[name="name"]', 'input[name*="full" i]', 'input[placeholder*="full name" i]', 'input[placeholder*="your name" i]'], value: N },
+    { selectors: ['input[name="name"]', 'input[name*="full" i]', 'input[placeholder*="full name" i]', 'input[placeholder*="your name" i]'], value: N, detail: 'fullName' },
     // state
-    { selectors: ['select[name*="state" i]', 'input[name*="state" i]'], value: ST },
+    { selectors: ['select[name*="state" i]', 'input[name*="state" i]'], value: ST, detail: 'state' },
     // zip
-    { selectors: ['input[name*="zip" i]', 'input[name*="postal" i]'], value: Z },
+    { selectors: ['input[name*="zip" i]', 'input[name*="postal" i]'], value: Z, detail: 'zip' },
     // phone - supplementary: filled only alongside a name or email, never on
     // its own. A lone phone box is usually a reverse-lookup search, and
     // submitting it would be recorded as a removal.
     {
       selectors: ['input[type="tel"]', 'input[name*="phone" i]', 'input[placeholder*="phone" i]'],
       value: p.phoneFormatted || p.phone,
+      detail: 'phone',
       supplementary: true,
     },
     // request type - select "Delete" or "Do Not Sell" where applicable
@@ -668,7 +670,9 @@ function getFieldMap(person, opts = {}) {
  * for older callers).
  * @param {object} page
  * @param {object} [person]
- * @param {{ submissionEmail?: string, scope?: object }} [opts]
+ * @param {{ submissionEmail?: string, scope?: object, typed?: object[] }} [opts]
+ *   `typed`, when given, receives one { selector, detail, value, masked } per field
+ *   typed into: the decision getFieldMap() made, for the field report (Q4).
  * @returns {Promise<boolean>} true if at least one field was filled
  */
 async function fillGenericForm(page, person, opts = {}) {
@@ -705,6 +709,9 @@ async function fillGenericForm(page, person, opts = {}) {
             await el.selectOption(field.value).catch(() => {});
           } else {
             await el.fill(field.value);
+          }
+          if (Array.isArray(opts.typed) && field.detail) {
+            opts.typed.push({ selector: sel, detail: field.detail, value: field.value, masked: field.detail === 'email' && !!opts.submissionEmail });
           }
           filledAny = true;
           break;
@@ -831,7 +838,7 @@ async function clearCaptcha(handleCaptcha, page, broker, describeFailure) {
  * with a fillable field exists, so the caller can fall through to the next
  * strategy; otherwise a { status, detail } result.
  */
-async function submitOptOutForm(page, { person, submissionEmail, checkUrl, blockedNow, redactor, formCtx = {}, label, broker, handleCaptcha, captchaFailureDetail }) {
+async function submitOptOutForm(page, { person, submissionEmail, checkUrl, blockedNow, redactor, formCtx = {}, label, broker, handleCaptcha, captchaFailureDetail, previewOnly = false, typed }) {
   const found = await describeForms(page);
   if (found.length === 0) return null;
 
@@ -866,12 +873,15 @@ async function submitOptOutForm(page, { person, submissionEmail, checkUrl, block
     // Look before typing: with nothing to clear a CAPTCHA, the person's details are
     // not typed into a form that cannot be sent.
     const captcha = await hasCaptchaWidget(page, locator);
-    if (captcha && typeof handleCaptcha !== 'function') {
+    if (captcha && !previewOnly && typeof handleCaptcha !== 'function') {
       return { status: 'captcha_failed', detail: captchaDetail(captchaFailureDetail, 'skipped', broker) || 'CAPTCHA on the opt-out form and this run cannot solve it - finish this one by hand' };
     }
 
-    const filled = await fillGenericForm(page, person, { submissionEmail, scope: locator });
+    const filled = await fillGenericForm(page, person, { submissionEmail, scope: locator, typed });
     if (!filled) { skipped.push('no fillable field'); continue; }
+    // A preview with fields stops here: the form is filled so the report can say what
+    // was typed, and nothing is clicked or sent (Q4).
+    if (previewOnly) return { status: 'skipped', detail: 'dry-run - form filled but not submitted' };
 
     // Filled first, so a person solving it by hand only has the CAPTCHA left. The
     // baseline below is read after, so a "verified" banner is not the broker's answer.
@@ -942,7 +952,24 @@ async function guardFor(page, check) {
 
 // ─── Process one generic URL ──────────────────────────────────────────────────
 
+/**
+ * Process one generic row. The work is in processGenericRow below; this wrapper
+ * adds what was typed to the result (Q4): `fields`, the detail NAMES, on a real
+ * run, and `fieldEntries` on a preview with fields (values only on showValues).
+ * Neither is added when nothing was typed, so every other result is unchanged.
+ */
 async function processGenericUrl(page, broker, state, dryRun = false, injectedDeadSet, opts = {}) {
+  const typed = [];
+  const result = await processGenericRow(page, broker, state, dryRun, injectedDeadSet, { ...opts, typed });
+  if (!result || typed.length === 0) return result;
+  if (opts.previewFields) {
+    return { ...result, fieldEntries: fieldReport.entriesFromGeneric(typed, { showValues: !!opts.showValues }) };
+  }
+  if (dryRun) return result;
+  return { ...result, fields: fieldReport.detailNames(fieldReport.entriesFromGeneric(typed)) };
+}
+
+async function processGenericRow(page, broker, state, dryRun = false, injectedDeadSet, opts = {}) {
   // The person whose PII gets typed in, and the state key their history lives
   // under. Defaults keep single-person and older call sites identical.
   const person = opts.person;
@@ -1056,6 +1083,13 @@ async function processGenericUrl(page, broker, state, dryRun = false, injectedDe
     // is reachable, but every strategy below is mutating (clicks a Do Not Sell
     // button or submits a form). Stop here so --dry-run is genuinely safe.
     if (dryRun) {
+      // `aidr preview --fields`: fill an opt-out form that is already on the page, so
+      // the report can say what would be typed. Nothing is clicked, so no Do Not Sell
+      // link is followed and a form that only appears after one is not previewed.
+      if (opts.previewFields && (broker.method === undefined || broker.method === null || broker.method === 'direct-form') && !isHomepageUrl(broker.url)) {
+        const previewed = await submitOptOutForm(page, { person, submissionEmail, checkUrl, blockedNow, redactor, broker, previewOnly: true, typed: opts.typed });
+        if (previewed) return previewed;
+      }
       return { status: 'skipped', detail: 'dry-run - generic opt-out not submitted' };
     }
 
@@ -1077,7 +1111,7 @@ async function processGenericUrl(page, broker, state, dryRun = false, injectedDe
       const movedBad = await guardLanding();
       if (movedBad) return movedBad;
       const submitted = await submitOptOutForm(page, {
-        person, submissionEmail, checkUrl, blockedNow, redactor, broker, handleCaptcha: opts.handleCaptcha, captchaFailureDetail: opts.captchaFailureDetail,
+        person, submissionEmail, checkUrl, blockedNow, redactor, broker, handleCaptcha: opts.handleCaptcha, captchaFailureDetail: opts.captchaFailureDetail, typed: opts.typed,
         formCtx: { afterOptOutClick: true, beforeSigs: formsBeforeClick },
         label: 'Do Not Sell clicked, form submitted',
       });
@@ -1117,7 +1151,7 @@ async function processGenericUrl(page, broker, state, dryRun = false, injectedDe
     const methodAllowsForms = broker.method === undefined || broker.method === null || broker.method === 'direct-form';
     if (methodAllowsForms && !isHomepageUrl(broker.url)) {
       const submitted = await submitOptOutForm(page, {
-        person, submissionEmail, checkUrl, blockedNow, redactor, broker, handleCaptcha: opts.handleCaptcha, captchaFailureDetail: opts.captchaFailureDetail,
+        person, submissionEmail, checkUrl, blockedNow, redactor, broker, handleCaptcha: opts.handleCaptcha, captchaFailureDetail: opts.captchaFailureDetail, typed: opts.typed,
         formCtx: { afterOptOutClick: false },
         label: 'Form submitted',
       });
@@ -1736,7 +1770,7 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
 
       let result;
       try {
-        result = await processFn(page, broker, state, dryRun, opts.injectedDeadSet, { person, personCount, personIndex: opts.personIndex, stateKey: keyFor(broker.name), submissionEmail: opts.submissionEmail || undefined, dnsLookup: opts.dnsLookup, handleCaptcha: opts.handleCaptcha, captchaFailureDetail: opts.captchaFailureDetail });
+        result = await processFn(page, broker, state, dryRun, opts.injectedDeadSet, { person, personCount, personIndex: opts.personIndex, stateKey: keyFor(broker.name), submissionEmail: opts.submissionEmail || undefined, dnsLookup: opts.dnsLookup, handleCaptcha: opts.handleCaptcha, captchaFailureDetail: opts.captchaFailureDetail, previewFields: !!opts.fieldReport, showValues: !!opts.showValues });
       } catch (err) {
         // One broker must never abort the whole run or skip the cleanup below.
         result = { status: 'error', detail: (err && err.message ? err.message.slice(0, 80) : 'error') };
@@ -1752,7 +1786,9 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
 
       // Rows are named by company, so record which host this one was about:
       // scripts/prune-dead.js can only judge a host it can see in the run log.
-      logResult(broker.name, result.status, result.detail || '', { host: hostOfBroker(broker) });
+      logResult(broker.name, result.status, result.detail || '', { host: hostOfBroker(broker), ...(result.fields ? { fields: result.fields } : {}) });
+      // `aidr preview --fields`: the fields this row's form would take (Q4).
+      if (opts.fieldReport && result.fieldEntries) opts.fieldReport.add(broker.name, result.fieldEntries);
 
       stats.attempted++;
       const bucket = classifyOutcome(result.status, result.detail || '');
