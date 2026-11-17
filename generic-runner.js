@@ -1632,6 +1632,9 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
   // brokers are dropped here, before any log line, navigation or state write.
   const include = typeof opts.include === 'function' ? opts.include : () => true;
   const queue = brokers.filter(b => include(b.name));
+  // California DROP: (row) => reason, or null. A covered row is not visited at all (see below).
+  // Absent for everyone it does not apply to, and then nothing here changes.
+  const coveredByDrop = typeof opts.coveredByDrop === 'function' ? opts.coveredByDrop : null;
 
   console.log(`\n── Generic brokers (${queue.length} from Markup CSV + BADBOOL)${dryRun ? ' [DRY RUN]' : ''} ──`);
 
@@ -1727,6 +1730,7 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
     'dry-run-skipped': 0,
     'skipped-recent': 0,
     dead: 0,
+    covered_by_drop: 0,
   };
 
   // The browser is gone and cannot be relaunched: every row that was not run is logged
@@ -1765,6 +1769,15 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
     for (let rowIndex = start; rowIndex < queue.length && !browserGone; rowIndex++) {
       if (finishedRows.has(rowIndex)) continue;
       const broker = queue[rowIndex];
+      // The person's DROP request already reaches this company: no visit, no state write,
+      // and nothing typed. Logged so the run log shows why the row did not run.
+      const droppedFor = coveredByDrop ? coveredByDrop(broker) : null;
+      if (droppedFor) {
+        doneKeys.push(keyHash(keyFor(broker.name)));
+        logResult(broker.name, 'skipped', droppedFor, { host: hostOfBroker(broker) });
+        stats.covered_by_drop++;
+        continue;
+      }
       checkpointRow(rowIndex, broker);
       process.stdout.write(`\n  [${broker.name.slice(0,40)}]… `);
 
@@ -1862,6 +1875,7 @@ async function runGenericBrokers(context, explicitBrokerHosts, state, logResult,
       'skipped-recent': stats['skipped-recent'],
       dead: stats.dead,
       allowlisted: stats.allowlisted || 0,
+      covered_by_drop: stats.covered_by_drop,
     },
   };
 }

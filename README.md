@@ -126,6 +126,7 @@ maps to an existing entrypoint:
 | `aidr breach` | Checks Have I Been Pwned and recommends a credit freeze on high-severity breaches |
 | `aidr freeze` | Shows the credit/identity-freeze checklist and its status |
 | `aidr complaints` | Generates regulator complaints for brokers past the CCPA/GDPR deadline |
+| `aidr drop` | California: shows how to file your DROP request, records when you did (`--done`, `--on DATE`, `--person NAME`, `--clear`), and skips the brokers it covers |
 | `aidr know` | Sends CCPA/GDPR right-to-know requests |
 | `aidr update-brokers` | Refreshes the broker list from the current California registry |
 | `aidr list` | Lists configured brokers and their last-known status |
@@ -619,7 +620,7 @@ This tool covers 500+ data brokers in two tiers:
 
 | Tier | Count | Confidence |
 |---|---|---|
-| **Explicit brokers** ([STATUS.md](STATUS.md)) | 51 | Hand-mapped with specific selectors. **None are currently marked `verified`** - the selectors compile and were correct when written, but none has been re-tested against the live site recently, so any of them may have drifted. |
+| **Explicit brokers** ([STATUS.md](STATUS.md)) | 50 | Hand-mapped with specific selectors. **None are currently marked `verified`** - the selectors compile and were correct when written, but none has been re-tested against the live site recently, so any of them may have drifted. |
 | **Generic runner** | ~490 | Best-effort heuristic - tries 4 strategies (Do Not Sell click, OneTrust/TrustArc, generic form, DSAR link). Many succeed; some fail silently. |
 
 Be skeptical of the counts this tool prints. Broker sites change their DOM
@@ -1103,21 +1104,64 @@ That said: if you're in a situation where even confirming your email address to 
 
 ---
 
-### California residents: DROP delete portal (SB 362)
+### California residents: DROP, the one-request deletion (SB 362)
 
-California's Delete Request and Opt-out Platform (DROP), established by SB 362,
-will eventually let residents submit a single deletion request that all
-California-registered data brokers must honor. The platform is operated by the
-California Privacy Protection Agency (CPPA).
+California's Delete Request and Opt-out Platform (DROP) is **live**. It is run by the
+California Privacy Protection Agency (branded CalPrivacy) and lets a California resident
+send one deletion request that every registered data broker must honor. It has been open
+to consumers since 2026-01-01, and registered brokers have had to access it since
+2026-08-01. The current registry lists 625 brokers.
 
-**Status as of late 2025: not yet live.** The broker-side compliance deadline
-in SB 362 is August 1, 2026. CPPA has missed several preceding milestones and
-ongoing litigation (Data Brokers Association v. Bonta) may further delay things.
+- Start at https://consumer.drop.privacy.ca.gov (the information page is https://privacy.ca.gov/drop/).
+- It verifies that you live in California through the California Identity Gateway (Socure or
+  Login.gov), and asks for your name, date of birth and email. Phone, ZIP code, mobile ad ID,
+  vehicle VIN and device ID are optional. One request covers one person.
+- You can amend or cancel a request no sooner than 45 days after you submit it.
+- The clock, Cal. Civ. Code 1798.99.86(c)(1): a broker must access the platform at least once
+  every 45 days and, within 45 days after receiving your request, delete your data. So a broker
+  can take up to 90 days from your submission (up to 45 to pick the request up, then up to 45
+  to delete). For a request submitted before 2026-08-01 the clock starts on 2026-08-01. After
+  that, under (d)(1), the broker must keep deleting new data about you at least every 45 days,
+  so one request stays in force.
+- Complaints go through the agency's general CCPA complaint form,
+  https://cppa.ca.gov/webapplications/complaint . There is no DROP-specific form.
 
-See: https://cppa.ca.gov/data_broker_registry/
+Identity verification means DROP cannot be automated, and aidr does not try. What it does is
+described under [`aidr drop`](#aidr-drop-record-your-california-drop-request) below.
 
-Until DROP is live, this tool falls back to per-broker opt-out flows for
-California-registered brokers.
+#### `aidr drop`: record your California DROP request
+
+```
+aidr drop                          # what DROP is, the URL, and where your request stands
+aidr drop --done                   # you submitted it today: record it
+aidr drop --done --on 2026-09-01   # you submitted it on another day (not in the future, not before 2026-01-01)
+aidr drop --done --person "Jane Sample"   # only this person, when config.json lists several
+aidr drop --clear                  # remove the record
+```
+
+For each California person (state `CA` or `California`, country US or unset) it prints what
+DROP is, the URL, what the platform asks for, and one of: *not recorded yet*, *submitted on
+DATE and brokers have until DEADLINE*, or *the window passed on DATE*. It also says how many
+registry brokers it knows; with none known it tells you to run `aidr update-brokers`. A person
+outside California is told DROP is for California residents and nothing changes.
+
+Once a request is recorded:
+
+- The generic pass does not visit a broker that is on the California registry, so fewer companies
+  receive your details. Each one is logged as skipped ("covered by your DROP request of DATE")
+  and the run summary counts them. This needs the registry list from `aidr update-brokers`; with
+  a recorded request and no list the run says so.
+- The explicit brokers in `brokers.js` (the people-search sites) still run: their listings are
+  public and a form is often faster.
+- After the deadline, `aidr complaints` can draft a complaint to the California agency for a
+  registry broker, but only when `aidr verify` saw you still listed after the deadline. It never
+  files from the age of a request alone.
+- `aidr score` shows how many registry brokers your request covers on a separate line. That is not
+  counted as a removal: a broker you have not checked is never treated as verified gone.
+
+To keep submitting to those brokers as well, set `"drop": { "alsoSubmit": true }` in `config.json`.
+
+A real run for a California person with no recorded request prints one line pointing at `aidr drop`.
 
 ---
 

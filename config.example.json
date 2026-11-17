@@ -78,6 +78,10 @@
   "retention": {
     "_comment": "OPTIONAL. Run logs, audit reports, form screenshots and monthly report PDFs hold your name and the list of brokers that have your data, and they pile up. Add \"days\": 180 here (a number of days, or text like \"6m\" or \"1y\"; at least 7 days) to delete the ones older than that at the end of each successful run. With no \"days\" key, everything is kept forever (the default). Never deleted, whatever you set: the newest run log and its journal, the newest audit report, complaints, state and config. `aidr purge --older-than 180d --dry-run` shows what an age would delete without deleting anything."
   },
+  "drop": {
+    "_comment": "OPTIONAL, California residents only. DROP is the state's one-request deletion platform (https://consumer.drop.privacy.ca.gov); run `aidr drop` to see how to file it and `aidr drop --done` to record that you did. Once recorded, the generic pass skips every broker on the California registry, because your request already reaches them, and the run summary counts how many. The explicit people-search brokers still run. Set alsoSubmit to true to keep submitting to the registry brokers as well. Skipping needs the registry list from `aidr update-brokers`.",
+    "alsoSubmit": false
+  },
   "browser": {
     "_comment": "OPTIONAL browser settings; every field can stay blank. Each person in config gets their own browser profile folder under profileDir (named person-<n>-<hash>, never the person's name), so cookies and logins never carry from one person to the next. An existing single-person install keeps its current profile for the first person. Headless runs send a regular Chrome user agent instead of HeadlessChrome (same Chrome version); set userAgent below only to override that.",
     "proxy": {

@@ -25,7 +25,7 @@
 - **Confidence** - `verified` means the selectors / flow have been manually confirmed against the live site. `untested` means the entry exists but has not been hand-verified end-to-end and depends on the broker not having changed its DOM.
 - **US-only** - site indexes US public records / voter data / phone directories; automatically skipped for non-US users.
 
-**This list covers the 51 explicit brokers in `brokers.js` only.** The other ~490 brokers in `data/markup-parsed.json` and `data/badbool-extra.json` are handled by the heuristic generic runner - every one of those is best-effort. Run `node watcher.js --verify` to spot-check whether opt-outs are still in effect.
+**This list covers the 50 explicit brokers in `brokers.js` only.** The other ~490 brokers in `data/markup-parsed.json` and `data/badbool-extra.json` are handled by the heuristic generic runner - every one of those is best-effort. Run `node watcher.js --verify` to spot-check whether opt-outs are still in effect.
 
 ---
 
@@ -33,7 +33,6 @@
 
 | Broker | Method | CAPTCHA | Confidence | US-only |
 |---|---|---|---|---|
-| California DELETE Portal | direct-form | no | untested | no |
 | Spokeo | search-form | no | untested | yes |
 | WhitePages | search-form | no | untested | yes |
 | FastPeopleSearch | search-form | no | untested | yes |
