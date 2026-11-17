@@ -162,7 +162,26 @@ function readJsonMeta(file) {
 // accident (the History routes already reduce URLs to hosts): the relay alias
 // cache maps each person's REAL email to its alias, and a result's detail or a
 // pending confirmation's snippet can carry an opt-out URL whose query holds the
-// email, name or zip.
+// email, name or zip. A scan record's listing URL has the person's name in its path
+// (and its history may repeat it), and its screenshot is an absolute path on this
+// machine: the URL is cut to its host and the screenshot is dropped (S6).
+function hostOnly(url) {
+  if (typeof url !== 'string' || !url) return url;
+  try { return new URL(url).hostname; } catch (_) { return ''; }
+}
+
+function redactScan(record) {
+  if (!record || typeof record !== 'object' || Array.isArray(record)) return record;
+  const { screenshot: _dropped, ...next } = record;
+  if (typeof next.listingUrl === 'string') next.listingUrl = hostOnly(next.listingUrl);
+  if (Array.isArray(next.history)) {
+    next.history = next.history.map(h => (h && typeof h === 'object' && typeof h.listingUrl === 'string'
+      ? { ...h, listingUrl: hostOnly(h.listingUrl) }
+      : h));
+  }
+  return next;
+}
+
 function redactState(state) {
   if (!state || typeof state !== 'object' || Array.isArray(state)) return {};
   const out = { ...state };
@@ -179,6 +198,9 @@ function redactState(state) {
       }
       return [key, next];
     }));
+  }
+  if (out.scans && typeof out.scans === 'object' && !Array.isArray(out.scans)) {
+    out.scans = Object.fromEntries(Object.entries(out.scans).map(([key, record]) => [key, redactScan(record)]));
   }
   return out;
 }
