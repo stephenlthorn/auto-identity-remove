@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const {
   recordScan, readScan, hasSeenListing, hasAnyScan, decideFoundOnly, SCAN_HISTORY_MAX,
 } = require('../lib/scan');
-const { personFingerprint } = require('../lib/identity');
+const { personFingerprint, searchHash } = require('../lib/identity');
 
 const jane = { firstName: 'Jane', lastName: 'Sample', zip: '78701', email: 'jane@example.org' };
 const sam = { firstName: 'Sam', lastName: 'Sample', zip: '78701', email: 'sam@example.org' };
@@ -116,7 +116,13 @@ test('hasAnyScan: a run\'s sighting written over a real scan does not make the s
 
 // ── the --found-only decision ────────────────────────────────────────────────
 
-const decide = (over) => decideFoundOnly({ scan: undefined, searchable: true, config: {}, now: NOW, ...over });
+// Scans are trusted only for the search they were made with (S1): the fixtures carry the hash of
+// the one search the decision is asked about, unless a test sets its own.
+const SEARCH = searchHash('https://decide.example/search');
+const decide = (over = {}) => decideFoundOnly({
+  searchable: true, config: {}, now: NOW, searchHash: SEARCH, validated: true, ...over,
+  scan: over.scan ? { sh: SEARCH, ...over.scan } : undefined,
+});
 
 test('decideFoundOnly: found in a fresh scan is submitted', () => {
   const d = decide({ scan: { at: daysBefore(2), outcome: 'found', listingUrl: 'https://s.example/a' } });
@@ -191,14 +197,15 @@ test('decideFoundOnly: a scan with no usable date is treated as stale, and an un
 
 const { applyFoundOnly } = require('../lib/scan');
 
-const searchable = (name, extra = {}) => ({ name, method: 'search-form', searchUrl: `https://${name}.example/s`, listingPattern: /x/, ...extra });
+const searchable = (name, extra = {}) => ({ name, method: 'search-form', searchUrl: `https://${name}.example/s`, listingPattern: /x/, searchCheckedAt: '2026-11-17', ...extra });
+const hashOf = (name) => searchHash(`https://${name}.example/s`);
 const formOnly = (name) => ({ name, method: 'direct-form', optOutUrl: `https://${name}.example/o` });
 
 test('applyFoundOnly: submits found, skips not_found with its reason, and sends the rest through scan.unknown', () => {
   const state = { optOuts: {}, scans: {
-    Found: { at: daysBefore(2), outcome: 'found' },
-    Absent: { at: '2026-11-10T00:00:00.000Z', outcome: 'not_found' },
-    Blocked: { at: daysBefore(2), outcome: 'unknown', reason: 'search failed: bot wall' },
+    Found: { at: daysBefore(2), outcome: 'found', sh: hashOf('Found') },
+    Absent: { at: '2026-11-10T00:00:00.000Z', outcome: 'not_found', sh: hashOf('Absent') },
+    Blocked: { at: daysBefore(2), outcome: 'unknown', reason: 'search failed: bot wall', sh: hashOf('Blocked') },
   } };
   const brokers = [searchable('Found'), searchable('Absent'), searchable('Blocked'), searchable('Fresh'), formOnly('Plain')];
   const base = { brokers, person: jane, personCount: 1, persons: [jane], personIndex: 0, state, now: NOW };
@@ -215,10 +222,10 @@ test('applyFoundOnly: submits found, skips not_found with its reason, and sends 
 
 test('applyFoundOnly: each person is judged on their own scans, and order is kept', () => {
   const state = { optOuts: {}, scans: {
-    'A|Jane Sample': { at: daysBefore(1), outcome: 'found', fp: personFingerprint(jane) },
-    'A|Sam Sample': { at: daysBefore(1), outcome: 'not_found', fp: personFingerprint(sam) },
-    'B|Jane Sample': { at: daysBefore(1), outcome: 'not_found', fp: personFingerprint(jane) },
-    'B|Sam Sample': { at: daysBefore(1), outcome: 'found', fp: personFingerprint(sam) },
+    'A|Jane Sample': { at: daysBefore(1), outcome: 'found', fp: personFingerprint(jane), sh: hashOf('A') },
+    'A|Sam Sample': { at: daysBefore(1), outcome: 'not_found', fp: personFingerprint(sam), sh: hashOf('A') },
+    'B|Jane Sample': { at: daysBefore(1), outcome: 'not_found', fp: personFingerprint(jane), sh: hashOf('B') },
+    'B|Sam Sample': { at: daysBefore(1), outcome: 'found', fp: personFingerprint(sam), sh: hashOf('B') },
   } };
   const brokers = [searchable('A'), searchable('B')];
   const run = (person, personIndex) => applyFoundOnly({ brokers, person, personCount: 2, persons: [jane, sam], personIndex, state, config: {}, now: NOW });

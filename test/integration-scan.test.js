@@ -16,6 +16,7 @@ const fs = require('node:fs');
 
 const { createSandbox, runWatcher, runnableConfig } = require('./helpers/watcher-sandbox');
 const brokers = require('../brokers');
+const { personFingerprint, searchHash } = require('../lib/identity');
 
 const day = 86400000;
 const daysAgo = (n) => new Date(Date.now() - n * day).toISOString();
@@ -25,6 +26,8 @@ const oneAda = (extra = {}) => runnableConfig({ persons: [ADA], ...extra });
 
 const withoutQuery = (url) => String(url).replace(/[?#].*$/, '');
 const adaBroker = (name) => brokers.forPerson(ADA).find(b => b.name === name);
+// A scan is trusted only for the search it was made with, so fixtures carry that search's hash (S1).
+const shOf = (name) => searchHash(adaBroker(name).searchUrl);
 
 async function inSandbox(options, fn) {
   const sandbox = createSandbox(options);
@@ -140,7 +143,7 @@ test('verify: an empty search is "never seen" with no sighting and "verified_cle
   const state = { optOuts: {
     Spokeo: { lastSuccess: daysAgo(10), lastAttempt: daysAgo(10) },
     USPhonebook: { lastSuccess: daysAgo(10), lastAttempt: daysAgo(10) },
-  }, scans: { USPhonebook: { at: daysAgo(20), outcome: 'found', lastFoundAt: daysAgo(20), listingUrl: 'https://listing.example/USPhonebook' } } };
+  }, scans: { USPhonebook: { at: daysAgo(20), outcome: 'found', lastFoundAt: daysAgo(20), listingUrl: 'https://listing.example/USPhonebook', sh: shOf('USPhonebook') } } };
   await inSandbox({ config: oneAda(), state }, async (sandbox) => {
     const r = await runWatcher(sandbox, ['--verify'], withSearchAnswers(sandbox, []));
     assert.equal(r.code, 0, r.stderr);
@@ -176,8 +179,8 @@ test('found-only: a sighting made by an ordinary run is not a scan, so it still 
 
 test('found-only: found is submitted, not_found is skipped with its reason, an unscanned broker follows scan.unknown', async () => {
   const state = { optOuts: {}, scans: {
-    Spokeo: { at: daysAgo(2), outcome: 'found', listingUrl: 'https://www.spokeo.com/Ada-Lovelace', fp: require('../lib/identity').personFingerprint(ADA) },
-    USPhonebook: { at: '2026-11-10T08:00:00.000Z', outcome: 'not_found', fp: require('../lib/identity').personFingerprint(ADA) },
+    Spokeo: { at: daysAgo(2), outcome: 'found', listingUrl: 'https://www.spokeo.com/Ada-Lovelace', fp: personFingerprint(ADA), sh: shOf('Spokeo') },
+    USPhonebook: { at: '2026-11-10T08:00:00.000Z', outcome: 'not_found', fp: personFingerprint(ADA), sh: shOf('USPhonebook') },
   } };
   // not_found is only fresh relative to now: pin the scan inside the default 30 days.
   state.scans.USPhonebook.at = daysAgo(3);
@@ -202,7 +205,7 @@ test('found-only: found is submitted, not_found is skipped with its reason, an u
 });
 
 test('found-only: with scan.unknown "submit" (the default) an unscanned broker still runs', async () => {
-  const state = { optOuts: {}, scans: { Spokeo: { at: daysAgo(2), outcome: 'not_found', fp: require('../lib/identity').personFingerprint(ADA) } } };
+  const state = { optOuts: {}, scans: { Spokeo: { at: daysAgo(2), outcome: 'not_found', fp: personFingerprint(ADA), sh: shOf('Spokeo') } } };
   await inSandbox({ config: oneAda(), state }, async (sandbox) => {
     const r = await runWatcher(sandbox, ['--found-only', '--only', 'Spokeo,Nuwber']);
     assert.equal(r.code, 0, r.stderr);
@@ -213,7 +216,7 @@ test('found-only: with scan.unknown "submit" (the default) an unscanned broker s
 });
 
 test('found-only with scan.unknown "skip": the email and generic passes are skipped, in one line', async () => {
-  const state = { optOuts: {}, scans: { Spokeo: { at: daysAgo(2), outcome: 'found', listingUrl: 'https://www.spokeo.com/x', fp: require('../lib/identity').personFingerprint(ADA) } } };
+  const state = { optOuts: {}, scans: { Spokeo: { at: daysAgo(2), outcome: 'found', listingUrl: 'https://www.spokeo.com/x', fp: personFingerprint(ADA), sh: shOf('Spokeo') } } };
   await inSandbox({ config: oneAda({ scan: { unknown: 'skip' } }), state }, async (sandbox) => {
     const r = await runWatcher(sandbox, ['--found-only']);
     assert.equal(r.code, 0, r.stderr);
@@ -224,7 +227,7 @@ test('found-only with scan.unknown "skip": the email and generic passes are skip
 });
 
 test('found-only with scan.unknown "submit": the generic pass runs as today', async () => {
-  const state = { optOuts: {}, scans: { Spokeo: { at: daysAgo(2), outcome: 'not_found', fp: require('../lib/identity').personFingerprint(ADA) } } };
+  const state = { optOuts: {}, scans: { Spokeo: { at: daysAgo(2), outcome: 'not_found', fp: personFingerprint(ADA), sh: shOf('Spokeo') } } };
   await inSandbox({ config: oneAda(), state }, async (sandbox) => {
     const r = await runWatcher(sandbox, ['--found-only', '--only', 'Spokeo'], { timeoutMs: 90000 });
     assert.equal(r.code, 0, r.stderr);

@@ -12,6 +12,13 @@
  * captchaLikely    - true = pre-attempt CapSolver before submit
  * priority         - 1 = highest (most commonly searched / highest risk)
  * timeoutMs        - optional per-broker navigation timeout in ms (default: 15000)
+ * searchNeeds      - the person fields (firstName, lastName, fullName, state) the searchUrl is
+ *                    built from. `aidr scan` will not search when one is blank: a URL with an
+ *                    empty name or state does not look for the person, so its "no listing"
+ *                    would say nothing about them (S1)
+ * searchCheckedAt  - the day the search step was validated live, in BOTH directions (finds a
+ *                    real listing, and reads "not listed" on a real empty page). Only a broker
+ *                    with it may make `--found-only` skip a broker as "not listed" (S8)
  *
  * No personal info lives here - all values come from config.json at runtime.
  */
@@ -209,6 +216,7 @@ function buildBrokers(person) {
     searchUrl: `https://www.usphonebook.com/${nameSlugs}/${stateSlugValue}`,
     listingPattern: /usphonebook\.com\/[a-z0-9-]+\/U[A-Za-z0-9]{15,}/i,
     lastName: L,
+    searchNeeds: ['firstName', 'lastName', 'state'],
     searchNotFound: { status: 404, text: /0 Public Records Found/i },
     searchCheckedAt: '2026-11-17',
   } : {};
@@ -222,6 +230,7 @@ function buildBrokers(person) {
     method: 'search-form',
     searchUrl: `https://www.spokeo.com/search?q=${enc(N)}&type=pp&state=${ST}`,
     listingPattern: /spokeo\.com\/[^/]+\/[^/]+\/[^/]+-p\d+/i,
+    searchNeeds: ['fullName', 'state'],
     lastName: L,
     optOutUrl: 'https://www.spokeo.com/optout',
     formFields: { 'input[name="email"]': E },
@@ -237,6 +246,7 @@ function buildBrokers(person) {
     method: 'search-form',
     searchUrl: `https://www.whitepages.com/name/${enc(F)}-${enc(L)}/${ST}`,
     listingPattern: /whitepages\.com\/people\//i,
+    searchNeeds: ['firstName', 'lastName', 'state'],
     lastName: L,
     optOutUrl: 'https://www.whitepages.com/suppression-requests',
     formFields: { 'input[name="name"]': N, 'input[name="email"]': E },
@@ -252,6 +262,7 @@ function buildBrokers(person) {
     method: 'search-form',
     searchUrl: `https://www.fastpeoplesearch.com/name/${enc(F)}-${enc(L)}_${ST}`,
     listingPattern: /fastpeoplesearch\.com\/name\//i,
+    searchNeeds: ['firstName', 'lastName', 'state'],
     lastName: L,
     optOutUrl: 'https://www.fastpeoplesearch.com/optout',
     formFields: { [`input[id="optout_name"],${fullNameInput('name')}`]: N, 'input[type="email"]': E },
@@ -338,6 +349,7 @@ function buildBrokers(person) {
     method: 'search-form',
     searchUrl: `https://www.mylife.com/find-people/results.pubview?searchtype=PEOPLE&firstname=${enc(F)}&lastname=${enc(L)}&state=${ST}`,
     listingPattern: /mylife\.com\/[^/]+\/[^/]+-\d+\.html/i,
+    searchNeeds: ['firstName', 'lastName', 'state'],
     lastName: L,
     optOutUrl: 'https://www.mylife.com/privacy-policy/',
     formFields: { 'input[type="email"]': E },
@@ -352,6 +364,7 @@ function buildBrokers(person) {
     method: 'search-form',
     searchUrl: `https://nuwber.com/person/search?name=${enc(N)}&state=${ST}`,
     listingPattern: /nuwber\.com\/person\//i,
+    searchNeeds: ['fullName', 'state'],
     lastName: L,
     optOutUrl: 'https://nuwber.com/removal/link',
     formFields: { 'input[type="email"]': E },
