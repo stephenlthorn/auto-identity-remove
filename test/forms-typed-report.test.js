@@ -71,3 +71,10 @@ test('an unmatched dropdown option is not reported as typed', async () => {
   const typed = await fillForm(page, { 'select[name="state"]': 'IL' }, PERSON);
   assert.deepEqual(typed, []);
 });
+
+test('F1: a submission email equal to the person\'s own address is not "masked"', async () => {
+  const page = makePage({ present: ['#email'] });
+  const typed = await fillForm(page, { '#email': 'jane.sample@example.com' }, PERSON, '  Jane.Sample@Example.com ');
+  assert.equal(typed.length, 1);
+  assert.equal(typed[0].masked, false);
+});

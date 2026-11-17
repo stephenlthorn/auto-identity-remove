@@ -664,6 +664,14 @@ function getFieldMap(person, opts = {}) {
   ];
 }
 
+// True only when the address typed differs from the person's own (F1): with no
+// relay the submission email IS the person's address and is not "masked".
+function isMaskedAddress(typedValue, person) {
+  let own = '';
+  try { own = String(activePerson(person).email || ''); } catch (_) { own = ''; }
+  return String(typedValue || '').trim().toLowerCase() !== own.trim().toLowerCase();
+}
+
 /**
  * Fill one form. Every lookup is scoped to `opts.scope` (a <form> locator) so
  * nothing outside it is touched; without a scope it searches the whole page (kept
@@ -719,7 +727,7 @@ async function fillGenericForm(page, person, opts = {}) {
             await el.fill(field.value);
           }
           if (Array.isArray(opts.record) && field.detail) {
-            opts.record.push({ selector: sel, detail: field.detail, value: field.value, masked: field.detail === 'email' && !!opts.submissionEmail });
+            opts.record.push({ selector: sel, detail: field.detail, value: field.value, masked: field.detail === 'email' && isMaskedAddress(field.value, person) });
           }
           filledAny = true;
           break;

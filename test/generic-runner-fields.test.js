@@ -184,3 +184,12 @@ test('the same form reports the same details in a preview as a real run types', 
   const real = await processGenericUrl(pageWith(fields), BROKER, { optOuts: {} }, false, new Set(), { person: PERSON });
   assert.deepEqual(fr.detailNames(preview.fieldEntries), real.fields);
 });
+
+test('F1: with no relay (submission email is the person\'s own address) the email is not "masked"', async () => {
+  const page = pageWith(['email']);
+  const record = [];
+  await fillGenericForm(page, PERSON, { record, submissionEmail: ` ${PERSON.email.toUpperCase()} ` });
+  assert.deepEqual(record.map(t => [t.detail, t.masked]), [['email', false]]);
+  const entries = fr.entriesFromGeneric(record);
+  assert.deepEqual(entries[0].details, ['email']);
+});

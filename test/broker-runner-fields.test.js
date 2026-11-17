@@ -233,3 +233,9 @@ test('the preview shows which details the search URL sends, even when no listing
   assert.match(report.renderTables().join('\n'), /SearchSite\s+\|\s+search: full name, state/);
   for (const v of VALUES) assert.ok(!out.includes(v), `"${v}" leaked`);
 });
+
+test('F1: the watcher passes the person\'s own address as submissionEmail when there is no relay; that is "email", not "masked email"', async () => {
+  const { lines, report } = await runPreview({ submissionEmail: PERSON.email });
+  assert.match(lines.join('\n'), /email <- email$/m);
+  assert.ok(!/masked/.test(lines.join('\n') + report.renderTables().join('\n')));
+});
