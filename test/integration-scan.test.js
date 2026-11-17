@@ -281,11 +281,14 @@ test('found-only with scan.unknown "submit": the generic pass runs, and says not
   });
 });
 
-test('found-only is refused with --resume and --captchas', async () => {
+test('found-only is refused with --resume, and refused with --captchas, each on its own', async () => {
   await inSandbox({ config: oneAda() }, async (sandbox) => {
-    const r = await runWatcher(sandbox, ['--found-only', '--resume']);
-    assert.notEqual(r.code, 0);
-    assert.match(r.stderr, /--found-only cannot be combined with --resume/);
+    for (const flag of ['--resume', '--captchas']) {
+      const r = await runWatcher(sandbox, ['--found-only', flag]);
+      assert.notEqual(r.code, 0, flag);
+      assert.match(r.stderr, new RegExp(`--found-only cannot be combined with ${flag}`), flag);
+      assert.deepEqual(sandbox.fakeEvents().filter(e => e.event === 'launch'), [], `${flag}: nothing started`);
+    }
   });
 });
 

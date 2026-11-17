@@ -7,8 +7,10 @@ const {
 } = require('../lib/scan');
 const { personFingerprint, searchHash } = require('../lib/identity');
 
-const jane = { firstName: 'Jane', lastName: 'Sample', zip: '78701', email: 'jane@example.org' };
-const sam = { firstName: 'Sam', lastName: 'Sample', zip: '78701', email: 'sam@example.org' };
+// People as the config has them, with the full name and the state the search URLs are built from:
+// fixtures without them are what hid S1 (the identity fingerprint covers neither).
+const jane = { firstName: 'Jane', lastName: 'Sample', fullName: 'Jane Sample', state: 'TX', zip: '78701', email: 'jane@example.org' };
+const sam = { firstName: 'Sam', lastName: 'Sample', fullName: 'Sam Sample', state: 'TX', zip: '78701', email: 'sam@example.org' };
 const NOW = new Date('2026-11-17T12:00:00.000Z');
 const daysBefore = (n) => new Date(NOW.getTime() - n * 86400000).toISOString();
 
@@ -33,8 +35,23 @@ test('recordScan stamps the identity fingerprint and a scan of someone else is n
   const state = { optOuts: {} };
   recordScan(state, ref('Spokeo'), { outcome: 'found', at: daysBefore(1), listingUrl: 'https://s.example/a' });
   assert.equal(state.scans.Spokeo.fp, personFingerprint(jane));
-  assert.equal(readScan(state, 'Spokeo', { ...jane, zip: '90210' }, 1), undefined);
   assert.equal(readScan(state, 'Spokeo', jane, 1).outcome, 'found');
+  // each identity field on its own makes it someone else's record
+  for (const changed of [{ zip: '90210' }, { email: 'other@example.org' }, { firstName: 'Janet' }, { lastName: 'Simple' }]) {
+    assert.equal(readScan(state, 'Spokeo', { ...jane, ...changed }, 1), undefined, JSON.stringify(changed));
+  }
+});
+
+test('the identity fingerprint does not cover the state or the full name: that is the search hash\'s job (S1)', () => {
+  const state = { optOuts: {} };
+  recordScan(state, ref('Spokeo'), { outcome: 'not_found', at: daysBefore(1), searchHash: searchHash('https://x.example/TX') });
+  const moved = { ...jane, state: 'CA', fullName: 'Jane Q Sample' };
+  assert.ok(readScan(state, 'Spokeo', moved, 1), 'the record is still "theirs" by fingerprint');
+  const d = decideFoundOnly({
+    scan: readScan(state, 'Spokeo', moved, 1), searchable: true, validated: true, config: {}, now: NOW,
+    searchHash: searchHash('https://x.example/CA'),
+  });
+  assert.equal(d.basis, 'missing', 'but it was made for a different search, so it is not trusted');
 });
 
 test('recordScan keeps a short, bounded history and remembers the last time a listing was seen', () => {
