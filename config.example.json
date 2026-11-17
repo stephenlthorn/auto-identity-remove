@@ -83,7 +83,7 @@
     "alsoSubmit": false
   },
   "scan": {
-    "_comment": "OPTIONAL. Used by `aidr run --found-only`, which submits only where the latest `aidr scan` found a listing. unknown: what to do with a broker whose scan result cannot be used (the scan could not tell, it is older than maxAgeDays, it was never scanned for your current details, the broker cannot be searched, or its empty result comes from a search step that was never validated live). \"submit\" (default) sends the opt-out anyway; \"skip\" leaves it out and logs why. The email opt-outs and the generic brokers cannot be searched, so they follow this setting as a whole. A value other than submit or skip is a config problem.",
+    "_comment": "OPTIONAL. Used by `aidr run --found-only`, which submits only where the latest `aidr scan` found a listing. unknown: what to do with a broker whose scan result cannot be used (the scan could not tell, it is older than maxAgeDays, it was never scanned for your current details, the broker cannot be searched, or its empty result comes from a search step that was never validated live). \"submit\" (default) sends the opt-out anyway; \"skip\" leaves it out and logs why. The generic brokers, and the email opt-outs that have no searchable entry for the same company, cannot be searched, so they follow this setting as a whole; an email opt-out for a company that has a searchable entry (Spokeo) follows that entry's decision instead. A value other than submit or skip is a config problem.",
     "unknown": "submit",
     "maxAgeDays": 30,
     "_maxAgeDays_comment": "How old a scan result may be and still count, as a whole number of days (1 or more). Default 30."

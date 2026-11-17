@@ -44,7 +44,7 @@ const { resolvePaths } = require('./lib/paths');
 const { openJournal, journalPathFor, countResults } = require('./lib/journal');
 const { startHeartbeat, defaultHeartbeatPath, outcomeFromResults } = require('./lib/heartbeat');
 const { OFFLINE_HINT } = require('./lib/outage');
-const { applyFoundOnly, hasUsableScan } = require('./lib/scan');
+const { applyFoundOnly, hasUsableScan, foundOnlyEmailPlan } = require('./lib/scan');
 const { scanReportLines, foundOnlyOverview } = require('./lib/scan-report');
 const { scanSettings } = require('./lib/scan-config');
 const { applyRetention } = require('./lib/retention');
@@ -1452,11 +1452,12 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
 
   const contextFor = makeContextProvider(contexts);
 
-  // --found-only: the email opt-outs and the generic pass cannot be searched, so they
-  // follow scan.unknown as a whole (the explicit brokers are judged one by one below).
+  // --found-only: the generic pass cannot be searched, so it follows scan.unknown as a whole
+  // (the explicit brokers are judged one by one below, and an email opt-out follows the
+  // searchable entry for the same company when there is one: see foundOnlyEmailPlan).
   const skipUnsearchablePasses = FOUND_ONLY && scanSettings(config).unknown === 'skip';
   if (skipUnsearchablePasses) {
-    console.log('\n--found-only: the email opt-outs and the generic brokers cannot be searched, so scan.unknown "skip" leaves them out of this run (set it to "submit" to include them).');
+    console.log('\n--found-only: the generic brokers (and the email opt-outs with no searchable entry for the same company) cannot be searched, so scan.unknown "skip" leaves them out of this run (set it to "submit" to include them).');
   }
 
   for (const [index, person] of persons.entries()) {
@@ -1493,9 +1494,20 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
     // it once per person in this loop multiplied real sends by persons.length.
     // dryRun: --dry-run must not send real opt-out emails either.
     console.log('── Email opt-outs ─────────────────────────────────────────');
-    if (!skipUnsearchablePasses) {
-      await sendOptOutEmails(brokers, config, undefined, { submissionEmailFor: (p) => submissionEmails.get(p), onlyPerson: person, dryRun: DRY_RUN, include });
+    // --found-only: each email opt-out follows the scan's decision for the same company's
+    // searchable entry (judged on ALL of this person's searchable entries, whatever --only
+    // narrows), so the Spokeo email does not go out while the Spokeo form is skipped (S7).
+    let emailInclude = include;
+    if (FOUND_ONLY) {
+      const siblings = applyFoundOnly({
+        brokers: personBrokers.filter(b => b.method !== 'email' && brokerAppliesToPerson(b, person)),
+        person, personCount: persons.length, persons, personIndex: index, state, config, now: new Date(),
+      }).decisions;
+      const emailPlan = foundOnlyEmailPlan({ emailBrokers: personBrokers.filter(b => b.method === 'email' && include(b.name)), decisions: siblings, config });
+      for (const { broker, reason } of emailPlan.skipped) logResult(broker.name, 'skipped', reason);
+      emailInclude = (name) => include(name) && emailPlan.send.has(name);
     }
+    await sendOptOutEmails(brokers, config, undefined, { submissionEmailFor: (p) => submissionEmails.get(p), onlyPerson: person, dryRun: DRY_RUN, include: emailInclude });
 
     let sorted = personBrokers
       .filter(b => b.method !== 'email' && include(b.name) && brokerAppliesToPerson(b, person))

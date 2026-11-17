@@ -925,8 +925,12 @@ recorded as could not tell, with the missing detail named, never as not found.
   different details), that cannot be searched at all, or whose empty result comes from a
   search step that was never validated follows `scan.unknown`: `submit` (the default) or
   `skip`. A skip is logged with its reason.
-- The email opt-outs and the ~490 generic brokers cannot be searched, so they follow
-  `scan.unknown` as a whole. With `skip` the run says in one line that they were skipped
+- An email opt-out follows the decision for a searchable entry of the same company (same
+  registrable domain as the address's domain or the entry's pages, else the name before
+  " (email)"): the Spokeo email is not sent while the Spokeo form is skipped as not listed.
+  With several such entries any submit wins. Email entries with no searchable entry for their
+  company (Hiya, Eyecon, Pipl) and the ~490 generic brokers cannot be searched, so they follow
+  `scan.unknown`. With `skip` the run says in one line that the generic brokers were left out
   and why; with `submit` they run as before.
 - Before the opt-out pass it prints one line per person: how many brokers the scan says you
   are listed at (submitted), how many it says you are not (skipped), and why every other
