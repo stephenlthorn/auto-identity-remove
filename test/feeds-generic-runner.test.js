@@ -144,3 +144,19 @@ test('loadGenericBrokers works when feeds-brokers.json is absent (markup-only fa
   assert.equal(brokers[0].name, 'Markup Co');
   assert.equal(brokers[0].source, 'markup');
 });
+
+test('loadGenericBrokers reads the object-shaped feeds file ({ brokers, registryHosts })', () => {
+  const files = {
+    [MARKUP_PATH]: JSON.stringify([]),
+    [BADBOOL_PATH]: JSON.stringify([]),
+    [FEEDS_PATH]: JSON.stringify({
+      brokers: [
+        { name: 'Acme Data Co', optOutUrl: 'https://acme.example.com/opt-out', method: 'direct-form', source: 'ca', registries: ['CA'] },
+      ],
+      registryHosts: { 'acme.example.com': ['CA'] },
+    }),
+  };
+  const gr = freshGenericRunnerWith(makeFsMock(files));
+  const brokers = gr.loadGenericBrokers(new Set());
+  assert.ok(brokers.some(b => b.name === 'Acme Data Co' && b.url === 'https://acme.example.com/opt-out'));
+});

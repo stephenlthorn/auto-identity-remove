@@ -1418,7 +1418,7 @@ function loadGenericBrokers(explicitBrokerHosts, extra = {}) {
     } catch(_) {}
   }
 
-  // Live registry feeds (California + Vermont), written by
+  // Live registry feeds (California today), written by
   // `node watcher.js --update-brokers` to data/feeds-brokers.json. Loaded after
   // Markup/BADBOOL so the Markup dataset stays the fallback and feed entries are
   // deduped against everything already loaded. Each row is the normalized shape
@@ -1427,7 +1427,9 @@ function loadGenericBrokers(explicitBrokerHosts, extra = {}) {
   // classified manual never reaches the form filler (codex #3).
   if (fs.existsSync(FEEDS_PATH)) {
     try {
-      const feeds = JSON.parse(fs.readFileSync(FEEDS_PATH, 'utf8'));
+      const parsed = JSON.parse(fs.readFileSync(FEEDS_PATH, 'utf8'));
+      // Current files are { brokers, registryHosts, ... }; older ones a bare array.
+      const feeds = Array.isArray(parsed) ? parsed : (parsed && parsed.brokers);
       if (Array.isArray(feeds)) {
         for (const row of feeds) {
           const url = row && row.optOutUrl;
