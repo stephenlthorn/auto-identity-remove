@@ -104,3 +104,19 @@ test('a shrunken household: the bare entry and the labelled one are one request,
   assert.equal(rows.length, 1, 'seen again after the clear: one complaint, not two');
   assert.equal(rows[0].stillListedAt, '2026-12-12T10:00:00Z');
 });
+
+test('the evidence boundary is past midnight in California: 08:00 UTC on the day after the deadline (D8)', () => {
+  const at = (stamp) => find({ 'Acme Data': { verifiedStillListedAt: stamp } });
+  assert.deepEqual(at('2026-12-01T06:59:00Z'), [], 'still the deadline day in California (daylight or standard time)');
+  assert.deepEqual(at('2026-12-01T07:59:00Z'), [], 'before 08:00 UTC');
+  assert.equal(at('2026-12-01T08:00:00Z').length, 1, 'at 08:00 UTC it counts');
+  assert.equal(at('2026-12-02T00:00:00Z').length, 1);
+});
+
+test('the window is not over until that same boundary has passed', () => {
+  const listed = { 'Acme Data': { verifiedStillListedAt: '2026-12-02T00:00:00Z' } };
+  const justBefore = new Date('2026-12-01T07:59:00Z');
+  const justAfter = new Date('2026-12-01T08:00:00Z');
+  assert.deepEqual(find(listed, { opts: { now: justBefore } }), []);
+  assert.equal(find({ 'Acme Data': { verifiedStillListedAt: '2026-12-01T08:00:00Z' } }, { opts: { now: justAfter } }).length, 1);
+});

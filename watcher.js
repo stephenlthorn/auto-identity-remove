@@ -384,6 +384,7 @@ function modeDrop() {
       options: { done: ARGS.done, clear: ARGS.clear, on: ARGS.on, person: ARGS.person },
       registryCount: californiaDomains(loadRegistryHostsSafe()).size,
       today: todayDay(),
+      utcToday: todayDay(new Date(), 0),
     });
   } finally {
     if (guard) guard.release();

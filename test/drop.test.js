@@ -377,3 +377,33 @@ test('an invalid drop block disables skipping and the run notes carry the config
   assert.match(lines[0], /drop\.alsoSubmit must be true or false/);
   assert.match(lines[0], /every broker is submitted/);
 });
+
+// ─── D8: local days ─────────────────────────────────────────────────────────
+
+test('todayDay is the machine\'s local calendar day: 17:30 Pacific on Nov 17 is still Nov 17', () => {
+  const evening = new Date('2026-11-18T01:30:00Z');
+  assert.equal(drop.todayDay(evening, 480), '2026-11-17', 'UTC-8');
+  assert.equal(drop.todayDay(evening, 0), '2026-11-18', 'UTC');
+  assert.equal(drop.todayDay(new Date('2026-11-17T23:30:00Z'), -540), '2026-11-18', 'Tokyo is already on the 18th');
+});
+
+test('todayDay with no offset uses the real local offset of that moment', () => {
+  const now = new Date('2026-06-01T12:00:00Z');
+  const expected = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  assert.equal(drop.todayDay(now), expected);
+});
+
+test('checkSubmittedDay refuses "in the future" only when later than both the local and the UTC day', () => {
+  assert.equal(drop.checkSubmittedDay('2026-11-18', '2026-11-17', '2026-11-18').ok, true, 'the UTC day is already the 18th');
+  assert.equal(drop.checkSubmittedDay('2026-11-18', '2026-11-18', '2026-11-17').ok, true, 'east of UTC: the local day is the 18th');
+  assert.match(drop.checkSubmittedDay('2026-11-19', '2026-11-17', '2026-11-18').error, /future/);
+  assert.match(drop.checkSubmittedDay('2026-11-19', '2026-11-18', '2026-11-17').error, /future/);
+  assert.match(drop.checkSubmittedDay('2026-11-18', '2026-11-17').error, /future/, 'no UTC day given: the local day alone');
+});
+
+test('runDrop accepts --on for the UTC day when the local day is still behind it', () => {
+  const state = { optOuts: {} };
+  const r = drop.runDrop({ persons: [JANE], state, options: { done: true, on: '2026-11-18' }, registryCount: 0, today: '2026-11-17', utcToday: '2026-11-18', save: () => {} });
+  assert.equal(r.code, 0);
+  assert.equal(state.drop['Jane Sample'].submittedAt, '2026-11-18');
+});
