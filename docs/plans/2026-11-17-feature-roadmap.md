@@ -3,6 +3,23 @@
 Written after 2.0.1. The 2026-10-29 roadmap (R0-R8) made the tool dependable to run: one home directory, a
 crash-safe journal, resume, a scheduler you can see, retention. This one is about what the tool does for you.
 
+## Status
+
+- **2.1.0** shipped Q1, Q2, Q3, Q4 and F1.
+- **2.2.0** shipped F2 and F3.
+- F4, F5 and the Later list are not started.
+
+Where the result differs from the plan below:
+
+- **Q3.** Vermont's export stopped serving a file, and Texas and Oregon publish none, so only
+  California's registry is read.
+- **F2.** The plan was a search step on about 20 brokers. Six have one, and only one (USPhonebook) could
+  be validated, because the sites refuse a plain browser and getting around bot checks is on the Not
+  doing list. Only a validated search step may skip a broker, so `--found-only` changes little today.
+- **F3.** The first check found most explicit forms either blocked to a plain browser or drifted. See
+  STATUS.md.
+- Radaris and PeekYou were removed: both domains were transferred to another company by court order.
+
 Four things drive it:
 
 1. **Nobody can say which broker flows still work.** All 51 explicit brokers are `untested` in STATUS.md, and
