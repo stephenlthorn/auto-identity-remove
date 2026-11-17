@@ -184,6 +184,36 @@ Some opt-out forms have reCAPTCHA. Without CapSolver, those sites go to your man
 > manual and opened in your browser for completion. Pass `--no-capsolver` to skip
 > them entirely rather than opening the browser.
 
+### Capping what CapSolver can spend
+
+Every solve is paid for, so a run can be given a ceiling:
+
+```json
+"capsolver": {
+  "apiKey": "CAP-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "maxSolvesPerRun": 25
+}
+```
+
+- `maxSolvesPerRun` is a whole number of 1 or more. Leave it out for no cap.
+- A solve counts when a paid task is created with CapSolver, whether or not it
+  then succeeds. Dry runs and previews never solve, so they never count.
+- One count covers the whole run: the explicit brokers, the 500+ generic brokers
+  and every person in a multi-person config.
+- When the cap is used up the solver is not called again. If you are at a visible
+  browser with manual solving on, you are asked as usual. Otherwise the broker is
+  recorded `captcha_failed` with the reason "solve cap reached (25 of 25 used)",
+  and `aidr captchas` picks it up afterwards.
+- Anything that is not a whole number of 1 or more (0, a negative, a fraction, a
+  string) is reported by `aidr config check` and at the start of a run, and the
+  run then allows no paid solve at all.
+- The run summary prints how many solves were used and the cap. The spend is the
+  difference between your CapSolver balance read before the first solve and again
+  at the end, so it follows whatever CapSolver charges today. If the balance
+  cannot be read, only the count is shown and the spend is reported as unknown.
+  The count and the spend are also written into the run log (`solves`) and the
+  end line of the journal.
+
 ### Solving CAPTCHAs yourself
 
 A CAPTCHA the solver cannot do (no key, or CapSolver failed) used to end the

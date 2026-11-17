@@ -46,6 +46,7 @@ const { OFFLINE_HINT } = require('./lib/outage');
 const { applyRetention } = require('./lib/retention');
 const { isPlaceholderKey, detectAndSolveCaptcha } = require('./lib/captcha');
 const { RELAY_BROKER, relaySkippedNames, guardResumePlan } = require('./lib/resume-guard');
+const { budgetForRun, reportSolves, runLogSolves } = require('./lib/solve-budget');
 const { handleCaptcha, resolveManualMode, manualTimeoutSec, captchaFailureDetail, announceCaptchaWait, captchaBrokersFromLog, captchaConfigWarnings } = require('./lib/manual-captcha');
 
 const PREVIEW           = ARGS.preview;
@@ -1076,7 +1077,7 @@ async function runWithBrowser({ config, persons, state, guard, captchaNames }) {
   // CAPTCHAs: decided once, here, from the run's own conditions (R1). The explicit
   // runner and the generic pass both read the answer, so they cannot disagree.
   const captcha = resolveCaptchaPlan({ config, headless });
-  brokerRunner.configure({ manual: captcha.manual, headless, isTTY: captcha.isTTY });
+  brokerRunner.configure({ manual: captcha.manual, headless, isTTY: captcha.isTTY, capsolver: captcha.capsolver });
   // A mistyped setting is worth knowing about in any run; who would solve a CAPTCHA
   // only matters to a run that submits (a dry run never waits, and --verify and the
   // SERP modes have no forms).
@@ -1137,7 +1138,10 @@ function resolveCaptchaPlan({ config, headless }) {
   } else {
     modeLine = `🧩 CAPTCHAs: solver only (${isTTY ? 'captcha.manual is false' : 'no interactive terminal'}). To solve them yourself afterwards: aidr captchas`;
   }
-  return { manual, isTTY, warnings, modeLine };
+  // One solve budget for the run, shared by the explicit runner, the generic pass and
+  // every person (Q2). Its config warnings are already in `warnings` above.
+  const { budget: solveBudget, capsolver } = budgetForRun(config);
+  return { manual, isTTY, warnings, modeLine, solveBudget, capsolver };
 }
 
 // ── Verify mode: T+7 post-submit verification loop ───────────────────────────
@@ -1360,7 +1364,8 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
     }
 
     const submissionEmail = submissionEmails.get(person);
-    brokerRunner.configure({ dryRun: DRY_RUN, preview: PREVIEW, person, personIndex: index, capsolver: config.capsolver, noCapsolver: NO_CAPSOLVER, snapshot: SNAPSHOT, personCount: persons.length, config, submissionEmail, partial: FILTERED });
+    // `captcha.capsolver` is the solver config that carries the run's one solve budget (Q2).
+    brokerRunner.configure({ dryRun: DRY_RUN, preview: PREVIEW, person, personIndex: index, capsolver: captcha.capsolver, noCapsolver: NO_CAPSOLVER, snapshot: SNAPSHOT, personCount: persons.length, config, submissionEmail, partial: FILTERED });
 
     // Rebuild the broker list for THIS person. brokers.js interpolates names,
     // city, state, zip and email into searchUrl and formFields, so reusing the
@@ -1481,7 +1486,7 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
   // for the whole run, and an unsolved one is worded exactly like an explicit one.
   const timeoutSec = manualTimeoutSec(config);
   const genericHandleCaptcha = (page, ctx) => handleCaptcha(page, {
-    capsolver: NO_CAPSOLVER ? null : config.capsolver,
+    capsolver: NO_CAPSOLVER ? null : captcha.capsolver,
     manual: captcha.manual,
     onWaiting: (info) => announceCaptchaWait(info, { notify: desktopNotify }),
     timeoutMs: timeoutSec * 1000,
@@ -1496,6 +1501,7 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
     isTTY: captcha.isTTY,
     config,
     noSolver: NO_CAPSOLVER,
+    budget: captcha.solveBudget,
   });
 
   const genericTotals = {};
@@ -1558,6 +1564,12 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
 
   await contexts.close();
 
+  // CapSolver solves and spend (Q2): settled before the log is written so the log, the
+  // journal and the printed summary carry the same numbers. A dry run never solves.
+  const solveEnd = await captcha.solveBudget.finish();
+  const solvesForLog = runLogSolves(solveEnd);
+  if (solvesForLog) results.solves = solvesForLog;
+
   // Save run log (skipped in dry-run); `partial` and `runFilter` were fixed at the top.
   const logBody = partial ? { ...results, partial: true, filter: runFilter } : results;
   if (!DRY_RUN) {
@@ -1565,7 +1577,7 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
     mkdirPrivate(LOG_DIR);
     writePrivateFile(logFile, JSON.stringify(logBody, null, 2));
     // The summary is the record now; the journal is closed with the same counts.
-    journal.close({ counts: countResults(results) });
+    journal.close({ counts: countResults(results), ...(solvesForLog ? { solves: solvesForLog } : {}) });
     setJournal(null);
   }
 
@@ -1621,6 +1633,7 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
   console.log('\n' + '═'.repeat(54));
   console.log(summary);
   console.log('═'.repeat(54));
+  await reportSolves(captcha.solveBudget, (line) => console.log(`🧩 ${line}`));
   console.log(DRY_RUN ? '\n📄 Log: not written (dry run)' : `\n📄 Log: ${logFile}`);
   console.log(DRY_RUN ? '💾 State: not saved (dry run)\n' : `💾 State: ${STATE_PATH}\n`);
 
