@@ -941,8 +941,12 @@ recorded as could not tell, with the missing detail named, never as not found.
   was made for different details), `--found-only` refuses to start and tells you to run
   `aidr scan` first: otherwise it would be a full run that only looks filtered.
 - It combines with `--only`, `--skip` and `--retry-failed` (each narrows the list
-  further), `--dry-run` and `--pollute`. It is refused with `--resume` (a checkpoint is a
-  position in the full list) and `--captchas` (which picks its own brokers). Like any
+  further) and `--dry-run`. It is refused with `--resume` (a checkpoint is a
+  position in the full list), `--captchas` (which picks its own brokers) and `--pollute`
+  (noise goes to every broker that accepts it, whatever the scan found), and with every other
+  mode (each is its own command, not the opt-out run it narrows). `--scan` and `--verify`
+  search and submit nothing, so they refuse `--pollute`, `--resume`, `--solve-captchas`,
+  `--snapshot` and `--fields` instead of ignoring them. Like any
   filtered run it marks its log as partial and leaves the resume checkpoint alone.
 
 ```json
