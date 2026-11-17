@@ -204,3 +204,98 @@ test('a real run attaches the names of the details it typed to every result, nev
   const all = JSON.stringify(s.loggedWithExtra);
   for (const v of VALUES) assert.ok(!all.includes(v), `"${v}" leaked into a logged result`);
 });
+
+// ── the search step ──────────────────────────────────────────────────────────
+
+test('the preview shows which details the search URL sends, even when no listing is found', async () => {
+  const searchBuild = (p) => [{
+    name: 'SearchSite', method: 'search-form',
+    searchUrl: `https://search.example/find?q=${encodeURIComponent(p.fullName)}&state=${p.state}`,
+    optOutUrl: 'https://search.example/optout', submitSelector: 'button',
+    formFields: {},
+  }];
+  const searched = [];
+  const h = loadRunner({
+    './forms': { ...realForms, findListingUrl: async (page, broker) => { searched.push(broker.name); return null; } },
+  });
+  const lines = [];
+  const report = fr.createFieldReport({ log: (l) => lines.push(l) });
+  h.runner.configure({ dryRun: true, preview: true, person: PERSON, personCount: 1, capsolver: null, brokersFor: searchBuild, fieldReport: report });
+  const realLog = console.log;
+  console.log = () => {};
+  try {
+    await h.runner.processBrokerWithPerson(makeContext(makePage()), searchBuild(PERSON)[0], PERSON);
+  } finally {
+    console.log = realLog;
+  }
+  assert.deepEqual(searched, ['SearchSite'], 'the search still runs');
+  const out = [...lines, ...report.renderTables()].join('\n');
+  assert.match(report.renderTables().join('\n'), /SearchSite\s+\|\s+search: full name, state/);
+  for (const v of VALUES) assert.ok(!out.includes(v), `"${v}" leaked`);
+});
+
+test('F1: the watcher passes the person\'s own address as submissionEmail when there is no relay; that is "email", not "masked email"', async () => {
+  const { lines, report } = await runPreview({ submissionEmail: PERSON.email });
+  assert.match(lines.join('\n'), /email <- email$/m);
+  assert.ok(!/masked/.test(lines.join('\n') + report.renderTables().join('\n')));
+});
+
+// ── F2: every path that fills reaches the report ─────────────────────────────
+
+function previewWith(overrides, brokerOverrides) {
+  const s = setup();
+  s.h.runner.configure({ noCapsolver: true, ...overrides });
+  const broker = { ...build(PERSON)[0], ...brokerOverrides };
+  return { s, broker };
+}
+
+test('F2: a captchaLikely broker under --no-capsolver is filled and still reaches the report', async () => {
+  const { s, broker } = previewWith({}, { captchaLikely: true });
+  const page = fieldPage([]);
+  const realLog = console.log;
+  console.log = () => {};
+  try {
+    await s.h.runner.processBrokerWithPerson(makeContext(page), broker, PERSON);
+  } finally {
+    console.log = realLog;
+  }
+  assert.match(s.report.renderTables().join('\n'), /FixtureBroker\s+\|\s+first name/);
+  assert.ok(!/value/.test(s.lines.join('\n')));
+});
+
+test('F2: details in the opt-out URL itself are reported', async () => {
+  const urlBuild = (p) => [{ ...build(p)[0], optOutUrl: `https://example.com/optout?n=${encodeURIComponent(p.fullName)}&e=${encodeURIComponent(p.email)}` }];
+  const s = setup();
+  s.h.runner.configure({ brokersFor: urlBuild });
+  const page = fieldPage([]);
+  const realLog = console.log;
+  console.log = () => {};
+  try {
+    await s.h.runner.processBrokerWithPerson(makeContext(page), urlBuild(PERSON)[0], PERSON);
+  } finally {
+    console.log = realLog;
+  }
+  const out = [...s.lines, ...s.report.renderTables()].join('\n');
+  assert.match(out, /opt-out URL: full name, email/);
+  for (const v of VALUES) assert.ok(!out.includes(v), `"${v}" leaked`);
+});
+
+test('F2: the report names the element that took the value', async () => {
+  const s = setup();
+  const page = fieldPage([]);
+  const base = page.locator;
+  page.locator = (sel) => {
+    const l = base(sel);
+    const first = l.first;
+    l.first = () => ({ ...first(), async evaluate(fn) { return fn({ tagName: 'INPUT', type: 'text', name: sel === '#first' ? 'real_first_name' : '', getAttribute: () => null }); } });
+    return l;
+  };
+  const realLog = console.log;
+  console.log = () => {};
+  try {
+    await s.h.runner.processBrokerWithPerson(makeContext(page), build(PERSON)[0], PERSON);
+  } finally {
+    console.log = realLog;
+  }
+  assert.match(s.lines.join('\n'), /real_first_name <- first name/);
+});

@@ -164,3 +164,68 @@ test('entriesFromGeneric names the detail the generic field map chose', () => {
   ]);
   assert.deepEqual(fr.entriesFromGeneric(typed, { showValues: true }).map(e => e.value), ['alias@relay.example', 'Jane']);
 });
+
+test('searchDetailsFor reads which details the search URL carries, with no network', () => {
+  const build = (p) => [
+    { name: 'Finder', method: 'search-form', searchUrl: `https://f.example/search?q=${encodeURIComponent(p.fullName)}&state=${p.state}`, formFields: {} },
+    { name: 'Path', method: 'search-form', searchUrl: `https://p.example/name/${encodeURIComponent(p.firstName)}-${encodeURIComponent(p.lastName)}/${p.state}`, formFields: {} },
+    { name: 'Plain', method: 'direct-form', formFields: {} },
+  ];
+  assert.deepEqual(fr.searchDetailsFor('Finder', build, PERSON), ['fullName', 'state']);
+  assert.deepEqual(fr.searchDetailsFor('Path', build, PERSON), ['firstName', 'lastName', 'state']);
+  assert.deepEqual(fr.searchDetailsFor('Plain', build, PERSON), []);
+  assert.equal(fr.searchDetailsFor('Nope', build, PERSON), null);
+});
+
+test('the table marks what the search step sends and counts it in the totals', () => {
+  const report = fr.createFieldReport({ log() {} });
+  report.addSearch('Finder', ['full name', 'state']);
+  report.add('Finder', [{ field: 'email', details: ['email'] }]);
+  report.addSearch('Other', ['full name']);
+  const table = report.renderTables().join('\n');
+  assert.match(table, /Finder\s+\|\s+email; search: full name, state/);
+  assert.match(table, /Other\s+\|\s+search: full name$/m);
+  assert.match(table, /search sends full name: 2 of 2/);
+  assert.match(table, /search sends state: 1 of 2/);
+  assert.match(table, /email: 1 of 2/);
+});
+
+test('a search-only broker is not described as "nothing typed"', () => {
+  const report = fr.createFieldReport({ log() {} });
+  report.addSearch('Other', ['full name']);
+  assert.ok(!/nothing typed/.test(report.renderTables().join('\n')));
+});
+
+test('F2: a non-US person\'s country is a detail, not "fixed text"', () => {
+  const build = (p) => [{ name: 'Fixture', formFields: { 'input[name*="state" i]': p.state } }];
+  const t = fr.templatesFor('Fixture', build, { ...PERSON, country: 'GB' });
+  const countrySel = Object.keys(t).find(sel => /country/.test(sel));
+  assert.deepEqual(t[countrySel], ['country']);
+  assert.deepEqual(fr.detailLabels(['country', 'zip']), ['ZIP', 'country']);
+  assert.deepEqual(fr.detailLabels(['country']), ['country']);
+});
+
+test('F2: entriesFromTyped names the field that took the value when fillForm says which', () => {
+  const e = fr.entriesFromTyped([{ selector: 'input[name*="first" i]', field: 'applicant_first_name', value: 'x' }], { 'input[name*="first" i]': ['firstName'] });
+  assert.equal(e[0].field, 'applicant_first_name');
+  assert.deepEqual(e[0].details, ['first name']);
+});
+
+test('F2: optOutUrlDetailsFor reads the details in the opt-out URL itself', () => {
+  const build = (p) => [
+    { name: 'Q', optOutUrl: `https://q.example/optout?name=${encodeURIComponent(p.fullName)}&email=${encodeURIComponent(p.email)}`, formFields: {} },
+    { name: 'Plain', optOutUrl: 'https://q.example/optout', formFields: {} },
+  ];
+  assert.deepEqual(fr.optOutUrlDetailsFor('Q', build, PERSON), ['fullName', 'email']);
+  assert.deepEqual(fr.optOutUrlDetailsFor('Plain', build, PERSON), []);
+  assert.equal(fr.optOutUrlDetailsFor('Nope', build, PERSON), null);
+});
+
+test('F2: the table marks details sent in the opt-out URL and counts them', () => {
+  const report = fr.createFieldReport({ log() {} });
+  report.addUrl('Q', ['full name', 'email']);
+  report.add('Q', [{ field: 'zip', details: ['ZIP'] }]);
+  const table = report.renderTables().join('\n');
+  assert.match(table, /Q\s+\|\s+ZIP; opt-out URL: full name, email/);
+  assert.match(table, /opt-out URL sends email: 1 of 1/);
+});

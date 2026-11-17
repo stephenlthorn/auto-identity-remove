@@ -15,7 +15,7 @@ const { fillForm } = require('../lib/forms');
 
 const PERSON = { firstName: 'Jane', lastName: 'Sample', email: 'jane.sample@example.com', country: 'US' };
 
-function makePage({ present, tags = {} }) {
+function makePage({ present, tags = {}, props }) {
   const fills = [];
   const page = {
     fills,
@@ -25,7 +25,7 @@ function makePage({ present, tags = {} }) {
           return {
             async count() { return present.includes(selector) ? 1 : 0; },
             async isVisible() { return present.includes(selector); },
-            async evaluate(fn) { return fn({ tagName: (tags[selector] || 'INPUT'), type: 'text' }); },
+            async evaluate(fn) { return fn({ tagName: (tags[selector] || 'INPUT'), type: 'text', ...((props || {})[selector] || {}), getAttribute: () => null }); },
             async fill(value) { fills.push({ selector, value }); },
             async selectOption() { return []; },
             async check() {},
@@ -56,7 +56,7 @@ test('a field that is not on the page, or has nothing to say, is not listed', as
 test('a relay alias is typed and marked masked', async () => {
   const page = makePage({ present: ['#email'] });
   const typed = await fillForm(page, { '#email': 'jane.sample@example.com' }, PERSON, 'alias@relay.example');
-  assert.deepEqual(typed, [{ selector: '#email', value: 'alias@relay.example', masked: true }]);
+  assert.deepEqual(typed, [{ selector: '#email', value: 'alias@relay.example', masked: true, field: '' }]);
 });
 
 test('an unmatched dropdown option is not reported as typed', async () => {
@@ -70,4 +70,24 @@ test('an unmatched dropdown option is not reported as typed', async () => {
   })(page.locator);
   const typed = await fillForm(page, { 'select[name="state"]': 'IL' }, PERSON);
   assert.deepEqual(typed, []);
+});
+
+test('F1: a submission email equal to the person\'s own address is not "masked"', async () => {
+  const page = makePage({ present: ['#email'] });
+  const typed = await fillForm(page, { '#email': 'jane.sample@example.com' }, PERSON, '  Jane.Sample@Example.com ');
+  assert.equal(typed.length, 1);
+  assert.equal(typed[0].masked, false);
+});
+
+test('F2: the record names the element that took the value, not just the template selector', async () => {
+  const page = makePage({ present: ['input[name*="first" i]'], props: { 'input[name*="first" i]': { name: 'applicant_first_name' } } });
+  const typed = await fillForm(page, { 'input[name*="first" i]': 'Jane' }, PERSON);
+  assert.equal(typed[0].field, 'applicant_first_name');
+  assert.equal(typed[0].selector, 'input[name*="first" i]');
+});
+
+test('F2: an element with no name or id leaves field empty so the report falls back to the selector', async () => {
+  const page = makePage({ present: ['#first'] });
+  const typed = await fillForm(page, { '#first': 'Jane' }, PERSON);
+  assert.equal(typed[0].field || '', '');
 });
