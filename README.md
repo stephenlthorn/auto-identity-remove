@@ -917,6 +917,10 @@ recorded as could not tell, with the missing detail named, never as not found.
 - A broker the latest scan says is `found` is submitted. One it says is `not_found` is
   skipped, and the run log says why ("not listed (scan of 2026-11-17)"), but only when that
   broker's search step was validated live. A `found` from any searchable broker is used.
+- A listing seen inside `scan.maxAgeDays` is not forgotten because a LATER scan could not tell
+  (a bot wall) or came back empty from a search that is not validated: the broker is still
+  treated as found. Only a later `not_found` from a validated search overrides a sighting.
+- A scan dated more than a day in the future (a wrong clock) is unusable and says so.
 - A broker whose scan is `unknown`, older than `scan.maxAgeDays`, missing (or made for
   different details), that cannot be searched at all, or whose empty result comes from a
   search step that was never validated follows `scan.unknown`: `submit` (the default) or
