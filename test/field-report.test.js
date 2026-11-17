@@ -151,3 +151,16 @@ test('a broker reached twice in one person pass merges its details', () => {
   report.add('Alpha', [{ field: 'p', details: ['phone'] }]);
   assert.match(report.renderTables().join('\n'), /Alpha\s+\|\s+email, phone/);
 });
+
+test('entriesFromGeneric names the detail the generic field map chose', () => {
+  const typed = [
+    { selector: 'input[type="email"]', detail: 'email', value: 'alias@relay.example', masked: true },
+    { selector: 'input[name="firstName"]', detail: 'firstName', value: 'Jane', masked: false },
+  ];
+  const plain = fr.entriesFromGeneric(typed);
+  assert.deepEqual(plain, [
+    { field: 'email', details: ['masked email'] },
+    { field: 'firstName', details: ['first name'] },
+  ]);
+  assert.deepEqual(fr.entriesFromGeneric(typed, { showValues: true }).map(e => e.value), ['alias@relay.example', 'Jane']);
+});

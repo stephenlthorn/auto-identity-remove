@@ -147,6 +147,40 @@ verb (`aidr schedule remove`) stops with the list of real ones before anything r
 > A native desktop wrapper (Electron/Tauri) is a planned follow-up and is **not**
 > included here - this release is clean CLI packaging only.
 
+### See which of your details go to which broker
+
+```
+aidr preview --fields
+```
+
+fills each form without sending it and prints, per broker, the form fields it typed into and
+which of your details went in each. It prints the NAME of the detail, never the value:
+
+```
+   fields for FastPeopleSearch:
+     optout_name <- full name
+     email <- masked email
+```
+
+The names are `first name`, `last name`, `full name`, `email` (`masked email` when your
+email relay supplies an alias), `phone`, `city`, `state` and `ZIP`. A field that gets a fixed
+choice, such as a dropdown option, shows `fixed text`. `unmapped` means the tool could not work
+out which detail a field carries; treat it as "unknown", not as "harmless".
+
+At the end of the run one table lists, for each broker, the set of details it would receive,
+then how many brokers would receive each detail (for example `phone: 12 of 140`). A broker whose
+form was not reached, or had no fillable form, is not in the table because nothing was typed.
+For the generic pass only a form that is already on the page is previewed; a form that opens
+after clicking a "Do Not Sell" link is not.
+
+Nothing printed contains a value unless you add `--show-values`, which also prints each value
+after its field on standard output (it is not written to the run log file, but anything that
+captures the terminal, such as `docker logs`, will see it). Use it to check a selector before a
+real run, and do not share that output.
+
+The audit report written after a real run lists the same detail names for each broker
+(`details typed: first name, email`), never values, whatever flags you used.
+
 ---
 
 ## Setup walkthrough

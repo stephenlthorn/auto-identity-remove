@@ -49,6 +49,10 @@ const { RELAY_BROKER, relaySkippedNames, guardResumePlan } = require('./lib/resu
 const { handleCaptcha, resolveManualMode, manualTimeoutSec, captchaFailureDetail, announceCaptchaWait, captchaBrokersFromLog, captchaConfigWarnings } = require('./lib/manual-captcha');
 
 const PREVIEW           = ARGS.preview;
+// aidr preview --fields: which of your details go into which field, by name. Values
+// only with --show-values (lib/field-report.js).
+const FIELD_REPORT      = ARGS.fields ? require('./lib/field-report').createFieldReport({ showValues: ARGS.showValues }) : null;
+const SHOW_VALUES       = ARGS.showValues;
 const DRY_RUN           = ARGS.dryRun; // lib/args: --preview implies --dry-run
 const VERIFY            = ARGS.verify;
 const SERP_SCAN         = ARGS.serpScan;
@@ -1043,6 +1047,7 @@ async function runWithBrowser({ config, persons, state, guard, captchaNames }) {
   if (POLLUTE_COUNT) console.log(`⚠️  NOISE MODE - ${POLLUTE_COUNT} bogus record(s) will be submitted to acceptsBogus brokers.`);
   console.log(`📅 ${new Date().toLocaleString()}`);
   console.log(`📋 ${brokers.length} explicit brokers + 500+ generic | re-check window: ${RECHECK_DAYS} days\n`);
+  if (SHOW_VALUES) console.log('--show-values: the values below are your real details, printed on this terminal only. Do not paste this output anywhere public.\n');
 
   brokerRunner.configure({ dryRun: DRY_RUN, preview: PREVIEW, person: persons[0], personIndex: 0, capsolver: config.capsolver, noCapsolver: NO_CAPSOLVER, snapshot: SNAPSHOT, personCount: persons.length, config, partial: FILTERED });
 
@@ -1360,7 +1365,8 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
     }
 
     const submissionEmail = submissionEmails.get(person);
-    brokerRunner.configure({ dryRun: DRY_RUN, preview: PREVIEW, person, personIndex: index, capsolver: config.capsolver, noCapsolver: NO_CAPSOLVER, snapshot: SNAPSHOT, personCount: persons.length, config, submissionEmail, partial: FILTERED });
+    brokerRunner.configure({ dryRun: DRY_RUN, preview: PREVIEW, person, personIndex: index, capsolver: config.capsolver, noCapsolver: NO_CAPSOLVER, snapshot: SNAPSHOT, personCount: persons.length, config, submissionEmail, partial: FILTERED, fieldReport: FIELD_REPORT, showValues: SHOW_VALUES });
+    if (FIELD_REPORT) FIELD_REPORT.setPerson(persons.length > 1 ? personName(person) : '');
 
     // Rebuild the broker list for THIS person. brokers.js interpolates names,
     // city, state, zip and email into searchUrl and formFields, so reusing the
@@ -1519,8 +1525,11 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
       logResult('Generic brokers', 'error', `browser unavailable (${safeMessage(err)}); the generic pass for ${personName(person)} was not run`);
       continue;
     }
+    if (FIELD_REPORT) FIELD_REPORT.setPerson(persons.length > 1 ? personName(person) : '');
     const genericResult = await runGenericBrokers(context, explicitHosts, state, logResult, recordSuccess, {
       dryRun: DRY_RUN,
+      fieldReport: FIELD_REPORT || undefined,
+      showValues: SHOW_VALUES,
       person,
       personCount: persons.length,
       personIndex: index,
@@ -1550,6 +1559,7 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
   }
   setCurrentPerson(null);
   results.genericStats = genericTotals;
+  if (FIELD_REPORT) for (const line of FIELD_REPORT.renderTables()) console.log(line);
 
   // Clear checkpoint now that the run completed successfully (a no-op in dry-run,
   // so a preview never deletes the checkpoint of an interrupted real run). A filtered

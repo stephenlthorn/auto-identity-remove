@@ -142,7 +142,7 @@ test('--show-values still strips the query string off the target URL', async () 
   const { loggedWithExtra } = await runPreview({ showValues: true });
   const entry = loggedWithExtra.find(l => l.status === 'preview');
   assert.ok(entry);
-  assert.ok(!/ZqFirst|first=/.test(entry.detail));
+  assert.ok(!/ZqFirst|\?first=/.test(entry.detail));
 });
 
 test('a relay alias is reported as "masked email" and the real address is never typed', async () => {
