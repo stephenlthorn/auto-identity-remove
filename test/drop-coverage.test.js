@@ -103,3 +103,45 @@ test('findDropOverdue uses the same rule: a shared platform page is never "regis
   });
   assert.deepEqual(out.map(r => r.broker), ['Acme Data']);
 });
+
+test('three registry brokers on one form platform all survive update-brokers (D5)', async () => {
+  const portal = 'https://privacyportal.onetrust.com/webform';
+  const out = await feeds.buildFeedsFile({
+    fetchImpl: stubFetch(caCsv([
+      row('1', 'Alpha Data', 'alpha-data.example', `${portal}/aaa/111`),
+      row('2', 'Beta Data', 'beta-data.example', `${portal}/bbb/222`),
+      row('3', 'Gamma Data', 'gamma-data.example', `${portal}/ccc/333`),
+    ])),
+    caUrl: CA_URL, now: NOW, explicitHosts: [],
+  });
+  assert.deepEqual(out.brokers.map(b => b.name).sort(), ['Alpha Data', 'Beta Data', 'Gamma Data']);
+  assert.equal(out.brokers[0].optOutUrl.startsWith(portal), true, 'the opt-out URL stays the rights URL');
+  assert.equal(out.stats.total, 3);
+});
+
+test('the same company listed by two registries is still one row (identity is the primary website)', async () => {
+  const portal = 'https://privacyportal.onetrust.com/webform';
+  const vt = 'Business Name,Website\nAlpha Data,https://www.alpha-data.example/privacy\n';
+  const out = await feeds.buildFeedsFile({
+    fetchImpl: async (url) => ({
+      ok: true, status: 200, headers: new Map([['content-type', 'text/csv']]),
+      text: async () => (url === CA_URL ? caCsv([row('1', 'Alpha Data', 'alpha-data.example', `${portal}/aaa/111`)]) : vt),
+    }),
+    caUrl: CA_URL, vtUrl: 'https://vt.test/x.csv', now: NOW, explicitHosts: [],
+  });
+  assert.equal(out.brokers.length, 1);
+  assert.deepEqual(out.brokers[0].registries, ['CA', 'VT']);
+});
+
+test('two rows with the same shared-platform page and no website are one row; different pages are two', async () => {
+  const portal = 'https://privacyportal.onetrust.com/webform';
+  const out = await feeds.buildFeedsFile({
+    fetchImpl: stubFetch(caCsv([
+      row('1', 'No Site One', '', `${portal}/aaa/111`),
+      row('2', 'No Site Two', '', `${portal}/aaa/111`),
+      row('3', 'No Site Three', '', `${portal}/bbb/222`),
+    ])),
+    caUrl: CA_URL, now: NOW, explicitHosts: [],
+  });
+  assert.deepEqual(out.brokers.map(b => b.name), ['No Site One', 'No Site Three']);
+});

@@ -60,3 +60,46 @@ test('a feed row keeps its registries field, so coverage can read it (D1)', () =
   assert.equal(rows.length, 1);
   assert.deepEqual(rows[0].registries, ['CA', 'VT']);
 });
+
+// ── D5: three registry brokers whose rights pages share one form platform ────
+
+const PORTAL = 'https://privacyportal.onetrust.com/webform';
+const THREE = [
+  { name: 'Alpha Data', optOutUrl: `${PORTAL}/aaa/111`, method: 'direct-form', source: 'ca', registries: ['CA'] },
+  { name: 'Beta Data', optOutUrl: `${PORTAL}/bbb/222`, method: 'direct-form', source: 'ca', registries: ['CA'] },
+  { name: 'Gamma Data', optOutUrl: `${PORTAL}/ccc/333`, method: 'direct-form', source: 'ca', registries: ['CA'] },
+];
+
+test('three feed rows on one form platform all survive the loader (D5)', () => {
+  const rows = load({ feeds: THREE });
+  assert.deepEqual(rows.map(r => r.name).sort(), ['Alpha Data', 'Beta Data', 'Gamma Data']);
+});
+
+test('a bundled row already on that platform host does not swallow the feed rows (D5)', () => {
+  const rows = load({
+    markup: [{ name: 'Delta Data', urlFinal: `${PORTAL}/ddd/444`, hostname: 'delta-data.example' }],
+    feeds: THREE,
+  });
+  assert.deepEqual(rows.map(r => r.name).sort(), ['Alpha Data', 'Beta Data', 'Delta Data', 'Gamma Data']);
+});
+
+test('two rows on a shared platform are one row only when host and path are the same', () => {
+  const rows = load({
+    feeds: [
+      THREE[0],
+      { ...THREE[0], name: 'Alpha Data again', optOutUrl: `${PORTAL}/aaa/111/` },
+      { ...THREE[1], name: 'Alpha Data other path', optOutUrl: `${PORTAL}/aaa/999` },
+    ],
+  });
+  assert.deepEqual(rows.map(r => r.name), ['Alpha Data', 'Alpha Data other path']);
+});
+
+test('on an ordinary host two rows are still one row (host only)', () => {
+  const rows = load({
+    feeds: [
+      { name: 'Acme', optOutUrl: 'https://acme-data.example/a', source: 'ca', registries: ['CA'] },
+      { name: 'Acme two', optOutUrl: 'https://www.acme-data.example/b', source: 'ca', registries: ['CA'] },
+    ],
+  });
+  assert.equal(rows.length, 1);
+});
