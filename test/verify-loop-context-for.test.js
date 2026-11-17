@@ -36,8 +36,8 @@ const searchBroker = (name) => ({
 
 const stateFor = (names) => ({
   optOuts: Object.fromEntries(names.flatMap(n => [
-    [`${n}|Alice Archer`, { lastSuccess: daysAgo(10) }],
-    [`${n}|Bob Builder`, { lastSuccess: daysAgo(10) }],
+    [`${n}|Alice Archer`, { lastSuccess: daysAgo(10), verifiedStillListedAt: daysAgo(40) }],
+    [`${n}|Bob Builder`, { lastSuccess: daysAgo(10), verifiedStillListedAt: daysAgo(40) }],
   ])),
 });
 

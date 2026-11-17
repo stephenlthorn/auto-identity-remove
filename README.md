@@ -21,6 +21,7 @@ Each month, the script:
 Beyond the monthly run, it can also:
 
 - **Score your exposure** - a single 0-100 number with a month-over-month trend (`aidr score`), built from verified removals, search-engine visibility, and breach data
+- **Look before you submit** - see where you are actually listed (`aidr scan`) and submit only there (`aidr run --found-only`)
 - **Close the loop** - re-verify removals (`aidr verify`), watch search engines for new listings (`aidr serp-watch`), and generate a monthly PDF report (`aidr report`)
 - **Add teeth** - send CCPA/GDPR right-to-know requests (`aidr know`) and auto-generate regulator complaints when a broker blows the legal deadline (`aidr complaints`)
 - **Protect proactively** - check Have I Been Pwned (`aidr breach`) and walk a credit/identity-freeze checklist (`aidr freeze`)
@@ -118,6 +119,7 @@ maps to an existing entrypoint:
 | `aidr preview` | Dry-run: fills forms but submits nothing |
 | `aidr run` | Runs the opt-out pass for real |
 | `aidr captchas` | Re-runs only the brokers that ended on a CAPTCHA last time, in a visible browser, so you can solve them |
+| `aidr scan` | Searches every broker that can be searched and records where you are listed. Submits nothing |
 | `aidr verify` | Re-searches brokers and reports whether you still appear |
 | `aidr score` | Prints your 0-100 exposure score and its month-over-month trend |
 | `aidr report` | Generates the monthly PDF + emails the summary |
@@ -776,7 +778,7 @@ form brokers, the **email** brokers and the 500+ **generic** brokers. Names are
 case-insensitive. Together they **narrow** each other: a broker runs when it is
 named by `--only`, is in the `--retry-failed` set, and is not named by `--skip`
 (`--skip` always wins, so `--retry-failed --skip A` leaves A out). `--only` and
-`--skip` also apply to `--pollute`, `--know`, `--verify`, `--serp-scan` and
+`--skip` also apply to `--pollute`, `--know`, `--verify`, `--scan`, `--serp-scan` and
 `--serp-watch`; `--retry-failed` reads a run log that those modes do not use, so it
 is refused with them. `--retry-failed` re-runs what the last run log recorded as an
 error, a CAPTCHA failure, awaiting an email confirmation, or *unconfirmed* (the
@@ -855,23 +857,87 @@ Re-search the brokers to see whether previous opt-outs are still in effect:
 node watcher.js --verify
 ```
 
-This opens a browser and, for each broker where a submission was recorded at least 7 days ago, searches for your listing. No forms are submitted. It **does** write to `state.json`: each checked entry gets `verifiedDeletedAt` (not found) or `verifiedStillListedAt` (found) plus a short `verifyHistory`, which is what `aidr report`, `aidr score` and `aidr complaints` read. It writes no report file; the result is printed to the console only.
+This opens a browser and, for each broker where a submission was recorded at least 7 days ago, searches for your listing. No forms are submitted. It **does** write to `state.json`: each checked entry gets `verifiedDeletedAt` (gone after a listing was seen), `verifiedAbsentAt` (not found, and no listing was ever seen) or `verifiedStillListedAt` (found) plus a short `verifyHistory`, which is what `aidr report`, `aidr score` and `aidr complaints` read. It writes no report file; the result is printed to the console only.
 
 The console shows a count for each outcome, then lists every broker that is still listed:
 
 | Outcome | Meaning |
 |---------|---------|
-| `verified_clear` | Your name was not found in the broker's search today |
+| `verified_clear` | A listing was seen before (by `aidr scan` or an earlier verify) and your name is not in the broker's search today: a removal |
+| `never_seen` | Your name is not in the broker's search today, but no listing was ever seen there, so nothing was proved removed. It is not counted as a removal, as exposure, or as "unverified" |
 | `still_listed` | A listing was found - the opt-out may have failed, or your data was re-added |
-| `unverifiable` | The broker uses a direct-form, email, or manual method (no automated search signal exists), or its search page could not be read |
+| `unverifiable` | The broker has no search step (email, manual, or a form with no search page), or its search page could not be read |
 | `skipped` | Nothing to check yet: no recorded submission, submitted fewer than 7 days ago, already verified since the last submission, or allowlisted |
 
 **Important caveats:**
 
-- Only `search-form` brokers (those with a `searchUrl` and `listingPattern`) can be checked automatically. Direct-form and email opt-outs are always `unverifiable`.
+- Only brokers with a search step (a `searchUrl` and a `listingPattern`, whatever their opt-out method) can be checked automatically. Email opt-outs and brokers with no search step are always `unverifiable`.
+- A removal counts as verified only when a listing was seen before and is gone after. State written by older versions keeps working: an entry whose `verifiedDeletedAt` is newer than its last submission is still counted as a removal (older versions wrote it for any empty search page, and there is no way to tell which ones were real, so nothing is re-labelled). From now on an empty search page with no recorded sighting is `never_seen` instead.
 - "Verified clear" means your name was not found in one search today. It is **not** a legal guarantee of deletion. Brokers routinely re-ingest data from upstream sources.
 - "Still listed" can mean the opt-out failed **or** the broker re-added your data since the last successful opt-out was recorded. Either way, re-running `node watcher.js` will attempt removal again.
 - If the broker's search page is down or slow, the result is classified as `unverifiable` (a timeout is not counted as "still listed").
+
+### Looking before you submit (`aidr scan`, `aidr run --found-only`)
+
+A normal run submits an opt-out to every broker whether or not it holds a listing
+for you. `aidr scan` finds out first:
+
+```bash
+aidr scan                       # every broker that can be searched, for each person
+aidr scan --only Spokeo,Radaris
+aidr run --found-only           # submit only where the scan found you
+```
+
+`aidr scan` searches each broker that has a search step (a `searchUrl` and a
+`listingPattern`, whatever its opt-out method), for each person, in that person's own
+browser profile. **It submits nothing and sends no email.** It prints where you were
+found (with the listing URL), where you were not, where it could not tell (with the
+reason), and how many brokers cannot be searched. `--only` and `--skip` apply. It exits 2
+when it could not tell anywhere (every search failed, for instance offline), so a scheduled
+scan that learned nothing does not look like a clean one.
+
+The latest result for each person and broker is saved in `state.json` under `scans`
+(keyed like the opt-outs), with a short history:
+
+| Result | Meaning |
+|--------|---------|
+| `found` | The search page showed a listing. The URL is kept and the search page is screenshotted into the snapshots directory (private permissions, and removed by `aidr purge` like the others) |
+| `not_found` | The search page loaded and showed no listing |
+| `unknown` | **Could not tell**: a bot wall, a failed navigation, a non-2xx answer, a browser that would not start. This is never recorded as `not_found` |
+
+`aidr run --found-only` runs the normal opt-out pass, narrowed by the scan:
+
+- A broker the latest scan says is `found` is submitted. One it says is `not_found` is
+  skipped, and the run log says why ("not listed (scan of 2026-11-17)").
+- A broker whose scan is `unknown`, older than `scan.maxAgeDays`, missing, or that
+  cannot be searched at all follows `scan.unknown`: `submit` (the default) or `skip`. A
+  skip is logged with its reason.
+- The email opt-outs and the ~490 generic brokers cannot be searched, so they follow
+  `scan.unknown` as a whole. With `skip` the run says in one line that they were skipped
+  and why; with `submit` they run as before.
+- If no scan has ever been recorded, `--found-only` refuses to start and tells you to
+  run `aidr scan` first.
+- It combines with `--only`, `--skip` and `--retry-failed` (each narrows the list
+  further), `--dry-run` and `--pollute`. It is refused with `--resume` (a checkpoint is a
+  position in the full list) and `--captchas` (which picks its own brokers). Like any
+  filtered run it marks its log as partial and leaves the resume checkpoint alone.
+
+```json
+"scan": { "unknown": "submit", "maxAgeDays": 30 }
+```
+
+`scan.unknown` is `submit` or `skip`; `scan.maxAgeDays` is a whole number of 1 or more.
+A wrong value is a config problem (`aidr config check` reports it), because a mistyped
+`skip` would otherwise quietly mean `submit`.
+
+An ordinary run also notes the listing it finds when it searches a broker before
+submitting. That sighting counts as evidence for `aidr verify` but does not count as a
+scan for `--found-only`.
+
+**Evidence-backed removal.** A removal is verified only when a listing was seen before
+(by a scan, a run's own search or an earlier verify) and is gone after. If `aidr verify`
+finds an empty search page and no listing was ever seen, it reports `never seen`, which
+is not counted as a removal in the exposure score, the monthly report or the complaints.
 
 ### Continuous SERP monitoring (`--serp-watch`)
 

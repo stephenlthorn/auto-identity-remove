@@ -122,7 +122,8 @@ test('email opt-outs: person 1 keeps their pre-upgrade (bare key) history, perso
 // ── verify-loop ───────────────────────────────────────────────────────────────
 
 test('verify: person 1 is still verified from their bare-key history after a second person is added', async () => {
-  const state = { optOuts: { Spokeo: { lastSuccess: daysAgo(10) } } };
+  // verifiedStillListedAt: a listing was seen before, so the empty search below is a removal.
+  const state = { optOuts: { Spokeo: { lastSuccess: daysAgo(10), verifiedStillListedAt: daysAgo(40) } } };
   const broker = { name: 'Spokeo', method: 'search-form', searchUrl: 'https://s.test/q', listingPattern: 'x' };
   const searched = [];
   const context = { newPage: async () => ({ close: async () => {} }) };

@@ -72,7 +72,8 @@ test('runVerify: allowlisted broker is skipped, not searched, not still_listed',
 
 test('runVerify: no config (default) preserves existing behavior', async () => {
   const findUrl = async () => null; // listing absent => verified_clear
-  const state = { optOuts: { NormalBroker: { lastSuccess: THIRTY_DAYS_AGO } } };
+  // A listing was seen before, so an empty search page now is a removal.
+  const state = { optOuts: { NormalBroker: { lastSuccess: THIRTY_DAYS_AGO, verifiedStillListedAt: new Date(Date.now() - 60 * 86400000).toISOString() } } };
   const brokers = [makeBroker('NormalBroker')];
 
   const result = await runVerify(makeContext(), brokers, [PERSON], { state, findUrl });

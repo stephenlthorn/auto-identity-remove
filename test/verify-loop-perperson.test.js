@@ -46,8 +46,9 @@ function brokerFor(person, name = 'Spokeo') {
 function twoPersonState(name = 'Spokeo') {
   return {
     optOuts: {
-      [`${name}|Alice Archer`]: { lastSuccess: daysAgo(10), totalRuns: 1 },
-      [`${name}|Bob Builder`]: { lastSuccess: daysAgo(10), totalRuns: 1 },
+      // verifiedStillListedAt: a listing was seen before, so a clear search is a removal.
+      [`${name}|Alice Archer`]: { lastSuccess: daysAgo(10), totalRuns: 1, verifiedStillListedAt: daysAgo(40) },
+      [`${name}|Bob Builder`]: { lastSuccess: daysAgo(10), totalRuns: 1, verifiedStillListedAt: daysAgo(40) },
     },
   };
 }
@@ -136,7 +137,7 @@ test('brokersFor throwing makes that person unverifiable and does not abort the 
 });
 
 test('single person without brokersFor keeps working (backward compatible)', async () => {
-  const state = { optOuts: { Spokeo: { lastSuccess: daysAgo(10) } } };
+  const state = { optOuts: { Spokeo: { lastSuccess: daysAgo(10), verifiedStillListedAt: daysAgo(40) } } };
 
   const result = await runVerify(makeContext(), [brokerFor(ALICE)], [ALICE], { state, findUrl: async () => null });
 
@@ -183,7 +184,7 @@ test('findUrl returning an empty string is unverifiable too; only null means "no
 });
 
 test('findUrl returning null is still verified clear (search loaded fine, no matching listing)', async () => {
-  const state = { optOuts: { Spokeo: { lastSuccess: daysAgo(10) } } };
+  const state = { optOuts: { Spokeo: { lastSuccess: daysAgo(10), verifiedStillListedAt: daysAgo(40) } } };
 
   const result = await runVerify(makeContext(), [brokerFor(ALICE)], [ALICE], { state, findUrl: async () => null });
 
