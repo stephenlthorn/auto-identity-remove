@@ -16,6 +16,8 @@ const path = require('node:path');
 const { createSandbox, runWatcher, runnableConfig } = require('./helpers/watcher-sandbox');
 const drop = require('../lib/drop');
 
+// The recorded days by person (each record also carries the identity fingerprint, see drop-identity.test.js).
+const days = (table) => Object.fromEntries(Object.entries(table || {}).map(([name, rec]) => [name, rec.submittedAt]));
 const person = (over) => ({
   firstName: 'Jane', lastName: 'Sample', fullName: 'Jane Sample', city: 'Fresno', state: 'CA', zip: '93701', country: 'US',
   email: 'jane@sample-test.example', phone: '5595550101', phoneFormatted: '(559) 555-0101', ...over,
@@ -56,7 +58,7 @@ test('aidr drop --done --on records the day in state.json; --clear removes it', 
     const done = await runWatcher(sandbox, ['--drop', '--done', '--on', '2026-09-01']);
     assert.equal(done.code, 0, done.stdout + done.stderr);
     assert.match(done.stdout, /brokers have until 2026-11-30/);
-    assert.deepEqual(sandbox.readState().drop, { 'Jane Sample': { submittedAt: '2026-09-01' } });
+    assert.deepEqual(days(sandbox.readState().drop), { 'Jane Sample': '2026-09-01' });
     assert.ok(sandbox.readState().optOuts.Spokeo, 'the opt-out history is untouched');
 
     const cleared = await runWatcher(sandbox, ['--drop', '--clear']);
@@ -90,7 +92,7 @@ test('--person picks one of several people', async () => {
   try {
     const r = await runWatcher(sandbox, ['--drop', '--done', '--on', '2026-09-01', '--person', 'Janet Sample']);
     assert.equal(r.code, 0, r.stdout + r.stderr);
-    assert.deepEqual(sandbox.readState().drop, { 'Janet Sample': { submittedAt: '2026-09-01' } });
+    assert.deepEqual(days(sandbox.readState().drop), { 'Janet Sample': '2026-09-01' });
   } finally { sandbox.cleanup(); }
 });
 

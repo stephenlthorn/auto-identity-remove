@@ -18,6 +18,8 @@ const path = require('node:path');
 const drop = require('../lib/drop');
 const cfg = require('../lib/config');
 
+// The recorded days by person (each record also carries the identity fingerprint, see drop-identity.test.js).
+const days = (table) => Object.fromEntries(Object.entries(table || {}).map(([name, rec]) => [name, rec.submittedAt]));
 const JANE = { firstName: 'Jane', lastName: 'Sample', state: 'CA', country: 'US' };
 const BOB = { firstName: 'Bob', lastName: 'Sample', state: 'TX' };
 const REGISTRY = { 'acme-data.example': ['CA'], 'other.example': ['CA', 'VT'], 'vermont-only.example': ['VT'] };
@@ -94,7 +96,8 @@ test('recording persists through the real state file, like --freeze-done', () =>
     const state = cfg.loadState();
     drop.recordDropRequest(state, JANE, '2026-09-01');
     const onDisk = JSON.parse(fs.readFileSync(path.join(dir, 'state.json'), 'utf8'));
-    assert.deepEqual(onDisk.drop, { 'Jane Sample': { submittedAt: '2026-09-01' } });
+    assert.equal(onDisk.drop['Jane Sample'].submittedAt, '2026-09-01');
+    assert.match(onDisk.drop['Jane Sample'].fp, /^[0-9a-f]{16}$/);
   } finally {
     cfg.setTestStatePath(null);
     fs.rmSync(dir, { recursive: true, force: true });
@@ -248,7 +251,7 @@ test('runDrop with no flags prints each person and changes nothing', () => {
 test('runDrop --done records today for the one California person (others are not touched)', () => {
   const r = runDrop({ persons: [JANE, BOB], options: { done: true } });
   assert.equal(r.code, 0);
-  assert.deepEqual(r.state.drop, { 'Jane Sample': { submittedAt: '2026-11-17' } });
+  assert.deepEqual(days(r.state.drop), { 'Jane Sample': '2026-11-17' });
   assert.match(r.text, /submitted on 2026-11-17/);
 });
 
@@ -260,7 +263,7 @@ test('runDrop --done or --clear with several California people needs --person (D
     assert.match(r.text, /--person/);
     assert.match(r.text, /Jane Sample, Janet Sample/, 'lists the California people');
     assert.doesNotMatch(r.text, /Bob Sample/, 'not the Texan');
-    assert.deepEqual(state.drop, { 'Jane Sample': { submittedAt: '2026-09-01' } }, 'nothing was changed');
+    assert.deepEqual(days(state.drop), { 'Jane Sample': '2026-09-01' }, 'nothing was changed');
   }
 });
 
@@ -272,7 +275,7 @@ test('runDrop with several California people and no flag still just shows them a
 
 test('runDrop --done --on records that day and shows the deadline', () => {
   const r = runDrop({ options: { done: true, on: '2026-09-01' } });
-  assert.deepEqual(r.state.drop, { 'Jane Sample': { submittedAt: '2026-09-01' } });
+  assert.deepEqual(days(r.state.drop), { 'Jane Sample': '2026-09-01' });
   assert.match(r.text, /brokers have until 2026-11-30/);
 });
 
@@ -287,7 +290,7 @@ test('runDrop refuses a bad --on before recording anything', () => {
 
 test('runDrop --person picks one person, and an unknown name is an error that lists the names', () => {
   const r = runDrop({ persons: [JANE, JANET], options: { done: true, person: 'janet sample' } });
-  assert.deepEqual(r.state.drop, { 'Janet Sample': { submittedAt: '2026-11-17' } });
+  assert.deepEqual(days(r.state.drop), { 'Janet Sample': '2026-11-17' });
   assert.doesNotMatch(r.text, /Jane Sample/);
 
   const bad = runDrop({ persons: [JANE, JANET], options: { done: true, person: 'Nobody Here' } });
