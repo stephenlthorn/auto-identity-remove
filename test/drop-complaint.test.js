@@ -91,3 +91,16 @@ test('the complaint cites the statute, the window, the evidence date and the for
 test('buildDropComplaint refuses to assert a listing it has no evidence for', () => {
   assert.throws(() => buildDropComplaint({ person: JANE, broker: { name: 'Acme Data' }, overdue: { submittedAt: '2026-09-01', deadline: '2026-11-30' } }), /still listed/);
 });
+
+test('a shrunken household: the bare entry and the labelled one are one request, the latest evidence wins (D7)', () => {
+  const stale = { verifiedStillListedAt: '2026-12-02T10:00:00Z' };
+  const gone = { verifiedDeletedAt: '2026-12-10T10:00:00Z' };
+  assert.deepEqual(find({ 'Acme Data|Jane Sample': stale, 'Acme Data': gone }), [], 'cleared later than it was seen: no complaint');
+  assert.deepEqual(find({ 'Acme Data': gone, 'Acme Data|Jane Sample': stale }), [], 'order of the keys does not matter');
+  const rows = find({
+    'Acme Data|Jane Sample': { verifiedStillListedAt: '2026-12-12T10:00:00Z' },
+    'Acme Data': { verifiedStillListedAt: '2026-12-02T10:00:00Z', verifiedDeletedAt: '2026-12-10T10:00:00Z' },
+  });
+  assert.equal(rows.length, 1, 'seen again after the clear: one complaint, not two');
+  assert.equal(rows[0].stillListedAt, '2026-12-12T10:00:00Z');
+});
