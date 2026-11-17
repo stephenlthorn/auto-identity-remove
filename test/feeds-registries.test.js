@@ -55,12 +55,11 @@ test('California: the consumer-rights URL is preferred, the website is the fallb
   assert.equal(by['Third Party LLC'].optOutUrl, 'https://third.example/');
 });
 
-test('registryHosts maps both the website domain and the rights domain, with sorted codes', async () => {
+test('registryHosts holds the primary website domains only, never the rights-page host', async () => {
   const out = await build({ [CA_URL]: caCsv(CA_ROWS) });
   assert.deepEqual(out.registryHosts, {
     'acme-data.example': ['CA'],
     'other.example': ['CA'],
-    'rights.acme-data.example': ['CA'],
     'third.example': ['CA'],
   });
 });

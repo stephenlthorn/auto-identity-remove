@@ -51,7 +51,10 @@ test('the README section states the live dates, the 90-day window and the compla
   assert.match(section, /2026-01-01/);
   assert.match(section, /2026-08-01/);
   assert.match(section, /90 days/);
-  assert.match(section, /625/);
+  // The registry's size changes; the README must not state it as a fixed number (D12).
+  assert.match(section, /several hundred/);
+  assert.doesNotMatch(section, /\b\d{3,}\s+(registered\s+)?brokers\b/i, 'no fixed broker count');
+  assert.match(section, /aidr update-brokers/);
   assert.ok(section.includes(CONSUMER_URL));
   assert.ok(section.includes('https://cppa.ca.gov/webapplications/complaint'));
   assert.match(section, /1798\.99\.86/);

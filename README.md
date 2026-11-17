@@ -917,7 +917,7 @@ The bundled Markup dataset is from January 2023 and is increasingly stale. Refre
 node watcher.js --update-brokers
 ```
 
-This reads the California Privacy Protection Agency's current data broker registry over HTTP (no browser is launched), normalizes each entry (preferring the registry's consumer-rights page as the opt-out URL), dedups it by hostname against the explicit brokers in `brokers.js`, and writes `data/feeds-brokers.json`. Each broker records which registries list it (`registries`), and the file keeps a `registryHosts` map of every registry domain to the registries that list it. The command prints one line per registry with its count or its failure. A registry that fails (an HTML page, an error status, or no rows) is reported as failed and its rows from the earlier run are kept, with their date; the command exits non-zero only when every registry failed. Other states:
+This reads the California Privacy Protection Agency's current data broker registry over HTTP (no browser is launched), normalizes each entry (preferring the registry's consumer-rights page as the opt-out URL when it is a single http(s) address, otherwise the primary website), dedups it by company against the explicit brokers in `brokers.js`, and writes `data/feeds-brokers.json`. A company is the registrable domain of its primary website, so several brokers whose rights pages share one form platform (a OneTrust portal, a Google Form) stay separate rows. Each broker records which registries list it (`registries`), and the file keeps a `registryHosts` map of the registrable domain of each broker's primary website (never a rights-page host, a shared form platform or a bare suffix like `co.uk`) to the registries that list it, plus a `registries` block with each registry's broker count. The command prints one line per registry with its count or its failure. A registry that fails (an HTML page, an error status, no rows, a file cut off by an unclosed quote, a list under half the size of the earlier one, or, from the official California URL, fewer than 100 brokers) is reported as failed and its rows from the earlier run are kept, with their date; the command exits non-zero only when every registry failed. Other states:
 
 - **Vermont** no longer offers a file export, so it is skipped with a one-line note. Set `VT_REGISTRY_URL` to a CSV of your own to read it.
 - **Texas and Oregon** run their registries as web applications only, with no CSV, spreadsheet or JSON export, so they are not read.
@@ -1122,7 +1122,8 @@ California's Delete Request and Opt-out Platform (DROP) is **live**. It is run b
 California Privacy Protection Agency (branded CalPrivacy) and lets a California resident
 send one deletion request that every registered data broker must honor. It has been open
 to consumers since 2026-01-01, and registered brokers have had to access it since
-2026-08-01. The current registry lists 625 brokers.
+2026-08-01. The registry lists several hundred brokers; `aidr drop` prints the current
+count once `aidr update-brokers` has run.
 
 - Start at https://consumer.drop.privacy.ca.gov (the information page is https://privacy.ca.gov/drop/).
 - It verifies that you live in California through the California Identity Gateway (Socure or
@@ -1148,20 +1149,33 @@ aidr drop                          # what DROP is, the URL, and where your reque
 aidr drop --done                   # you submitted it today: record it
 aidr drop --done --on 2026-09-01   # you submitted it on another day (not in the future, not before 2026-01-01)
 aidr drop --done --person "Jane Sample"   # only this person, when config.json lists several
-aidr drop --clear                  # remove the record
+aidr drop --clear                  # remove the record (works even if you no longer live in California)
 ```
+
+Days are your machine's local calendar days, so `--done` at 17:30 Pacific records that day, not
+the next UTC date. `--done` on a request that is already recorded changes nothing and says which
+date is recorded (the 90-day clock hangs on it); `--done --on DATE` replaces it. When
+`config.json` lists more than one California resident, `--done` and `--clear` need `--person`
+so one person's request is never recorded for another. If `--person` matches two configured
+people with the same name, it refuses and says what tells them apart (email, zip code), because
+the record is kept per name: give one of them a different first or last name. A record carries
+the same identity fingerprint as the rest of the state, so a namesake or a replaced person does
+not inherit it.
 
 For each California person (state `CA` or `California`, country US or unset) it prints what
 DROP is, the URL, what the platform asks for, and one of: *not recorded yet*, *submitted on
 DATE and brokers have until DEADLINE*, or *the window passed on DATE*. It also says how many
-registry brokers it knows; with none known it tells you to run `aidr update-brokers`. A person
+registry brokers it knows (counted from the registry's own broker count, not from domains); with
+none known it tells you to run `aidr update-brokers`. A person
 outside California is told DROP is for California residents and nothing changes.
 
 Once a request is recorded:
 
 - The generic pass does not visit a broker that is on the California registry, so fewer companies
-  receive your details. Each one is logged as skipped ("covered by your DROP request of DATE")
-  and the run summary counts them. This needs the registry list from `aidr update-brokers`; with
+  receive your details. A broker counts as on the registry when its row came from the registry
+  feed, or when its own website is the primary website of a registry broker; a page on a shared
+  form platform (a OneTrust portal, a Google Form) never counts by its host. Each covered row is
+  logged as skipped ("covered by your DROP request of DATE") and the run summary counts them. This needs the registry list from `aidr update-brokers`; with
   a recorded request and no list the run says so.
 - The explicit brokers in `brokers.js` (the people-search sites) still run: their listings are
   public and a form is often faster.
@@ -1172,6 +1186,12 @@ Once a request is recorded:
   counted as a removal: a broker you have not checked is never treated as verified gone.
 
 To keep submitting to those brokers as well, set `"drop": { "alsoSubmit": true }` in `config.json`.
+A mistyped `drop` block (for example `"alsoSubmit": "true"`) turns the skipping off for that run, so
+every broker is submitted, and the run prints the config warning once at the start.
+
+After a request is recorded, the `CalPrivacy DROP` entry is listed as done with its date instead of
+as a to-do. A complaint treats a listing as seen after the deadline only from 08:00 UTC on the day
+after it (past midnight in California in both standard and daylight time).
 
 A real run for a California person with no recorded request prints one line pointing at `aidr drop`.
 

@@ -18,6 +18,8 @@ const path = require('node:path');
 const drop = require('../lib/drop');
 const cfg = require('../lib/config');
 
+// The recorded days by person (each record also carries the identity fingerprint, see drop-identity.test.js).
+const days = (table) => Object.fromEntries(Object.entries(table || {}).map(([name, rec]) => [name, rec.submittedAt]));
 const JANE = { firstName: 'Jane', lastName: 'Sample', state: 'CA', country: 'US' };
 const BOB = { firstName: 'Bob', lastName: 'Sample', state: 'TX' };
 const REGISTRY = { 'acme-data.example': ['CA'], 'other.example': ['CA', 'VT'], 'vermont-only.example': ['VT'] };
@@ -94,7 +96,8 @@ test('recording persists through the real state file, like --freeze-done', () =>
     const state = cfg.loadState();
     drop.recordDropRequest(state, JANE, '2026-09-01');
     const onDisk = JSON.parse(fs.readFileSync(path.join(dir, 'state.json'), 'utf8'));
-    assert.deepEqual(onDisk.drop, { 'Jane Sample': { submittedAt: '2026-09-01' } });
+    assert.equal(onDisk.drop['Jane Sample'].submittedAt, '2026-09-01');
+    assert.match(onDisk.drop['Jane Sample'].fp, /^[0-9a-f]{16}$/);
   } finally {
     cfg.setTestStatePath(null);
     fs.rmSync(dir, { recursive: true, force: true });
@@ -162,10 +165,11 @@ test('isCoveredByDrop is false when any condition is missing', () => {
   assert.equal(covered({ host: '' }), false);
 });
 
-test('drop.alsoSubmit: true turns coverage off, any other value does not', () => {
+test('drop.alsoSubmit: true turns coverage off, and so does an invalid drop block', () => {
   assert.equal(covered({ config: { drop: { alsoSubmit: true } } }), false);
   assert.equal(covered({ config: { drop: { alsoSubmit: false } } }), true);
-  assert.equal(covered({ config: { drop: { alsoSubmit: 'true' } } }), true, 'only the boolean true counts');
+  assert.equal(covered({ config: { drop: { alsoSubmit: 'true' } } }), false, 'a mistyped value turns skipping off: submitting is the safe direction (D6)');
+  assert.equal(covered({ config: { drop: 'yes' } }), false, 'a drop block that is not an object turns skipping off too');
 });
 
 test('coverageReason names the date; makeCoveredByDrop works on generic rows by url', () => {
@@ -178,7 +182,9 @@ test('coverageReason names the date; makeCoveredByDrop works on generic rows by 
 test('makeCoveredByDrop returns null when it can never cover anything (no state work for other people)', () => {
   assert.equal(drop.makeCoveredByDrop({ person: BOB, state: {}, config: {}, registryHosts: REGISTRY }), null);
   assert.equal(drop.makeCoveredByDrop({ person: JANE, state: STATE_WITH_DROP, config: { drop: { alsoSubmit: true } }, registryHosts: REGISTRY }), null);
-  assert.equal(drop.makeCoveredByDrop({ person: JANE, state: STATE_WITH_DROP, config: {}, registryHosts: {} }), null);
+  const empty = drop.makeCoveredByDrop({ person: JANE, state: STATE_WITH_DROP, config: {}, registryHosts: {} });
+  assert.equal(empty({ name: 'Bundled', url: 'https://acme-data.example/optout' }), null, 'no registry list: a bundled row is submitted');
+  assert.match(empty({ name: 'Feed', url: 'https://x.example/optout', registries: ['CA'] }), /covered/, 'a feed row says CA itself');
 });
 
 test('dropConfigProblems: only a non-boolean alsoSubmit is a problem', () => {
@@ -243,25 +249,40 @@ test('runDrop with no flags prints each person and changes nothing', () => {
   assert.equal(r.state.drop, undefined);
 });
 
-test('runDrop --done records today for the California people only', () => {
-  const r = runDrop({ persons: [JANE, BOB, JANET], options: { done: true } });
+test('runDrop --done records today for the one California person (others are not touched)', () => {
+  const r = runDrop({ persons: [JANE, BOB], options: { done: true } });
   assert.equal(r.code, 0);
-  assert.deepEqual(r.state.drop, {
-    'Jane Sample': { submittedAt: '2026-11-17' },
-    'Janet Sample': { submittedAt: '2026-11-17' },
-  });
+  assert.deepEqual(days(r.state.drop), { 'Jane Sample': '2026-11-17' });
   assert.match(r.text, /submitted on 2026-11-17/);
+});
+
+test('runDrop --done or --clear with several California people needs --person (D2)', () => {
+  for (const options of [{ done: true }, { clear: true }, { done: true, on: '2026-09-01' }]) {
+    const state = { optOuts: {}, drop: { 'Jane Sample': { submittedAt: '2026-09-01' } } };
+    const r = runDrop({ persons: [JANE, BOB, JANET], options, state });
+    assert.equal(r.code, 2, JSON.stringify(options));
+    assert.match(r.text, /--person/);
+    assert.match(r.text, /Jane Sample, Janet Sample/, 'lists the California people');
+    assert.doesNotMatch(r.text, /Bob Sample/, 'not the Texan');
+    assert.deepEqual(days(state.drop), { 'Jane Sample': '2026-09-01' }, 'nothing was changed');
+  }
+});
+
+test('runDrop with several California people and no flag still just shows them all', () => {
+  const r = runDrop({ persons: [JANE, JANET] });
+  assert.equal(r.code, 0);
+  assert.match(r.text, /Jane Sample[\s\S]*Janet Sample/);
 });
 
 test('runDrop --done --on records that day and shows the deadline', () => {
   const r = runDrop({ options: { done: true, on: '2026-09-01' } });
-  assert.deepEqual(r.state.drop, { 'Jane Sample': { submittedAt: '2026-09-01' } });
+  assert.deepEqual(days(r.state.drop), { 'Jane Sample': '2026-09-01' });
   assert.match(r.text, /brokers have until 2026-11-30/);
 });
 
 test('runDrop refuses a bad --on before recording anything', () => {
   for (const on of ['2026-11-18', '2025-12-31', 'soon']) {
-    const r = runDrop({ persons: [JANE, JANET], options: { done: true, on } });
+    const r = runDrop({ persons: [JANE, JANET], options: { done: true, on, person: 'Jane Sample' } });
     assert.equal(r.code, 2, on);
     assert.equal(r.state.drop, undefined, `${on} must record nothing`);
     assert.match(r.text, /Error:/);
@@ -270,7 +291,7 @@ test('runDrop refuses a bad --on before recording anything', () => {
 
 test('runDrop --person picks one person, and an unknown name is an error that lists the names', () => {
   const r = runDrop({ persons: [JANE, JANET], options: { done: true, person: 'janet sample' } });
-  assert.deepEqual(r.state.drop, { 'Janet Sample': { submittedAt: '2026-11-17' } });
+  assert.deepEqual(days(r.state.drop), { 'Janet Sample': '2026-11-17' });
   assert.doesNotMatch(r.text, /Jane Sample/);
 
   const bad = runDrop({ persons: [JANE, JANET], options: { done: true, person: 'Nobody Here' } });
@@ -346,4 +367,64 @@ test('brokerAppliesToPerson: a californiaOnly entry is for California residents 
   assert.equal(drop.brokerAppliesToPerson({ name: 'CalPrivacy DROP', californiaOnly: true }, JANE), true);
   assert.equal(drop.brokerAppliesToPerson({ name: 'CalPrivacy DROP', californiaOnly: true }, BOB), false);
   assert.equal(drop.brokerAppliesToPerson({ name: 'Spokeo' }, BOB), true);
+});
+
+test('an invalid drop block disables skipping and the run notes carry the config warning once (D6)', () => {
+  const config = { drop: { alsoSubmit: 'true' } };
+  assert.equal(drop.makeCoveredByDrop({ person: JANE, state: STATE_WITH_DROP, config, registryHosts: REGISTRY }), null);
+  const lines = drop.dropRunNotes({ persons: [JANE, BOB], state: STATE_WITH_DROP, config, registryHosts: REGISTRY });
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /drop\.alsoSubmit must be true or false/);
+  assert.match(lines[0], /every broker is submitted/);
+});
+
+// ─── D8: local days ─────────────────────────────────────────────────────────
+
+test('todayDay is the machine\'s local calendar day: 17:30 Pacific on Nov 17 is still Nov 17', () => {
+  const evening = new Date('2026-11-18T01:30:00Z');
+  assert.equal(drop.todayDay(evening, 480), '2026-11-17', 'UTC-8');
+  assert.equal(drop.todayDay(evening, 0), '2026-11-18', 'UTC');
+  assert.equal(drop.todayDay(new Date('2026-11-17T23:30:00Z'), -540), '2026-11-18', 'Tokyo is already on the 18th');
+});
+
+test('todayDay with no offset uses the real local offset of that moment', () => {
+  const now = new Date('2026-06-01T12:00:00Z');
+  const expected = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  assert.equal(drop.todayDay(now), expected);
+});
+
+test('checkSubmittedDay refuses "in the future" only when later than both the local and the UTC day', () => {
+  assert.equal(drop.checkSubmittedDay('2026-11-18', '2026-11-17', '2026-11-18').ok, true, 'the UTC day is already the 18th');
+  assert.equal(drop.checkSubmittedDay('2026-11-18', '2026-11-18', '2026-11-17').ok, true, 'east of UTC: the local day is the 18th');
+  assert.match(drop.checkSubmittedDay('2026-11-19', '2026-11-17', '2026-11-18').error, /future/);
+  assert.match(drop.checkSubmittedDay('2026-11-19', '2026-11-18', '2026-11-17').error, /future/);
+  assert.match(drop.checkSubmittedDay('2026-11-18', '2026-11-17').error, /future/, 'no UTC day given: the local day alone');
+});
+
+test('runDrop accepts --on for the UTC day when the local day is still behind it', () => {
+  const state = { optOuts: {} };
+  const r = drop.runDrop({ persons: [JANE], state, options: { done: true, on: '2026-11-18' }, registryCount: 0, today: '2026-11-17', utcToday: '2026-11-18', save: () => {} });
+  assert.equal(r.code, 0);
+  assert.equal(state.drop['Jane Sample'].submittedAt, '2026-11-18');
+});
+
+// ─── D12: hosts the way the real registry has them ──────────────────────────
+
+const REAL = { 'acme-data.example': ['CA'], 'ukdata.co.uk': ['CA'], 'onetrust.com': ['CA'], 'google.com': ['CA'], 'co.uk': ['CA'] };
+const coveredReal = (host, extra = {}) => drop.isCoveredByDrop({ person: JANE, state: STATE_WITH_DROP, config: {}, host, registryHosts: drop.loadRegistryHosts({ readFile: () => JSON.stringify({ registryHosts: REAL }) }), ...extra });
+
+test('coverage on real-looking hosts: www, subdomains, multi-part suffixes and shared platforms', () => {
+  assert.equal(coveredReal('www.acme-data.example'), true);
+  assert.equal(coveredReal('rights.eu.acme-data.example'), true);
+  assert.equal(coveredReal('shop.ukdata.co.uk'), true);
+  assert.equal(coveredReal('https://www.ukdata.co.uk/privacy'), true);
+  assert.equal(coveredReal('another.co.uk'), false, 'a different company under the same suffix');
+  assert.equal(coveredReal('privacyportal.onetrust.com'), false);
+  assert.equal(coveredReal('docs.google.com'), false);
+  assert.equal(coveredReal('privacyportal.onetrust.com', { registries: ['CA'] }), true, 'unless the row itself says it is a registry broker');
+});
+
+test('loadRegistryHosts keeps the multi-part-suffix company and drops the suffix and the platforms', () => {
+  const hosts = drop.loadRegistryHosts({ readFile: () => JSON.stringify({ registryHosts: REAL }) });
+  assert.deepEqual(Object.keys(hosts).sort(), ['acme-data.example', 'ukdata.co.uk']);
 });
