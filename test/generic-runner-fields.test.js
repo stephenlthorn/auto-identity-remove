@@ -32,21 +32,21 @@ const pageWith = (fields) => makeFakePage({
 
 test('fillGenericForm records the detail behind every field it typed into', async () => {
   const page = pageWith(['email', 'firstName', 'lastName', 'state', 'zip', 'phone']);
-  const typed = [];
-  await fillGenericForm(page, PERSON, { typed });
-  assert.deepEqual(typed.map(t => t.detail), ['email', 'firstName', 'lastName', 'state', 'zip', 'phone']);
-  assert.equal(typed.length, page.filled.length, 'one record per field actually typed');
-  assert.ok(typed.every(t => t.masked === false));
+  const record = [];
+  await fillGenericForm(page, PERSON, { record });
+  assert.deepEqual(record.map(t => t.detail), ['email', 'firstName', 'lastName', 'state', 'zip', 'phone']);
+  assert.equal(record.length, page.filled.length, 'one record per field actually typed');
+  assert.ok(record.every(t => t.masked === false));
 });
 
 test('with a relay alias the email is recorded as masked', async () => {
   const page = pageWith(['email']);
-  const typed = [];
-  await fillGenericForm(page, PERSON, { typed, submissionEmail: ALIAS });
-  assert.deepEqual(typed.map(t => [t.detail, t.masked]), [['email', true]]);
+  const record = [];
+  await fillGenericForm(page, PERSON, { record, submissionEmail: ALIAS });
+  assert.deepEqual(record.map(t => [t.detail, t.masked]), [['email', true]]);
 });
 
-test('a preview with fields fills the form and reports entries without submitting', async () => {
+test('a preview with fields reports what a real run would type, without typing or submitting', async () => {
   const page = pageWith(['email', 'firstName', 'lastName', 'phone']);
   const result = await processGenericUrl(page, BROKER, { optOuts: {} }, true, new Set(), { person: PERSON, previewFields: true });
   assert.equal(result.status, 'skipped');
@@ -54,7 +54,7 @@ test('a preview with fields fills the form and reports entries without submittin
   assert.deepEqual(result.fieldEntries.map(e => e.details[0]), ['email', 'first name', 'last name', 'phone']);
   assert.ok(result.fieldEntries.every(e => !('value' in e)), 'no value unless showValues');
   assert.equal(page.clicked.filter(c => c.sel.includes('submit')).length, 0, 'nothing is submitted');
-  assert.equal(page.filled.length, 4);
+  assert.equal(page.filled.length, 0, 'nothing is typed in a preview');
 });
 
 test('a preview with fields and showValues carries the values in the entries', async () => {
@@ -125,4 +125,71 @@ test('runGenericBrokers puts the typed names on the logged result of a real run'
   const row = calls.find(c => c.n === 'ExampleBroker');
   assert.deepEqual(row.extra.fields, ['first name', 'email']);
   assert.equal(JSON.stringify(row).includes(PERSON.email), false);
+});
+
+// ── a preview must not type anything into the page ───────────────────────────
+
+const MUTATORS = ['fill', 'type', 'press', 'pressSequentially', 'selectOption', 'check', 'click', 'setInputFiles', 'dispatchEvent'];
+
+/**
+ * Wraps a fake page so every mutating call on any locator is recorded, and models
+ * a form whose fields start empty and fire `input` / `change` events when written
+ * to, like a page with a session-replay script listening.
+ */
+function instrumented(page) {
+  const probe = { calls: [], values: {}, events: { input: 0, change: 0 } };
+  const wrap = (loc) => new Proxy(loc, {
+    get(target, prop) {
+      const v = target[prop];
+      if (typeof v !== 'function') return v;
+      if (MUTATORS.includes(prop)) {
+        return (...args) => {
+          probe.calls.push(prop);
+          if (prop === 'fill' || prop === 'type' || prop === 'pressSequentially') { probe.events.input++; probe.values[String(Math.random())] = args[0]; }
+          if (prop === 'selectOption' || prop === 'check') probe.events.change++;
+          return v.apply(target, args);
+        };
+      }
+      if (['first', 'nth', 'locator'].includes(prop)) return (...args) => wrap(v.apply(target, args));
+      return v.bind(target);
+    },
+  });
+  const original = page.locator;
+  page.locator = (sel) => wrap(original(sel));
+  return probe;
+}
+
+test('a preview with fields types nothing: no fill, no events, every field still empty', async () => {
+  const page = pageWith(['email', 'firstName', 'lastName', 'state', 'zip', 'phone']);
+  const probe = instrumented(page);
+  const result = await processGenericUrl(page, BROKER, { optOuts: {} }, true, new Set(), { person: PERSON, previewFields: true });
+  assert.deepEqual(probe.calls, [], 'no mutating call of any kind');
+  assert.deepEqual(probe.events, { input: 0, change: 0 });
+  assert.deepEqual(probe.values, {});
+  assert.deepEqual(page.filled, []);
+  assert.deepEqual(result.fieldEntries.map(e => e.details[0]), ['email', 'first name', 'last name', 'state', 'ZIP', 'phone']);
+});
+
+test('the supplementary phone rule holds in a preview: a lone phone box is not reported', async () => {
+  const page = pageWith(['phone']);
+  const probe = instrumented(page);
+  const result = await processGenericUrl(page, BROKER, { optOuts: {} }, true, new Set(), { person: PERSON, previewFields: true });
+  assert.deepEqual(probe.calls, []);
+  assert.equal(result.fieldEntries, undefined);
+});
+
+test('the same form reports the same details in a preview as a real run types', async () => {
+  const fields = ['email', 'firstName', 'lastName', 'phone'];
+  const preview = await processGenericUrl(pageWith(fields), BROKER, { optOuts: {} }, true, new Set(), { person: PERSON, previewFields: true });
+  const real = await processGenericUrl(pageWith(fields), BROKER, { optOuts: {} }, false, new Set(), { person: PERSON });
+  assert.deepEqual(fr.detailNames(preview.fieldEntries), real.fields);
+});
+
+test('F1: with no relay (submission email is the person\'s own address) the email is not "masked"', async () => {
+  const page = pageWith(['email']);
+  const record = [];
+  await fillGenericForm(page, PERSON, { record, submissionEmail: ` ${PERSON.email.toUpperCase()} ` });
+  assert.deepEqual(record.map(t => [t.detail, t.masked]), [['email', false]]);
+  const entries = fr.entriesFromGeneric(record);
+  assert.deepEqual(entries[0].details, ['email']);
 });

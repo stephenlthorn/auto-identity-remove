@@ -664,15 +664,27 @@ function getFieldMap(person, opts = {}) {
   ];
 }
 
+// True only when the address typed differs from the person's own (F1): with no
+// relay the submission email IS the person's address and is not "masked".
+function isMaskedAddress(typedValue, person) {
+  let own = '';
+  try { own = String(activePerson(person).email || ''); } catch (_) { own = ''; }
+  return String(typedValue || '').trim().toLowerCase() !== own.trim().toLowerCase();
+}
+
 /**
  * Fill one form. Every lookup is scoped to `opts.scope` (a <form> locator) so
  * nothing outside it is touched; without a scope it searches the whole page (kept
  * for older callers).
  * @param {object} page
  * @param {object} [person]
- * @param {{ submissionEmail?: string, scope?: object, typed?: object[] }} [opts]
- *   `typed`, when given, receives one { selector, detail, value, masked } per field
- *   typed into: the decision getFieldMap() made, for the field report (Q4).
+ * @param {{ submissionEmail?: string, scope?: object, record?: object[], dryFill?: boolean }} [opts]
+ *   `record`, when given, receives one { selector, detail, value, masked } per field
+ *   chosen: the decision getFieldMap() made, for the field report (Q4).
+ *   `dryFill` takes every decision and records it but calls none of fill,
+ *   selectOption, check or click, so `aidr preview --fields` can say what a real run
+ *   would type without typing it. Typing is itself a disclosure: a script on the page
+ *   (session replay, an input listener, autosave) can read a value as it is entered.
  * @returns {Promise<boolean>} true if at least one field was filled
  */
 async function fillGenericForm(page, person, opts = {}) {
@@ -680,6 +692,8 @@ async function fillGenericForm(page, person, opts = {}) {
   let filledAny = false;
   for (const field of getFieldMap(person, opts)) {
     if (field.special === 'selectDeleteOrOptOut') {
+      // A dropdown choice changes the page; a dry fill leaves it alone.
+      if (opts.dryFill) continue;
       // Try to pick "Delete", "Opt-Out", or "Do Not Sell" from a dropdown
       for (const sel of field.selectors) {
         try {
@@ -705,13 +719,15 @@ async function fillGenericForm(page, person, opts = {}) {
         const el = root.locator(sel).first();
         if ((await el.count()) > 0 && (await el.isVisible({ timeout: 300 }))) {
           const tag = await el.evaluate(n => n.tagName.toLowerCase());
-          if (tag === 'select') {
+          if (opts.dryFill) {
+            // decided, not done
+          } else if (tag === 'select') {
             await el.selectOption(field.value).catch(() => {});
           } else {
             await el.fill(field.value);
           }
-          if (Array.isArray(opts.typed) && field.detail) {
-            opts.typed.push({ selector: sel, detail: field.detail, value: field.value, masked: field.detail === 'email' && !!opts.submissionEmail });
+          if (Array.isArray(opts.record) && field.detail) {
+            opts.record.push({ selector: sel, detail: field.detail, value: field.value, masked: field.detail === 'email' && isMaskedAddress(field.value, person) });
           }
           filledAny = true;
           break;
@@ -838,7 +854,7 @@ async function clearCaptcha(handleCaptcha, page, broker, describeFailure) {
  * with a fillable field exists, so the caller can fall through to the next
  * strategy; otherwise a { status, detail } result.
  */
-async function submitOptOutForm(page, { person, submissionEmail, checkUrl, blockedNow, redactor, formCtx = {}, label, broker, handleCaptcha, captchaFailureDetail, previewOnly = false, typed }) {
+async function submitOptOutForm(page, { person, submissionEmail, checkUrl, blockedNow, redactor, formCtx = {}, label, broker, handleCaptcha, captchaFailureDetail, previewOnly = false, record }) {
   const found = await describeForms(page);
   if (found.length === 0) return null;
 
@@ -877,11 +893,12 @@ async function submitOptOutForm(page, { person, submissionEmail, checkUrl, block
       return { status: 'captcha_failed', detail: captchaDetail(captchaFailureDetail, 'skipped', broker) || 'CAPTCHA on the opt-out form and this run cannot solve it - finish this one by hand' };
     }
 
-    const filled = await fillGenericForm(page, person, { submissionEmail, scope: locator, typed });
+    const filled = await fillGenericForm(page, person, { submissionEmail, scope: locator, record, dryFill: previewOnly });
     if (!filled) { skipped.push('no fillable field'); continue; }
-    // A preview with fields stops here: the form is filled so the report can say what
-    // was typed, and nothing is clicked or sent (Q4).
-    if (previewOnly) return { status: 'skipped', detail: 'dry-run - form filled but not submitted' };
+    // A preview with fields stops here. fillGenericForm took the same decisions a real
+    // run takes and typed none of them, so the report cannot drift from a real run and
+    // no detail reaches the page (Q4).
+    if (previewOnly) return { status: 'skipped', detail: 'dry-run - form found, nothing typed or submitted' };
 
     // Filled first, so a person solving it by hand only has the CAPTCHA left. The
     // baseline below is read after, so a "verified" banner is not the broker's answer.
@@ -954,19 +971,19 @@ async function guardFor(page, check) {
 
 /**
  * Process one generic row. The work is in processGenericRow below; this wrapper
- * adds what was typed to the result (Q4): `fields`, the detail NAMES, on a real
- * run, and `fieldEntries` on a preview with fields (values only on showValues).
- * Neither is added when nothing was typed, so every other result is unchanged.
+ * adds the fields to the result (Q4): `fields`, the detail NAMES actually typed, on a
+ * real run, and `fieldEntries`, what a real run WOULD type, on a preview with fields
+ * (values only on showValues). Neither is added when no field was chosen, so every other result is unchanged.
  */
 async function processGenericUrl(page, broker, state, dryRun = false, injectedDeadSet, opts = {}) {
-  const typed = [];
-  const result = await processGenericRow(page, broker, state, dryRun, injectedDeadSet, { ...opts, typed });
-  if (!result || typed.length === 0) return result;
+  const record = [];
+  const result = await processGenericRow(page, broker, state, dryRun, injectedDeadSet, { ...opts, record });
+  if (!result || record.length === 0) return result;
   if (opts.previewFields) {
-    return { ...result, fieldEntries: fieldReport.entriesFromGeneric(typed, { showValues: !!opts.showValues }) };
+    return { ...result, fieldEntries: fieldReport.entriesFromGeneric(record, { showValues: !!opts.showValues }) };
   }
   if (dryRun) return result;
-  return { ...result, fields: fieldReport.detailNames(fieldReport.entriesFromGeneric(typed)) };
+  return { ...result, fields: fieldReport.detailNames(fieldReport.entriesFromGeneric(record)) };
 }
 
 async function processGenericRow(page, broker, state, dryRun = false, injectedDeadSet, opts = {}) {
@@ -1083,11 +1100,12 @@ async function processGenericRow(page, broker, state, dryRun = false, injectedDe
     // is reachable, but every strategy below is mutating (clicks a Do Not Sell
     // button or submits a form). Stop here so --dry-run is genuinely safe.
     if (dryRun) {
-      // `aidr preview --fields`: fill an opt-out form that is already on the page, so
-      // the report can say what would be typed. Nothing is clicked, so no Do Not Sell
-      // link is followed and a form that only appears after one is not previewed.
+      // `aidr preview --fields`: find an opt-out form that is already on the page and
+      // record what a real run would type into it. Nothing is typed or clicked, so no
+      // detail reaches the page, no Do Not Sell link is followed, and a form that only
+      // appears after one is not previewed.
       if (opts.previewFields && (broker.method === undefined || broker.method === null || broker.method === 'direct-form') && !isHomepageUrl(broker.url)) {
-        const previewed = await submitOptOutForm(page, { person, submissionEmail, checkUrl, blockedNow, redactor, broker, previewOnly: true, typed: opts.typed });
+        const previewed = await submitOptOutForm(page, { person, submissionEmail, checkUrl, blockedNow, redactor, broker, previewOnly: true, record: opts.record });
         if (previewed) return previewed;
       }
       return { status: 'skipped', detail: 'dry-run - generic opt-out not submitted' };
@@ -1111,7 +1129,7 @@ async function processGenericRow(page, broker, state, dryRun = false, injectedDe
       const movedBad = await guardLanding();
       if (movedBad) return movedBad;
       const submitted = await submitOptOutForm(page, {
-        person, submissionEmail, checkUrl, blockedNow, redactor, broker, handleCaptcha: opts.handleCaptcha, captchaFailureDetail: opts.captchaFailureDetail, typed: opts.typed,
+        person, submissionEmail, checkUrl, blockedNow, redactor, broker, handleCaptcha: opts.handleCaptcha, captchaFailureDetail: opts.captchaFailureDetail, record: opts.record,
         formCtx: { afterOptOutClick: true, beforeSigs: formsBeforeClick },
         label: 'Do Not Sell clicked, form submitted',
       });
@@ -1151,7 +1169,7 @@ async function processGenericRow(page, broker, state, dryRun = false, injectedDe
     const methodAllowsForms = broker.method === undefined || broker.method === null || broker.method === 'direct-form';
     if (methodAllowsForms && !isHomepageUrl(broker.url)) {
       const submitted = await submitOptOutForm(page, {
-        person, submissionEmail, checkUrl, blockedNow, redactor, broker, handleCaptcha: opts.handleCaptcha, captchaFailureDetail: opts.captchaFailureDetail, typed: opts.typed,
+        person, submissionEmail, checkUrl, blockedNow, redactor, broker, handleCaptcha: opts.handleCaptcha, captchaFailureDetail: opts.captchaFailureDetail, record: opts.record,
         formCtx: { afterOptOutClick: false },
         label: 'Form submitted',
       });

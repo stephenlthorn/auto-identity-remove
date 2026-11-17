@@ -179,6 +179,18 @@ after its field on standard output (it is not written to the run log file, but a
 captures the terminal, such as `docker logs`, will see it). Use it to check a selector before a
 real run, and do not share that output.
 
+**What a preview itself does.** `--fields` is not "nothing leaves my machine". A preview still
+visits sites:
+
+- **Search steps run.** For a broker that searches first, the search page is loaded, and your name
+  (usually with your state) is in that URL. The table marks these as `search: full name, state`
+  and counts them in the totals.
+- **Explicit brokers' forms are filled in the page, not submitted.** The preview types your details
+  into the form fields of the brokers listed in `brokers.js` and stops before the submit click.
+  A script on such a page can read what is typed.
+- **Generic brokers' forms are not touched.** For the generic pass the tool works out what it
+  would type and types nothing, clicks nothing and submits nothing, so those pages see only a visit.
+
 The audit report written after a real run lists the same detail names for each broker
 (`details typed: first name, email`), never values, whatever flags you used.
 
