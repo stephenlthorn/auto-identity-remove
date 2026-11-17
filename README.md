@@ -928,8 +928,14 @@ recorded as could not tell, with the missing detail named, never as not found.
 - The email opt-outs and the ~490 generic brokers cannot be searched, so they follow
   `scan.unknown` as a whole. With `skip` the run says in one line that they were skipped
   and why; with `submit` they run as before.
-- If no scan has ever been recorded, `--found-only` refuses to start and tells you to
-  run `aidr scan` first.
+- Before the opt-out pass it prints one line per person: how many brokers the scan says you
+  are listed at (submitted), how many it says you are not (skipped), and why every other
+  broker is being submitted or skipped (scan too old, could not tell, never scanned, search not
+  validated, cannot be searched). A person with no usable result is told so, and told to run
+  `aidr scan` again.
+- If NO person has a usable result (none recorded, or every one is too old, could not tell, or
+  was made for different details), `--found-only` refuses to start and tells you to run
+  `aidr scan` first: otherwise it would be a full run that only looks filtered.
 - It combines with `--only`, `--skip` and `--retry-failed` (each narrows the list
   further), `--dry-run` and `--pollute`. It is refused with `--resume` (a checkpoint is a
   position in the full list) and `--captchas` (which picks its own brokers). Like any

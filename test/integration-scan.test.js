@@ -184,6 +184,37 @@ test('found-only: a sighting made by an ordinary run is not a scan, so it still 
   });
 });
 
+test('found-only: with only stale or could-not-tell results it refuses, and opens no browser (S2)', async () => {
+  // Scanned on day 0, run on day 31 with the default config used to be a full run whose only
+  // line was "Filter applied - N broker(s) will run".
+  const state = { optOuts: {}, scans: {
+    Spokeo: { at: daysAgo(31), outcome: 'found', listingUrl: 'https://www.spokeo.com/x', fp: personFingerprint(ADA), sh: shOf('Spokeo') },
+    USPhonebook: { at: daysAgo(1), outcome: 'unknown', reason: 'search failed: bot wall', fp: personFingerprint(ADA), sh: shOf('USPhonebook') },
+  } };
+  await inSandbox({ config: oneAda(), state }, async (sandbox) => {
+    const r = await runWatcher(sandbox, ['--found-only']);
+    assert.equal(r.code, 1);
+    assert.match(r.stderr, /no usable scan result/);
+    assert.match(r.stderr, /Run `aidr scan` first/);
+    assert.deepEqual(sandbox.fakeEvents().filter(e => e.event === 'launch'), []);
+  });
+});
+
+test('found-only: says per person what the scan gave it to go by, and when one person has nothing usable (S2)', async () => {
+  const ALAN = runnableConfig().persons[1];
+  const state = { optOuts: {}, scans: {
+    'USPhonebook|Ada Lovelace': { at: daysAgo(2), outcome: 'not_found', fp: personFingerprint(ADA), sh: shOf('USPhonebook') },
+  } };
+  await inSandbox({ config: runnableConfig({ persons: [ADA, ALAN] }), state }, async (sandbox) => {
+    const r = await runWatcher(sandbox, ['--found-only', '--only', 'USPhonebook']);
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(r.stdout, /--found-only for Ada Lovelace: 0 listed \(submitted\), 1 not listed \(skipped\)\./);
+    assert.match(r.stdout, /--found-only for Alan Turing: 0 listed \(submitted\), 0 not listed \(skipped\)\./);
+    assert.match(r.stdout, /Alan Turing has no usable scan result[^\n]*run `aidr scan` again/);
+    assert.doesNotMatch(r.stdout, /Ada Lovelace has no usable scan result/);
+  });
+});
+
 test('found-only: found is submitted, not_found is skipped with its reason, an unscanned broker follows scan.unknown', async () => {
   const state = { optOuts: {}, scans: {
     Spokeo: { at: daysAgo(2), outcome: 'found', listingUrl: 'https://www.spokeo.com/Ada-Lovelace', fp: personFingerprint(ADA), sh: shOf('Spokeo') },

@@ -44,8 +44,8 @@ const { resolvePaths } = require('./lib/paths');
 const { openJournal, journalPathFor, countResults } = require('./lib/journal');
 const { startHeartbeat, defaultHeartbeatPath, outcomeFromResults } = require('./lib/heartbeat');
 const { OFFLINE_HINT } = require('./lib/outage');
-const { applyFoundOnly, hasAnyScan } = require('./lib/scan');
-const { scanReportLines } = require('./lib/scan-report');
+const { applyFoundOnly, hasUsableScan } = require('./lib/scan');
+const { scanReportLines, foundOnlyOverview } = require('./lib/scan-report');
 const { scanSettings } = require('./lib/scan-config');
 const { applyRetention } = require('./lib/retention');
 const { isPlaceholderKey, detectAndSolveCaptcha } = require('./lib/captcha');
@@ -1524,6 +1524,9 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
       const plan = applyFoundOnly({ brokers: sorted, person, personCount: persons.length, persons, personIndex: index, state, config, now: new Date() });
       foundOnlySkips = plan.skipped;
       sorted = plan.submit;
+      // What the scan gave this run to go by, said before the pass: a full run must not be
+      // able to pass for a filtered one without a word (S2).
+      for (const line of foundOnlyOverview({ plan, config, name: persons.length > 1 ? personName(person) : '' })) console.log(line);
     }
 
     if (ONLY_ARG || SKIP_ARG || RETRY_FAILED || CAPTCHAS || FOUND_ONLY) {
@@ -1887,10 +1890,12 @@ async function dispatch() {
   if (!DRY_RUN) exitOnUnreadableState();
   const state = loadState();
 
-  // --found-only judges each broker by the latest scan. With no scan at all that would
-  // be every broker "never scanned", so say how to get one instead of starting.
-  if (FOUND_ONLY && !hasAnyScan(state)) {
-    console.error('Error: --found-only needs a scan to go by, and none has been recorded yet. Run `aidr scan` first.');
+  // --found-only judges each broker by the latest scan. With no usable result for anyone (none
+  // recorded, or every one too old, could not tell, or made for other details) that would be
+  // every broker "never scanned" and a full run dressed up as a filtered one, so say how to get
+  // one instead of starting.
+  if (FOUND_ONLY && !hasUsableScan({ brokersFor: (p) => require('./brokers').forPerson(p), persons, state, config, now: new Date() })) {
+    console.error('Error: --found-only has no usable scan result to go by (none recorded, or every one is older than scan.maxAgeDays, could not tell, or was made for different details). Run `aidr scan` first.');
     process.exit(1);
   }
 
