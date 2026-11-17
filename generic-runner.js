@@ -56,6 +56,7 @@ const { patternsFor, langOf } = require('./lib/locale-patterns');
 const { CONFIRM_RECHECK_DAYS, loadConfig, readEntry, brokerPart, CONFIG_PATH, CONFIG_ENC_PATH } = require('./lib/config');
 const { withRetry } = require('./lib/retry');
 const { isAllowlisted } = require('./lib/filter');
+const { SHARED_PLATFORM_DOMAINS, bareHost, registrableDomain } = require('./lib/domains');
 const { acceptOptOutDialogs } = require('./lib/browser');
 const { armSubmitWatch } = require('./lib/submit-watch');
 const { redactIdentity } = require('./lib/redact-identity');
@@ -1199,32 +1200,8 @@ const FREE_MAIL_DOMAINS = new Set([
   'aol.com', 'icloud.com', 'me.com', 'proton.me', 'protonmail.com', 'gmx.com', 'mail.com',
 ]);
 
-// Domains shared by many unrelated organisations: an explicit broker on one of
-// them says nothing about a different company's page on the same domain (a
-// PureCars opt-out Google Form is not Google's "Results about you"). Only an
-// exact host match counts there.
-const SHARED_PLATFORM_DOMAINS = new Set([
-  'google.com', 'microsoft.com', 'live.com', 'ca.gov', 'force.com', 'salesforce.com', 'zendesk.com',
-  'onetrust.com', 'trustarc.com', 'osano.com', 'termly.io', 'iubenda.com', 'transcend.io', 'ketch.com',
-  'typeform.com', 'jotform.com', 'formstack.com', 'airtable.com', 'notion.site', 'github.io', 'wordpress.com',
-  'wixsite.com', 'squarespace.com', 'herokuapp.com', 'azurewebsites.net', 'amazonaws.com', 'cloudfront.net',
-]);
-
-const MULTI_LABEL_SUFFIXES = new Set([
-  'co.uk', 'org.uk', 'ac.uk', 'gov.uk', 'com.au', 'net.au', 'org.au', 'co.nz', 'co.jp', 'co.in', 'com.br', 'com.mx', 'co.za',
-]);
-
-function bareHost(host) {
-  return String(host || '').toLowerCase().replace(/^www\./, '').replace(/\.$/, '');
-}
-
-/** Approximate registrable domain (eTLD+1) without a public-suffix list. */
-function registrableDomain(host) {
-  const labels = bareHost(host).split('.').filter(Boolean);
-  if (labels.length <= 2) return labels.join('.');
-  const lastTwo = labels.slice(-2).join('.');
-  return MULTI_LABEL_SUFFIXES.has(lastTwo) ? labels.slice(-3).join('.') : lastTwo;
-}
+// SHARED_PLATFORM_DOMAINS, MULTI_LABEL_SUFFIXES, bareHost and registrableDomain live in
+// lib/domains.js so the registry feeds and the DROP coverage rule use the same ones.
 
 const LEGAL_SUFFIXES = new Set(['inc', 'llc', 'ltd', 'limited', 'corp', 'corporation', 'co', 'company', 'lp', 'llp', 'plc', 'gmbh', 'sa', 'ag', 'bv', 'pty', 'pllc']);
 
@@ -1472,7 +1449,10 @@ function loadGenericBrokers(explicitBrokerHosts, extra = {}) {
             const host = new URL(url).hostname.replace(/^www\./, '');
             if (seen.has(host) || covered(row.name, host)) continue;
             seen.add(host);
-            brokers.push(withTrust({ name: row.name || host, url, source: row.source || 'feed', method: row.method }, row));
+            // `registries` rides along: DROP coverage reads it to know a row is a registry broker
+            // even when its opt-out page is on a shared form platform (lib/drop.js).
+            const registries = Array.isArray(row.registries) ? { registries: row.registries } : {};
+            brokers.push(withTrust({ name: row.name || host, url, source: row.source || 'feed', method: row.method, ...registries }, row));
           } catch(_) {}
         }
       }

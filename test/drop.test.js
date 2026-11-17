@@ -178,7 +178,9 @@ test('coverageReason names the date; makeCoveredByDrop works on generic rows by 
 test('makeCoveredByDrop returns null when it can never cover anything (no state work for other people)', () => {
   assert.equal(drop.makeCoveredByDrop({ person: BOB, state: {}, config: {}, registryHosts: REGISTRY }), null);
   assert.equal(drop.makeCoveredByDrop({ person: JANE, state: STATE_WITH_DROP, config: { drop: { alsoSubmit: true } }, registryHosts: REGISTRY }), null);
-  assert.equal(drop.makeCoveredByDrop({ person: JANE, state: STATE_WITH_DROP, config: {}, registryHosts: {} }), null);
+  const empty = drop.makeCoveredByDrop({ person: JANE, state: STATE_WITH_DROP, config: {}, registryHosts: {} });
+  assert.equal(empty({ name: 'Bundled', url: 'https://acme-data.example/optout' }), null, 'no registry list: a bundled row is submitted');
+  assert.match(empty({ name: 'Feed', url: 'https://x.example/optout', registries: ['CA'] }), /covered/, 'a feed row says CA itself');
 });
 
 test('dropConfigProblems: only a non-boolean alsoSubmit is a problem', () => {
