@@ -131,6 +131,14 @@ test('rule 1: a redirect to a different company under the same two-part suffix i
   await couldNotTell(page, broker);
 });
 
+test('rule 1: a listing-looking link on a page from another site is not trusted (a parked lander can copy the broker\'s links)', async () => {
+  const page = makePage({ probe: probeResult({
+    url: 'https://parked.example.net/lander?d=example.com',
+    links: [{ href: LISTING, text: 'Jane Sample' }],
+  }) });
+  await couldNotTell(page);
+});
+
 test('rule 1: www and a subdomain on the same registrable domain are the same site', async () => {
   const page = makePage({ probe: probeResult({ url: 'https://search.example.com/results?q=x' }) });
   assert.equal(await findListingUrl(page, BROKER, PERSON), null);
