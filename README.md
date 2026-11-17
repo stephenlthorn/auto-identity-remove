@@ -944,7 +944,11 @@ submitting. That sighting counts as evidence for `aidr verify` but does not coun
 scan for `--found-only`.
 
 **Evidence-backed removal.** A removal is verified only when a listing was seen before
-(by a scan, a run's own search or an earlier verify) and is gone after. If `aidr verify`
+(by a scan, a run's own search or an earlier verify) and is gone after. For a broker whose
+opt-out starts with the search (method `search-form`, such as Spokeo) a recorded submission is
+itself a sighting, because the run only submits after its own search found a listing: state
+from before scans existed still counts. A broker that merely has a search step but submits
+without looking (USPhonebook) does not get that credit. If `aidr verify`
 finds an empty search page and no listing was ever seen, it reports `never seen`, which
 is not counted as a removal in the exposure score, the monthly report or the complaints.
 

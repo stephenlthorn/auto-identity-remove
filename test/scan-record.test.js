@@ -86,6 +86,20 @@ test('hasSeenListing: a scan that found one, a verify that found one, or neither
   assert.equal(hasSeenListing({ optOuts: {} }, 'D', jane, 1), false);
 });
 
+test('hasSeenListing: for a search-form broker a recorded submission is itself a sighting (S3)', () => {
+  // The runner reaches recordSuccess for a search-form broker only after its own search found a
+  // listing (lib/broker-runner.js returns "Not listed" before the opt-out page otherwise), so a
+  // submission made before 2.2, which wrote no scan record, still proves a listing was there.
+  const upgraded = { optOuts: { Spokeo: { lastSuccess: daysBefore(20) } } };
+  assert.equal(hasSeenListing(upgraded, 'Spokeo', jane, 1, { method: 'search-form' }), true);
+});
+
+test('hasSeenListing: a direct-form broker that merely has a search step is not a sighting from lastSuccess (S3)', () => {
+  const upgraded = { optOuts: { USPhonebook: { lastSuccess: daysBefore(20) } } };
+  assert.equal(hasSeenListing(upgraded, 'USPhonebook', jane, 1, { method: 'direct-form' }), false);
+  assert.equal(hasSeenListing(upgraded, 'USPhonebook', jane, 1), false, 'no method given: not assumed');
+});
+
 test('hasSeenListing: an old verifiedDeletedAt is not a sighting', () => {
   const legacy = { optOuts: { A: { lastSuccess: daysBefore(20), verifiedDeletedAt: daysBefore(10) } } };
   assert.equal(hasSeenListing(legacy, 'A', jane, 1), false);

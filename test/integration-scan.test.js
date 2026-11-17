@@ -141,21 +141,26 @@ test('scan then run --found-only: found is submitted, not found is skipped, and 
   });
 });
 
-test('verify: an empty search is "never seen" with no sighting and "verified_clear" with one', async () => {
+test('verify: an empty search is "never seen" with no sighting and "verified_clear" with one (a scan, or a search-form submission)', async () => {
+  // Spokeo is a search-form broker: its run searched before it submitted, so its lastSuccess is a
+  // sighting even with no scan record (state from before 2.2). USPhonebook submits without looking and
+  // has no scan: never seen. Nuwber has a scan that saw a listing.
   const state = { optOuts: {
     Spokeo: { lastSuccess: daysAgo(10), lastAttempt: daysAgo(10) },
     USPhonebook: { lastSuccess: daysAgo(10), lastAttempt: daysAgo(10) },
-  }, scans: { USPhonebook: { at: daysAgo(20), outcome: 'found', lastFoundAt: daysAgo(20), listingUrl: 'https://listing.example/USPhonebook', sh: shOf('USPhonebook') } } };
+    Nuwber: { lastSuccess: daysAgo(10), lastAttempt: daysAgo(10) },
+  }, scans: { Nuwber: { at: daysAgo(20), outcome: 'found', lastFoundAt: daysAgo(20), listingUrl: 'https://listing.example/Nuwber', sh: shOf('Nuwber') } } };
   await inSandbox({ config: oneAda(), state }, async (sandbox) => {
     const r = await runWatcher(sandbox, ['--verify'], withSearchAnswers(sandbox, []));
     assert.equal(r.code, 0, r.stderr);
-    assert.match(r.stdout, /verified_clear : 1/);
+    assert.match(r.stdout, /verified_clear : 2/);
     assert.match(r.stdout, /never_seen     : 1/);
-    assert.match(r.stdout, /Never seen \(nothing there now[^\n]*\n\s+- Spokeo/);
+    assert.match(r.stdout, /Never seen \(nothing there now[^\n]*\n\s+- USPhonebook/);
     const after = sandbox.readState().optOuts;
-    assert.ok(after.USPhonebook.verifiedDeletedAt, 'seen before, gone now: a removal');
-    assert.ok(after.Spokeo.verifiedAbsentAt, 'never seen: recorded apart');
-    assert.equal(after.Spokeo.verifiedDeletedAt, undefined);
+    assert.ok(after.Spokeo.verifiedDeletedAt, 'a search-form submission was itself a sighting');
+    assert.ok(after.Nuwber.verifiedDeletedAt, 'seen by a scan, gone now: a removal');
+    assert.ok(after.USPhonebook.verifiedAbsentAt, 'never seen: recorded apart');
+    assert.equal(after.USPhonebook.verifiedDeletedAt, undefined);
   });
 });
 

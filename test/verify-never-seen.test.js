@@ -22,11 +22,15 @@ const searchBroker = (name, extra = {}) => ({
 // A scan counts as a sighting for the search it was made with (S1): this is Alpha's.
 const ALPHA_SEARCH = searchHash('https://alpha.example/search');
 
+// A direct-form broker that merely HAS a search step: its submission never depended on a listing,
+// so nothing but a scan or a verify can say one was there (S3). A search-form broker's run searches first.
+const directWithSearch = (name) => searchBroker(name, { method: 'direct-form', optOutUrl: `https://${name.toLowerCase()}.example/optout` });
+
 const verify = (state, brokers, findUrl) => runVerify(context, brokers, [JANE], { state, findUrl });
 
 test('no listing now and none ever seen: never_seen, in its own list, under its own field', async () => {
   const state = { optOuts: { Alpha: { lastSuccess: daysAgo(10) } } };
-  const result = await verify(state, [searchBroker('Alpha')], async () => null);
+  const result = await verify(state, [directWithSearch('Alpha')], async () => null);
 
   assert.deepEqual(result.never_seen.map(e => e.broker), ['Alpha']);
   assert.equal(result.verified_clear.length, 0);
@@ -35,6 +39,23 @@ test('no listing now and none ever seen: never_seen, in its own list, under its 
   assert.ok(entry.verifiedAbsentAt, 'recorded under verifiedAbsentAt');
   assert.equal(entry.verifiedDeletedAt, undefined, 'never under verifiedDeletedAt: it is not a removal');
   assert.equal(entry.verifyHistory.at(-1).outcome, 'never_seen');
+});
+
+test('S3: a search-form broker submitted before scans existed was seen when it was submitted: an empty search is a removal', async () => {
+  // Spokeo's run searches first and returns "Not listed - nothing to remove" without a listing, so
+  // its lastSuccess is itself a sighting. Upgrading users have no scan record at all.
+  const state = { optOuts: { Alpha: { lastSuccess: daysAgo(10) } } };
+  const result = await verify(state, [searchBroker('Alpha')], async () => null);
+  assert.deepEqual(result.verified_clear.map(e => e.broker), ['Alpha']);
+  assert.equal(result.never_seen.length, 0);
+  assert.ok(state.optOuts.Alpha.verifiedDeletedAt);
+});
+
+test('S3: the same state on a direct-form broker with a search step is still never_seen', async () => {
+  const state = { optOuts: { Alpha: { lastSuccess: daysAgo(10) } } };
+  const result = await verify(state, [directWithSearch('Alpha')], async () => null);
+  assert.equal(result.verified_clear.length, 0);
+  assert.deepEqual(result.never_seen.map(e => e.broker), ['Alpha']);
 });
 
 test('no listing now but a scan saw one earlier: verified_clear, a real removal', async () => {
@@ -56,7 +77,7 @@ test('a sighting made by a different search (or by older code, with no hash) is 
       optOuts: { Alpha: { lastSuccess: daysAgo(10) } },
       scans: { Alpha: { at: daysAgo(20), outcome: 'found', lastFoundAt: daysAgo(20), ...(sh ? { sh } : {}) } },
     };
-    const result = await verify(state, [searchBroker('Alpha', { method: 'direct-form', optOutUrl: 'https://alpha.example/o' })], async () => null);
+    const result = await verify(state, [directWithSearch('Alpha')], async () => null);
     assert.equal(result.verified_clear.length, 0, String(sh));
     assert.equal(result.never_seen.length, 1, String(sh));
   }
