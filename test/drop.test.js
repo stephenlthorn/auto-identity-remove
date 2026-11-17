@@ -407,3 +407,24 @@ test('runDrop accepts --on for the UTC day when the local day is still behind it
   assert.equal(r.code, 0);
   assert.equal(state.drop['Jane Sample'].submittedAt, '2026-11-18');
 });
+
+// ─── D12: hosts the way the real registry has them ──────────────────────────
+
+const REAL = { 'acme-data.example': ['CA'], 'ukdata.co.uk': ['CA'], 'onetrust.com': ['CA'], 'google.com': ['CA'], 'co.uk': ['CA'] };
+const coveredReal = (host, extra = {}) => drop.isCoveredByDrop({ person: JANE, state: STATE_WITH_DROP, config: {}, host, registryHosts: drop.loadRegistryHosts({ readFile: () => JSON.stringify({ registryHosts: REAL }) }), ...extra });
+
+test('coverage on real-looking hosts: www, subdomains, multi-part suffixes and shared platforms', () => {
+  assert.equal(coveredReal('www.acme-data.example'), true);
+  assert.equal(coveredReal('rights.eu.acme-data.example'), true);
+  assert.equal(coveredReal('shop.ukdata.co.uk'), true);
+  assert.equal(coveredReal('https://www.ukdata.co.uk/privacy'), true);
+  assert.equal(coveredReal('another.co.uk'), false, 'a different company under the same suffix');
+  assert.equal(coveredReal('privacyportal.onetrust.com'), false);
+  assert.equal(coveredReal('docs.google.com'), false);
+  assert.equal(coveredReal('privacyportal.onetrust.com', { registries: ['CA'] }), true, 'unless the row itself says it is a registry broker');
+});
+
+test('loadRegistryHosts keeps the multi-part-suffix company and drops the suffix and the platforms', () => {
+  const hosts = drop.loadRegistryHosts({ readFile: () => JSON.stringify({ registryHosts: REAL }) });
+  assert.deepEqual(Object.keys(hosts).sort(), ['acme-data.example', 'ukdata.co.uk']);
+});

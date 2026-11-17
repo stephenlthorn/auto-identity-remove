@@ -214,3 +214,16 @@ test('a mistyped drop.alsoSubmit submits the covered row and the run says why, o
     assert.equal(r.stdout.split('\n').filter(l => /drop\.alsoSubmit must be true or false/.test(l)).length, 1, r.stdout);
   } finally { sandbox.cleanup(); }
 });
+
+// D12: a bundled row on a shared form platform is never "covered" by a platform domain.
+test('a bundled row on a shared form platform is still visited, even if the registry file lists the platform', async () => {
+  const platformRow = { name: 'Path2Response LLC', host: 'privacyportal-cdn.onetrust.com' };
+  const sandbox = createSandbox({ config: config([person()]), state: { optOuts: {}, drop: { 'Jane Sample': { submittedAt: '2026-09-01' } } } });
+  try {
+    writeRegistry(sandbox, { 'onetrust.com': ['CA'], 'co.uk': ['CA'], 'acme-data.example': ['CA'] });
+    const r = await runWatcher(sandbox, ['--only', platformRow.name]);
+    assert.equal(r.code, 0, r.stdout + r.stderr);
+    assert.equal(sandbox.networkAttempts().some(e => String(e.host || e.url || '').includes(platformRow.host)), true, 'the portal host was looked up');
+    assert.doesNotMatch(r.stdout, /covered by DROP/);
+  } finally { sandbox.cleanup(); }
+});

@@ -12,6 +12,8 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
+const crypto = require('node:crypto');
+
 const gr = require('../generic-runner');
 const drop = require('../lib/drop');
 const logger = require('../lib/logger');
@@ -28,7 +30,7 @@ const ROWS = () => [
   { name: 'Unlisted Co', url: 'https://unlisted.example/optout', source: 'markup' },
 ];
 
-async function pass({ person, state = RECORDED, config = {}, registryHosts = REGISTRY, extra = {} }) {
+async function pass({ person, state = RECORDED, config = {}, registryHosts = REGISTRY, rows = ROWS(), extra = {} }) {
   const visited = [];
   const logged = [];
   const saved = [];
@@ -43,7 +45,7 @@ async function pass({ person, state = RECORDED, config = {}, registryHosts = REG
     {
       person,
       personCount: 1,
-      injectedBrokers: ROWS(),
+      injectedBrokers: rows,
       injectedProcessFn: async (_p, broker) => { visited.push(broker.name); return { status: 'success', detail: 'ok' }; },
       ...(coveredByDrop ? { coveredByDrop } : {}),
       ...extra,
@@ -93,6 +95,8 @@ test('the option is optional: runGenericBrokers without it behaves as before', a
   assert.equal(result.genericStats.covered_by_drop, 0);
 });
 
+const keyHash = (name) => crypto.createHash('sha1').update(name).digest('hex').slice(0, 10);
+
 test('a covered row counts as finished in the resume checkpoint, and an --only filter still applies first', async () => {
   const checkpoints = [];
   const { visited } = await pass({
@@ -100,6 +104,32 @@ test('a covered row counts as finished in the resume checkpoint, and an --only f
     extra: { saveCheckpoint: (r) => checkpoints.push(r), checkpointDone: true, include: (n) => n !== 'Unlisted Co', now: () => checkpoints.length * 60000 },
   });
   assert.deepEqual(visited, ['Vermont Only']);
+  // Queue after the filter: Acme Data (covered), Vermont Only, VT Too (covered). The only row
+  // that runs is the second, so there is exactly one checkpoint, written before it runs.
+  assert.equal(checkpoints.length, 1);
+  assert.equal(checkpoints[0].phase, 'generic');
+  assert.equal(checkpoints[0].key, 'Vermont Only');
+  assert.equal(checkpoints[0].index, 1);
+  assert.deepEqual(checkpoints[0].done, [keyHash('Acme Data')], 'the covered row before it is listed as finished');
+  assert.equal(checkpoints[0].done.includes(keyHash('Unlisted Co')), false, 'a row the filter removed was never in the queue');
+});
+
+// D12: fixtures that look like the real registry, not already-reduced .example domains.
+const ROWS_REAL = () => [
+  { name: 'Portal Row', url: 'https://privacyportal.onetrust.com/webform/abc/def', source: 'markup' },
+  { name: 'Portal Feed Row', url: 'https://privacyportal.onetrust.com/webform/ghi/jkl', source: 'feed', registries: ['CA'] },
+  { name: 'UK Data', url: 'https://shop.ukdata.co.uk/optout', source: 'feed' },
+  { name: 'Other UK', url: 'https://another.co.uk/optout', source: 'markup' },
+  { name: 'WWW Host', url: 'https://www.acme-data.example/optout', source: 'markup' },
+  { name: 'Deep Subdomain', url: 'https://a.b.acme-data.example/optout', source: 'markup' },
+];
+const REAL_REGISTRY = { 'ukdata.co.uk': ['CA'], 'acme-data.example': ['CA'], 'onetrust.com': ['CA'], 'co.uk': ['CA'] };
+
+test('shared platforms, public suffixes, www and subdomains behave like real registry hosts', async () => {
+  const { visited, logged } = await pass({ person: JANE, rows: ROWS_REAL(), registryHosts: REAL_REGISTRY });
+  assert.deepEqual(visited, ['Portal Row', 'Other UK'], 'a portal page with no registries field, and an unrelated .co.uk, are submitted');
+  const skipped = logged.filter(l => l.status === 'skipped').map(l => l.name).sort();
+  assert.deepEqual(skipped, ['Deep Subdomain', 'Portal Feed Row', 'UK Data', 'WWW Host']);
 });
 
 test('the run summary says how many rows DROP covered', () => {
