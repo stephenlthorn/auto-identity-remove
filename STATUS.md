@@ -6,7 +6,7 @@
 
 The last check ran on 2026-11-17, from a run on a developer machine.
 
-**14 ok, 9 drifted, 20 blocked, 0 dead, 1 error** out of 44 brokers with a page to check; 4 n/a (email brokers have no page).
+**12 ok, 13 drifted, 18 blocked, 0 dead, 1 error** out of 44 brokers with a page to check; 4 n/a (email brokers have no page).
 
 ## Health labels
 
@@ -51,7 +51,7 @@ If you encounter a broker that has changed its form, please file a GitHub issue 
 |---|---|---|---|---|---|---|
 | Spokeo | search-form | no | blocked | 2026-11-17 | yes | yes (not checked) |
 | WhitePages | search-form | no | blocked | 2026-11-17 | yes | yes (not checked) |
-| FastPeopleSearch | search-form | no | ok | 2026-11-17 | yes | yes (not checked) |
+| FastPeopleSearch | search-form | no | drifted | 2026-11-17 | yes | yes (not checked) |
 | TruePeopleSearch | direct-form | no | blocked | 2026-11-17 | yes | no |
 | BeenVerified | direct-form | yes | blocked | 2026-11-17 | yes | no |
 | Intelius | direct-form | no | blocked | 2026-11-17 | no | no |
@@ -60,16 +60,16 @@ If you encounter a broker that has changed its form, please file a GitHub issue 
 | MyLife | search-form | yes | blocked | 2026-11-17 | no | yes (not checked) |
 | Nuwber | search-form | no | blocked | 2026-11-17 | no | yes (not checked) |
 | FamilyTreeNow | direct-form | yes | blocked | 2026-11-17 | no | no |
-| CheckPeople | direct-form | no | ok | 2026-11-17 | no | no |
+| CheckPeople | direct-form | no | drifted | 2026-11-17 | no | no |
 | ThatsThem | direct-form | no | blocked | 2026-11-17 | no | no |
 | USPhonebook | direct-form | yes | ok | 2026-11-17 | yes | yes (2026-11-17) |
-| SmartBackgroundChecks | direct-form | no | blocked | 2026-11-17 | no | no |
+| SmartBackgroundChecks | direct-form | no | drifted | 2026-11-17 | no | no |
 | SearchPeopleFree | direct-form | no | blocked | 2026-11-17 | no | no |
-| PeopleSearchNow | direct-form | no | ok | 2026-11-17 | no | no |
+| PeopleSearchNow | direct-form | no | drifted | 2026-11-17 | no | no |
 | InfoTracer | direct-form | no | drifted | 2026-11-17 | no | no |
-| SocialCatfish | direct-form | no | blocked | 2026-11-17 | no | no |
+| SocialCatfish | direct-form | no | drifted | 2026-11-17 | no | no |
 | NationalPublicData | direct-form | no | blocked | 2026-11-17 | no | no |
-| PrivateRecords | direct-form | no | ok | 2026-11-17 | no | no |
+| PrivateRecords | direct-form | no | drifted | 2026-11-17 | no | no |
 | Acxiom | direct-form | no | drifted | 2026-11-17 | no | no |
 | LexisNexis | direct-form | no | drifted | 2026-11-17 | no | no |
 | ZoomInfo | manual | n/a | blocked | 2026-11-17 | no | no |
@@ -80,14 +80,14 @@ If you encounter a broker that has changed its form, please file a GitHub issue 
 | TruthFinder | direct-form | no | blocked | 2026-11-17 | no | no |
 | InstantCheckmate | direct-form | no | blocked | 2026-11-17 | no | no |
 | Spokeo (email) | email | n/a | n/a | 2026-11-17 | no | no |
-| Epsilon | direct-form | no | blocked | 2026-11-17 | no | no |
+| Epsilon | direct-form | no | drifted | 2026-11-17 | no | no |
 | Oracle Data Cloud | direct-form | no | drifted | 2026-11-17 | no | no |
-| Equifax (marketing) | direct-form | no | drifted | 2026-11-17 | no | no |
-| Experian (marketing) | direct-form | no | error | 2026-11-17 | no | no |
+| Equifax (marketing) | direct-form | no | error | 2026-11-17 | no | no |
+| Experian (marketing) | direct-form | no | blocked | 2026-11-17 | no | no |
 | DataAxle | direct-form | no | drifted | 2026-11-17 | no | no |
 | Truecaller | manual | n/a | ok | 2026-11-17 | no | no |
-| Sync.ME | direct-form | yes | drifted | 2026-11-17 | yes | no |
-| CallApp | direct-form | no | drifted | 2026-11-17 | no | no |
+| Sync.ME | direct-form | yes | ok | 2026-11-17 | yes | no |
+| CallApp | direct-form | no | ok | 2026-11-17 | no | no |
 | NumLookup | direct-form | no | ok | 2026-11-17 | yes | no |
 | Hiya | email | n/a | n/a | 2026-11-17 | no | no |
 | Eyecon | email | n/a | n/a | 2026-11-17 | no | no |
