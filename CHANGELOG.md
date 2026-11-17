@@ -30,7 +30,7 @@ California's one-request deletion platform, broker lists that are current again,
 
 ### How it was checked
 
-Written test-first. An independent review of the release branch found 2 P1, 4 P2 and 7 P3 issues before release; all are fixed, each with a test that failed first. A mutation check then planted bugs in the new rules one at a time to see whether the tests notice.
+Written test-first. An independent review of the release branch found 2 P1, 4 P2 and 7 P3 issues before release; all are fixed, each with a test that failed first. A mutation check then planted 22 chosen bugs in the new rules, all of which the tests caught, and about 27 more: 7 slipped through and now have tests.
 
 ## 2.0.1 - 2026-10-30
 
