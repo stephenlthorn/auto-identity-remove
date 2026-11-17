@@ -103,6 +103,14 @@ describe('checkBroker against fixture pages', { skip: executablePath ? false : '
     assert.equal(r.status, 'ok', r.detail);
   });
 
+  test('a Playwright-only selector (:has-text) is evaluated by Playwright, not reported as drift', async () => {
+    const present = await check(broker('/ok', { submitSelector: 'button[type="submit"]:has-text("Remove")' }));
+    assert.equal(present.status, 'ok', present.detail);
+    const absent = await check(broker('/ok', { submitSelector: 'button[type="submit"]:has-text("Nonexistent")' }));
+    assert.equal(absent.status, 'drifted');
+    assert.deepEqual(absent.missing, ['button[type="submit"]:has-text("Nonexistent")']);
+  });
+
   test('a manual broker only has to answer', async () => {
     const r = await check(broker('/ok', { method: 'manual', formFields: undefined, submitSelector: undefined }));
     assert.equal(r.status, 'ok');

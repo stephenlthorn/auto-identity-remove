@@ -4,9 +4,9 @@
 >
 > **Limits, plainly:** the check looks at the shape of the form. It never types, clicks or submits, so it cannot tell you whether a submission deletes anything. `aidr verify` is the check for that. And the weekly job runs from a data centre address that some sites refuse, so a page can be `blocked` here and fine from your home connection. `aidr doctor --brokers` runs the same check from your own machine.
 
-No health check has been recorded yet.
+The last check ran on 2026-11-17, from a run on a developer machine.
 
-No health check has covered these brokers yet, so every row says "not checked yet".
+**15 ok, 11 drifted, 20 blocked, 0 dead, 1 error** out of 47 brokers with a page to check; 4 n/a (email brokers have no page).
 
 ## Health labels
 
@@ -47,57 +47,57 @@ If you encounter a broker that has changed its form, please file a GitHub issue 
 
 | Broker | Method | CAPTCHA | Health | Checked | US-only | Search step |
 |---|---|---|---|---|---|---|
-| California DELETE Portal | manual | n/a | not checked yet | - | no | no |
-| Spokeo | search-form | no | not checked yet | - | yes | yes (not checked) |
-| WhitePages | search-form | no | not checked yet | - | yes | yes (not checked) |
-| FastPeopleSearch | search-form | no | not checked yet | - | yes | yes (not checked) |
-| TruePeopleSearch | direct-form | no | not checked yet | - | yes | no |
-| BeenVerified | direct-form | yes | not checked yet | - | yes | no |
-| Radaris | search-form | no | not checked yet | - | no | yes (not checked) |
-| Intelius | direct-form | no | not checked yet | - | no | no |
-| PeopleFinders | direct-form | no | not checked yet | - | no | no |
-| PeopleSmart | direct-form | no | not checked yet | - | no | no |
-| MyLife | search-form | yes | not checked yet | - | no | yes (not checked) |
-| Nuwber | search-form | no | not checked yet | - | no | yes (not checked) |
-| FamilyTreeNow | direct-form | yes | not checked yet | - | no | no |
-| CheckPeople | direct-form | no | not checked yet | - | no | no |
-| ThatsThem | direct-form | no | not checked yet | - | no | no |
-| USPhonebook | direct-form | yes | not checked yet | - | yes | no |
-| SmartBackgroundChecks | direct-form | no | not checked yet | - | no | no |
-| SearchPeopleFree | direct-form | no | not checked yet | - | no | no |
-| PeopleSearchNow | direct-form | no | not checked yet | - | no | no |
-| InfoTracer | direct-form | no | not checked yet | - | no | no |
-| SocialCatfish | direct-form | no | not checked yet | - | no | no |
-| NationalPublicData | direct-form | no | not checked yet | - | no | no |
-| PrivateRecords | direct-form | no | not checked yet | - | no | no |
-| Acxiom | direct-form | no | not checked yet | - | no | no |
-| LexisNexis | direct-form | no | not checked yet | - | no | no |
-| ZoomInfo | manual | n/a | not checked yet | - | no | no |
-| Clearbit | manual | n/a | not checked yet | - | no | no |
-| Andrews Wharton | manual | n/a | not checked yet | - | no | no |
-| PeekYou | direct-form | no | not checked yet | - | no | no |
-| Addresses.com | direct-form | no | not checked yet | - | no | no |
-| AnyWho | direct-form | no | not checked yet | - | no | no |
-| TruthFinder | direct-form | no | not checked yet | - | no | no |
-| InstantCheckmate | direct-form | no | not checked yet | - | no | no |
-| Spokeo (email) | email | n/a | not checked yet | - | no | no |
-| Epsilon | direct-form | no | not checked yet | - | no | no |
-| Oracle Data Cloud | direct-form | no | not checked yet | - | no | no |
-| Equifax (marketing) | direct-form | no | not checked yet | - | no | no |
-| Experian (marketing) | direct-form | no | not checked yet | - | no | no |
-| DataAxle | direct-form | no | not checked yet | - | no | no |
-| Truecaller | manual | n/a | not checked yet | - | no | no |
-| Sync.ME | direct-form | yes | not checked yet | - | yes | no |
-| CallApp | direct-form | no | not checked yet | - | no | no |
-| NumLookup | direct-form | no | not checked yet | - | yes | no |
-| Hiya | email | n/a | not checked yet | - | no | no |
-| Eyecon | email | n/a | not checked yet | - | no | no |
-| National Do Not Call Registry | manual | n/a | not checked yet | - | yes | no |
-| Spy Dialer | manual | n/a | not checked yet | - | yes | no |
-| Pipl | email | n/a | not checked yet | - | no | no |
-| Google - Results About You | manual | n/a | not checked yet | - | no | no |
-| Google - Outdated Content | manual | n/a | not checked yet | - | no | no |
-| CalPrivacy DROP | manual | n/a | not checked yet | - | no | no |
+| California DELETE Portal | manual | n/a | ok | 2026-11-17 | no | no |
+| Spokeo | search-form | no | blocked | 2026-11-17 | yes | yes (not checked) |
+| WhitePages | search-form | no | blocked | 2026-11-17 | yes | yes (not checked) |
+| FastPeopleSearch | search-form | no | ok | 2026-11-17 | yes | yes (not checked) |
+| TruePeopleSearch | direct-form | no | blocked | 2026-11-17 | yes | no |
+| BeenVerified | direct-form | yes | blocked | 2026-11-17 | yes | no |
+| Radaris | search-form | no | drifted | 2026-11-17 | no | yes (not checked) |
+| Intelius | direct-form | no | blocked | 2026-11-17 | no | no |
+| PeopleFinders | direct-form | no | blocked | 2026-11-17 | no | no |
+| PeopleSmart | direct-form | no | drifted | 2026-11-17 | no | no |
+| MyLife | search-form | yes | blocked | 2026-11-17 | no | yes (not checked) |
+| Nuwber | search-form | no | blocked | 2026-11-17 | no | yes (not checked) |
+| FamilyTreeNow | direct-form | yes | blocked | 2026-11-17 | no | no |
+| CheckPeople | direct-form | no | ok | 2026-11-17 | no | no |
+| ThatsThem | direct-form | no | blocked | 2026-11-17 | no | no |
+| USPhonebook | direct-form | yes | ok | 2026-11-17 | yes | no |
+| SmartBackgroundChecks | direct-form | no | blocked | 2026-11-17 | no | no |
+| SearchPeopleFree | direct-form | no | blocked | 2026-11-17 | no | no |
+| PeopleSearchNow | direct-form | no | ok | 2026-11-17 | no | no |
+| InfoTracer | direct-form | no | drifted | 2026-11-17 | no | no |
+| SocialCatfish | direct-form | no | blocked | 2026-11-17 | no | no |
+| NationalPublicData | direct-form | no | blocked | 2026-11-17 | no | no |
+| PrivateRecords | direct-form | no | ok | 2026-11-17 | no | no |
+| Acxiom | direct-form | no | drifted | 2026-11-17 | no | no |
+| LexisNexis | direct-form | no | drifted | 2026-11-17 | no | no |
+| ZoomInfo | manual | n/a | blocked | 2026-11-17 | no | no |
+| Clearbit | manual | n/a | ok | 2026-11-17 | no | no |
+| Andrews Wharton | manual | n/a | ok | 2026-11-17 | no | no |
+| PeekYou | direct-form | no | drifted | 2026-11-17 | no | no |
+| Addresses.com | direct-form | no | blocked | 2026-11-17 | no | no |
+| AnyWho | direct-form | no | blocked | 2026-11-17 | no | no |
+| TruthFinder | direct-form | no | blocked | 2026-11-17 | no | no |
+| InstantCheckmate | direct-form | no | blocked | 2026-11-17 | no | no |
+| Spokeo (email) | email | n/a | n/a | 2026-11-17 | no | no |
+| Epsilon | direct-form | no | blocked | 2026-11-17 | no | no |
+| Oracle Data Cloud | direct-form | no | drifted | 2026-11-17 | no | no |
+| Equifax (marketing) | direct-form | no | drifted | 2026-11-17 | no | no |
+| Experian (marketing) | direct-form | no | error | 2026-11-17 | no | no |
+| DataAxle | direct-form | no | drifted | 2026-11-17 | no | no |
+| Truecaller | manual | n/a | ok | 2026-11-17 | no | no |
+| Sync.ME | direct-form | yes | drifted | 2026-11-17 | yes | no |
+| CallApp | direct-form | no | drifted | 2026-11-17 | no | no |
+| NumLookup | direct-form | no | ok | 2026-11-17 | yes | no |
+| Hiya | email | n/a | n/a | 2026-11-17 | no | no |
+| Eyecon | email | n/a | n/a | 2026-11-17 | no | no |
+| National Do Not Call Registry | manual | n/a | ok | 2026-11-17 | yes | no |
+| Spy Dialer | manual | n/a | ok | 2026-11-17 | yes | no |
+| Pipl | email | n/a | n/a | 2026-11-17 | no | no |
+| Google - Results About You | manual | n/a | ok | 2026-11-17 | no | no |
+| Google - Outdated Content | manual | n/a | ok | 2026-11-17 | no | no |
+| CalPrivacy DROP | manual | n/a | ok | 2026-11-17 | no | no |
 
 ## How confident should I be?
 

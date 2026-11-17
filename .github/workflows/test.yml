@@ -35,6 +35,13 @@ jobs:
         working-directory: dashboard
         run: npm ci
 
+      # test/broker-health-check.test.js drives a real headless Chromium against
+      # local fixture pages. Without a browser it skips itself, and the broker health
+      # check would go untested exactly where it runs.
+      - name: Install Chromium
+        if: matrix.node-version == 22
+        run: npx playwright install --with-deps chromium
+
       - name: Run tests
         run: node --test test/*.test.js dashboard/validate.test.js dashboard/config-status.test.js
 
