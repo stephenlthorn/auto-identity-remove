@@ -114,13 +114,22 @@ function extractMissing(texts) {
 const sameSet = (a, b) => a.length === b.length && [...a].sort().every((s, i) => s === [...b].sort()[i]);
 const bullets = (missing) => missing.map((s) => `- ${code(s)}`).join('\n');
 
+// What the issue records as "wrong": the selectors that match nothing visible, and
+// the redirect when the page moved to another domain. Both go through the same
+// marker, so "same problem" and "the problem changed" work for either.
+const problemOf = (result) => [
+  ...(Array.isArray(result.missing) ? result.missing : []),
+  ...(result.redirectedTo ? [`redirected to ${result.redirectedTo}`] : []),
+];
+const headingOf = (result) => (result.redirectedTo ? 'The page no longer lives where the definition says:' : 'Selectors that match nothing:');
+
 function createBody({ name, result, url }) {
   return [
     `The weekly broker health check found that the opt-out page of ${code(name)} loads but no longer has the form the definition in \`brokers.js\` expects. It was \`drifted\` on two weekly checks in a row.`,
     '',
     url ? `Page: ${code(url)}` : null,
     '',
-    'Selectors that match nothing:',
+    headingOf(result),
     bullets(result.missing),
     '',
     `Last checked: ${result.checkedAt}`,
@@ -134,7 +143,7 @@ function createBody({ name, result, url }) {
 
 function updateBody({ result }) {
   return [
-    'The selectors that match nothing have changed. Now:',
+    'What is wrong has changed. Now:',
     bullets(result.missing),
     '',
     `Checked: ${result.checkedAt}`,
@@ -147,7 +156,7 @@ function reopenBody({ name, result }) {
   return [
     `The weekly broker health check found ${code(name)} \`drifted\` on two checks in a row again, so this issue is reopened instead of a new one being opened. If this is known and should stay closed, close it and add the \`${WONTFIX_LABEL}\` label.`,
     '',
-    'Selectors that match nothing:',
+    headingOf(result),
     bullets(result.missing),
     '',
     `Checked: ${result.checkedAt}`,
@@ -187,7 +196,7 @@ function planIssueActions({ openIssues, results, urls = {} }) {
   for (const name of Object.keys(results).sort()) {
     const result = results[name];
     const issue = byName.get(name);
-    const missing = Array.isArray(result.missing) ? result.missing : [];
+    const missing = problemOf(result);
 
     if (result.status === 'drifted') {
       if (!issue) {

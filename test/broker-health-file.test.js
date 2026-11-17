@@ -149,6 +149,15 @@ describe('summarize and buildHealthFile', () => {
     assert.equal('missing' in file.results.A, false);
   });
 
+  test('a redirect is recorded with where it went, and only then', () => {
+    const file = buildHealthFile({
+      checked: [{ name: 'R', status: 'drifted', detail: 'redirected to parked.example.net', redirectedTo: 'parked.example.net', checkedAt: at }, checked[0]],
+      runner: 'ci', checkedAt: at,
+    });
+    assert.equal(file.results.R.redirectedTo, 'parked.example.net');
+    assert.equal('redirectedTo' in file.results.A, false);
+  });
+
   test('a garbled previous file is treated as no history', () => {
     const file = buildHealthFile({ checked, previous: { results: 'nope' }, runner: 'ci', checkedAt: at });
     assert.equal(file.results.A.previousStatus, null);

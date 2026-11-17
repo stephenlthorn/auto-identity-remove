@@ -70,6 +70,54 @@ describe('drifted', () => {
   });
 });
 
+describe('a page on another domain (H5)', () => {
+  const moved = (over = {}) => page({
+    requestedUrl: 'https://www.example.com/optout', url: 'https://parked.example.net/for-sale', ...over,
+  });
+
+  test('a final URL on a different registrable domain is drifted, and the detail says where', () => {
+    const r = classifyHealth(moved());
+    assert.equal(r.status, 'drifted');
+    assert.match(r.detail, /redirected to parked\.example\.net/);
+    assert.equal(r.redirectedTo, 'parked.example.net');
+  });
+
+  test('for every method: a manual broker (no selectors) that lands on a parking page is drifted too', () => {
+    const r = classifyHealth(moved({ selectors: [], missing: [], method: 'manual' }));
+    assert.equal(r.status, 'drifted');
+    assert.match(r.detail, /redirected to parked\.example\.net/);
+  });
+
+  test('another subdomain of the same site is not a redirect off the site', () => {
+    const r = classifyHealth(page({ requestedUrl: 'https://www.example.com/optout', url: 'https://privacy.example.com/request' }));
+    assert.equal(r.status, 'ok');
+  });
+
+  test('two unrelated .co.uk sites are two sites', () => {
+    const r = classifyHealth(page({ requestedUrl: 'https://www.one.co.uk/optout', url: 'https://www.two.co.uk/optout' }));
+    assert.equal(r.status, 'drifted');
+  });
+
+  test('a redirect to a challenge page is still blocked: the wall wins', () => {
+    const r = classifyHealth(moved({ url: 'https://other.example.net/captcha?x=1' }));
+    assert.equal(r.status, 'blocked');
+  });
+
+  test('the missing selectors are not reported for a page on another domain: they were never looked for on the right page', () => {
+    const r = classifyHealth(moved({ missing: ['input[name="email"]'] }));
+    assert.equal(r.status, 'drifted');
+    assert.equal(r.missing, undefined);
+  });
+});
+
+describe('a manual broker is only checked for answering (H5)', () => {
+  test('the label stays ok, but the detail says what was and was not checked', () => {
+    const r = classifyHealth(page({ selectors: [], missing: [], method: 'manual' }));
+    assert.equal(r.status, 'ok');
+    assert.match(r.detail, /the page answers; a manual broker's form is not checked/);
+  });
+});
+
 describe('blocked, never drifted', () => {
   test('a Cloudflare interstitial', () => {
     const r = classifyHealth(page({ markers: ['cloudflare-challenge'], missing: ['x', 'y'] }));

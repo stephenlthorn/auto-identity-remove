@@ -22,7 +22,23 @@ const FORM = `
 
 const page = (body, title = 'Opt out') => `<!doctype html><html><head><title>${title}</title></head><body>${body}</body></html>`;
 
+const hiddenForm = (emailInput) => page(FORM.replace('<input name="email" type="email">', emailInput));
+const hiddenSubmit = (style) => page(FORM.replace('<button type="submit">Remove</button>', `<button type="submit" ${style}>Remove</button>`));
+
 const ROUTES = {
+  // The email field is in the DOM but nobody can see it (a bot trap, a template left behind, a hidden step).
+  '/hidden/display': () => ({ body: hiddenForm('<input name="email" type="email" style="display:none">') }),
+  '/hidden/visibility': () => ({ body: hiddenForm('<input name="email" type="email" style="visibility:hidden">') }),
+  '/hidden/offscreen': () => ({ body: hiddenForm('<input name="email" type="email" style="position:absolute;left:-9999px">') }),
+  '/hidden/aria': () => ({ body: hiddenForm('<div aria-hidden="true"><input name="email" type="email"></div>') }),
+  '/hidden/tiny': () => ({ body: hiddenForm('<input name="email" type="email" style="width:1px;height:1px;padding:0;border:0">') }),
+  '/hidden/tabindex': () => ({ body: hiddenForm('<input name="email" type="email" tabindex="-1">') }),
+  '/hidden/parent': () => ({ body: hiddenForm('<div style="display:none"><input name="email" type="email"></div>') }),
+  '/hidden/submit': () => ({ body: hiddenSubmit('style="display:none"') }),
+  // A hidden duplicate first, the real field second: a visible match exists.
+  '/hidden/duplicate-first': () => ({ body: hiddenForm('<input name="email" type="email" style="display:none"><input name="email" type="email">') }),
+  '/redirect-offsite': (req) => ({ status: 302, headers: { location: `http://localhost:${req.headers.host.split(':')[1]}/ok` }, body: '' }),
+  '/redirect-same-site': () => ({ status: 302, headers: { location: '/ok' }, body: '' }),
   '/ok': () => ({ body: page(FORM) }),
   '/drifted': () => ({ body: page(FORM.replace('<input name="email" type="email">', '<input name="addr" type="text">')) }),
   '/wall': () => ({
@@ -59,7 +75,7 @@ function startFixtureServer() {
     requests.push({ method: req.method, path: req.url });
     const route = ROUTES[req.url.split('?')[0]];
     if (!route) { res.writeHead(404, { 'content-type': 'text/html' }); res.end(page('<h1>No such fixture</h1>')); return; }
-    const spec = route();
+    const spec = route(req);
     if (spec.hang) return; // never answers: the check's own timeout must end it
     res.writeHead(spec.status || 200, { 'content-type': 'text/html', ...(spec.headers || {}) });
     res.end(spec.body);

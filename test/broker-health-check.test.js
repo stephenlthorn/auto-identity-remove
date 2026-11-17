@@ -123,9 +123,62 @@ describe('checkBroker against fixture pages', { skip: executablePath ? false : '
     assert.deepEqual(absent.missing, ['button[type="submit"]:has-text("Nonexistent")']);
   });
 
+  describe('a selector counts only when it matches a VISIBLE element (H5)', () => {
+    for (const kind of ['display', 'visibility', 'offscreen', 'aria', 'tiny', 'tabindex', 'parent']) {
+      test(`an email field that is hidden by ${kind} is missing, so the form is drifted`, async () => {
+        const r = await check(broker(`/hidden/${kind}`));
+        assert.equal(r.status, 'drifted', r.detail);
+        assert.deepEqual(r.missing, ['input[name="email"]']);
+      });
+    }
+
+    test('a hidden submit button is missing too', async () => {
+      const r = await check(broker('/hidden/submit'));
+      assert.equal(r.status, 'drifted', r.detail);
+      assert.deepEqual(r.missing, ['button[type="submit"]']);
+    });
+
+    test('a hidden submit button is missing when the selector is a Playwright one', async () => {
+      const r = await check(broker('/hidden/submit', { submitSelector: 'button[type="submit"]:has-text("Remove")' }));
+      assert.equal(r.status, 'drifted', r.detail);
+    });
+
+    test('a hidden duplicate does not hide a visible field with the same selector', async () => {
+      const r = await check(broker('/hidden/duplicate-first'));
+      assert.equal(r.status, 'ok', r.detail);
+    });
+
+    test('a comma list needs only one visible alternative', async () => {
+      const r = await check(broker('/hidden/display', { formFields: { 'input[name="nope"],input[name="email"],input[type="email"]': 'x' } }));
+      assert.equal(r.status, 'drifted');
+      const ok = await check(broker('/ok', { formFields: { 'input[name="nope"],input[name="email"]': 'x' } }));
+      assert.equal(ok.status, 'ok', ok.detail);
+    });
+  });
+
+  describe('a page on another domain is drifted, for every method (H5)', () => {
+    test('a form broker that redirects off its domain', async () => {
+      const r = await check(broker('/redirect-offsite'));
+      assert.equal(r.status, 'drifted', r.detail);
+      assert.match(r.detail, /redirected to localhost/);
+    });
+
+    test('a manual broker that redirects off its domain', async () => {
+      const r = await check(broker('/redirect-offsite', { method: 'manual', formFields: undefined, submitSelector: undefined }));
+      assert.equal(r.status, 'drifted', r.detail);
+      assert.match(r.detail, /redirected to localhost/);
+    });
+
+    test('a redirect within the same site is fine', async () => {
+      const r = await check(broker('/redirect-same-site'));
+      assert.equal(r.status, 'ok', r.detail);
+    });
+  });
+
   test('a manual broker only has to answer', async () => {
     const r = await check(broker('/ok', { method: 'manual', formFields: undefined, submitSelector: undefined }));
     assert.equal(r.status, 'ok');
+    assert.match(r.detail, /a manual broker's form is not checked/);
     assert.equal((await check(broker('/gone', { method: 'manual' }))).status, 'dead');
   });
 

@@ -92,7 +92,7 @@ function renderStatus({ brokers, health }) {
 
 > **What this page is:** a weekly health check of the opt-out pages of the ${brokers.length} explicit brokers in \`brokers.js\`. A scheduled job loads each page with a plain headless browser and checks that the page answers and that the selectors the definition relies on still exist. It is generated: edit \`brokers.js\` or let the weekly job refresh \`data/broker-health.json\`, then run \`node scripts/generate-status.js\`. Do not edit the table by hand.
 >
-> **Limits, plainly:** the check looks at the shape of the form. It never types, clicks or submits, so it cannot tell you whether a submission deletes anything. \`aidr verify\` is the check for that. And the weekly job runs from a data centre address that some sites refuse, so a page can be \`blocked\` here and fine from your home connection. \`aidr doctor --brokers\` runs the same check from your own machine.
+> **Limits, plainly:** the check looks at the shape of the form. It never types, clicks or submits, so it cannot tell you whether a submission deletes anything. It cannot tell the real opt-out form from another form with the same fields on the page (a newsletter box with an email field and a submit button satisfies \`input[type="email"]\` plus \`button[type="submit"]\`). \`aidr verify\` is the check for that. And the weekly job runs from a data centre address that some sites refuse, so a page can be \`blocked\` here and fine from your home connection. \`aidr doctor --brokers\` runs the same check from your own machine.
 
 ${lastCheckLine(health)}
 
@@ -100,9 +100,9 @@ ${totalsLine(brokers, results)}
 
 ## Health labels
 
-- \`ok\` - the page loads and every selector the definition relies on (the form fields and the submit button) matches. A CAPTCHA widget on a complete form is part of the form and still counts as \`ok\`. A \`manual\` broker is \`ok\` when its page answers.
-- \`drifted\` - the page loads, but one or more of those selectors match nothing. The site changed its form, or moved it. The weekly job opens one issue per drifted broker after two checks in a row.
-- \`blocked\` - a bot challenge, a CAPTCHA that hides the form, a 403 or 429, or a challenge-style 503. We did not see the real page, so a blocked broker is reported as \`blocked\`, not \`drifted\`.
+- \`ok\` - the page loads and every selector the definition relies on (the form fields and the submit button) matches a **visible** element, the same test the runner applies before it fills a field. A CAPTCHA widget on a complete form is part of the form and still counts as \`ok\`. A \`manual\` broker is \`ok\` when its page answers: **its form is not checked**, so for those \`ok\` says only that the page answers on the same site (a soft 404 or a page that merely loads also answers).
+- \`drifted\` - the page loads, but one or more of those selectors match no visible element (the site changed its form, or moved it), or the page ended up on a different site than the opt-out URL (the detail says \`redirected to <host>\`: a parking page, a sold domain, a moved portal). The weekly job opens one issue per drifted broker after two checks in a row from the same kind of runner. A real form with a CAPTCHA widget beside it and some fields renamed is \`drifted\`, not \`blocked\`.
+- \`blocked\` - a bot challenge, a 403 or 429, a challenge-style 503, or a CAPTCHA or bot-manager marker with **not one** of the selectors visible (the widget may be hiding the form). We did not see the real page, so a blocked broker is reported as \`blocked\`, not \`drifted\`.
 - \`dead\` - the host does not resolve, the connection is refused, or the page answers 404 or 410.
 - \`error\` - a timeout, a 5xx that is not a challenge, a reset connection, or a page that rendered nothing. Shown, but it never opens an issue: the next weekly check replaces it.
 - \`n/a\` - email brokers. Removal is an email, so there is no page to check.
@@ -157,7 +157,7 @@ After running, use \`node watcher.js --verify\` to search the broker for your na
 
 ## Reporting drift
 
-When a broker is \`drifted\` on two weekly checks in a row, an issue titled \`Broker drift: <name>\` is opened with the selectors that no longer match, and it closes itself when the broker is \`ok\` again. If you notice a broker failing that the table still shows as \`ok\`, please open an issue with a screenshot of its current opt-out form.
+When a broker is \`drifted\` on two weekly checks in a row (from the same kind of runner: the first check from the weekly job after a local run does not count), an issue titled \`Broker drift: <name>\` is opened with what no longer matches, and it closes itself when the broker is \`ok\` again. The broker an issue belongs to is recorded in a hidden marker in its body, so you can retitle it. If you close it because the problem is known, add the \`wontfix\` label and it stays closed; without that label it is reopened when the broker drifts again. If you notice a broker failing that the table still shows as \`ok\`, please open an issue with a screenshot of its current opt-out form.
 `;
 }
 

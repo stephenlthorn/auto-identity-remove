@@ -443,3 +443,22 @@ describe('what reaches gh (argv, never a shell string)', () => {
     assert.doesNotMatch(visible.replace(/``[^]*?``|`[^`\n]*`/g, ''), /@/, 'every @ is inside a code span');
   });
 });
+
+describe('H5: a drifted broker that moved to another domain', () => {
+  const moved = (over = {}) => res('drifted', { previousStatus: 'drifted', redirectedTo: 'parked.example.net', detail: 'redirected to parked.example.net', ...over });
+
+  test('opens an issue that says where the page went, not an empty list of selectors', () => {
+    const [a] = planIssueActions({ openIssues: [], results: { Spokeo: moved() }, urls: { Spokeo: 'https://www.spokeo.com/optout' } });
+    assert.equal(a.type, 'create');
+    assert.match(a.body, /parked\.example\.net/);
+    assert.doesNotMatch(a.body.replace(/<!--[^]*?-->/g, ''), /Selectors that match nothing/);
+  });
+
+  test('the same redirect next week is not a change; a different place is', () => {
+    const open = [{ number: 7, title: titleFor('Spokeo'), state: 'open', labels: [LABEL], brokerName: 'Spokeo', missing: ['redirected to parked.example.net'] }];
+    assert.deepEqual(planIssueActions({ openIssues: open, results: { Spokeo: moved() } }), []);
+    const plan = planIssueActions({ openIssues: open, results: { Spokeo: moved({ redirectedTo: 'other.example.org' }) } });
+    assert.equal(plan[0].type, 'comment');
+    assert.match(plan[0].body, /other\.example\.org/);
+  });
+});
