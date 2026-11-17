@@ -13,6 +13,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 const { runBrokerHealthDoctor } = require('../lib/doctor');
 const { buildLaunchOptions, BASE_ARGS } = require('../lib/browser');
 
@@ -94,12 +95,55 @@ describe('runBrokerHealthDoctor', () => {
     assert.equal(log.context.userAgent, 'Mozilla/5.0 Test');
   });
 
-  it('never prints anything from the config: no personal data in the output', async () => {
-    fs.writeFileSync(path.join(root, 'config.json'), JSON.stringify({
-      person: { firstName: 'Jane', lastName: 'Sample', email: 'jane.private@example.com', zip: '90001' },
-    }));
-    const { lines } = await run();
-    assert.doesNotMatch(lines.join('\n'), /Jane|private@example|90001/);
+  it('never prints or loads anything from the config: sentinel person, the real broker list, real broker URLs', async () => {
+    // A distinct person (not the placeholder), and the REAL explicit broker list, built in a child
+    // process whose config is the sentinel config: brokers.js reads its config at first require, so
+    // a leak from the config into a URL or a printed line would show up here.
+    const SENTINELS = ['Zqfirst', 'Zqlast', 'zq.sentinel@zq.invalid', '9990001111', 'Zqcity', '99999', 'Zqalias'];
+    const example = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'config.example.json'), 'utf8'));
+    const config = {
+      ...example,
+      person: {
+        ...example.person, firstName: 'Zqfirst', lastName: 'Zqlast', fullName: 'Zqfirst Zqlast', aliases: ['Zqalias'],
+        email: 'zq.sentinel@zq.invalid', phone: '9990001111', phoneFormatted: '9990001111', city: 'Zqcity', state: 'ZQ', zip: '99999',
+      },
+    };
+    delete config.persons;
+    const configPath = path.join(root, 'config.json');
+    fs.writeFileSync(configPath, JSON.stringify(config));
+
+    const script = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'aidr-doctor-probe-')), 'probe.js');
+    fs.writeFileSync(script, `
+      const { runBrokerHealthDoctor } = require(${JSON.stringify(path.join(__dirname, '..', 'lib', 'doctor'))});
+      const gotos = []; const lines = [];
+      const launch = async () => ({
+        async newContext() { return { async newPage() { return {
+          async goto(url) { gotos.push(url); return { status: () => 200, headers: () => ({}) }; },
+          async evaluate() { return null; }, async waitForTimeout() {}, async close() {},
+        }; } }; },
+        async close() {},
+      });
+      runBrokerHealthDoctor({ rootDir: ${JSON.stringify(root)}, launch, print: (l) => lines.push(l), pauseMs: 0 })
+        .then((outcome) => process.stdout.write(JSON.stringify({ gotos, lines, exitCode: outcome.exitCode })));
+    `);
+    const out = spawnSync(process.execPath, [script], {
+      encoding: 'utf8', env: { ...process.env, AIDR_CONFIG_PATH: configPath, AIDR_HOME: root },
+    });
+    assert.equal(out.status, 0, out.stderr);
+    const seen = JSON.parse(out.stdout);
+    assert.equal(seen.exitCode, 0);
+    assert.ok(seen.gotos.length >= 40, 'the real broker list was used');
+    const haystack = [...seen.lines, ...seen.gotos].join('\n');
+    for (const value of SENTINELS) {
+      assert.equal(haystack.toLowerCase().includes(value.toLowerCase()), false, `leaked ${value}`);
+      assert.equal(haystack.includes(encodeURIComponent(value)), false, `leaked ${value} (encoded)`);
+    }
+    assert.ok(seen.gotos.some((u) => /Jane/.test(u)), 'the placeholder person is what reaches a URL');
+  });
+
+  it('the sentinel config really would reach a URL if the list were built from it (so the test above can fail)', () => {
+    const forReal = require('../brokers').forPerson({ firstName: 'Zqfirst', lastName: 'Zqlast', state: 'ZQ', zip: '99999', email: 'zq@zq.invalid' });
+    assert.ok(forReal.some((b) => /Zqfirst/.test(String(b.optOutUrl))), 'a broker URL embeds the person');
   });
 
   it('loads each opt-out page once, and none for an email broker', async () => {

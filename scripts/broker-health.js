@@ -100,7 +100,9 @@ async function run(deps = {}) {
     return 1;
   }
 
-  const document = buildHealthFile({ checked, previous, runner: args.runner, checkedAt: new Date(now()).toISOString() });
+  const document = buildHealthFile({
+    checked, previous, runner: args.runner, checkedAt: new Date(now()).toISOString(), known: list.map((b) => b.name),
+  });
   writeAtomic(file, `${JSON.stringify(document, null, 2)}\n`);
   const s = document.summary;
   io.log(`\n${s.ok} ok, ${s.drifted} drifted, ${s.blocked} blocked, ${s.dead} dead, ${s.error} error, ${s.na} n/a (${s.total} checked)`);

@@ -2,21 +2,15 @@
   "checkedAt": "2026-11-17T15:47:28.448Z",
   "runner": "local",
   "summary": {
-    "ok": 15,
-    "drifted": 11,
+    "ok": 14,
+    "drifted": 9,
     "blocked": 20,
     "dead": 0,
     "error": 1,
     "na": 4,
-    "total": 47
+    "total": 44
   },
   "results": {
-    "California DELETE Portal": {
-      "status": "ok",
-      "detail": "the page answers",
-      "checkedAt": "2026-11-17T15:41:17.012Z",
-      "previousStatus": null
-    },
     "Spokeo": {
       "status": "blocked",
       "detail": "HTTP 403: the site refused this address",
@@ -46,18 +40,6 @@
       "detail": "HTTP 403: the site refused this address",
       "checkedAt": "2026-11-17T15:41:46.319Z",
       "previousStatus": null
-    },
-    "Radaris": {
-      "status": "drifted",
-      "detail": "4 of 4 selectors match nothing: input[name*=\"first\"],input[placeholder*=\"first\" i] | input[name*=\"last\"],input[placeholder*=\"last\" i] | input[type=\"email\"] | button[type=\"submit\"]",
-      "checkedAt": "2026-11-17T15:41:51.615Z",
-      "previousStatus": null,
-      "missing": [
-        "input[name*=\"first\"],input[placeholder*=\"first\" i]",
-        "input[name*=\"last\"],input[placeholder*=\"last\" i]",
-        "input[type=\"email\"]",
-        "button[type=\"submit\"]"
-      ]
     },
     "Intelius": {
       "status": "blocked",
@@ -211,20 +193,6 @@
       "detail": "the page answers",
       "checkedAt": "2026-11-17T15:44:12.653Z",
       "previousStatus": null
-    },
-    "PeekYou": {
-      "status": "drifted",
-      "detail": "6 of 6 selectors match nothing: input[name*=\"first\" i] | input[name*=\"last\" i] | input[type=\"email\"] | input[name*=\"city\" i] | input[name*=\"state\" i] | button[type=\"submit\"],input[type=\"submit\"]",
-      "checkedAt": "2026-11-17T15:44:17.638Z",
-      "previousStatus": null,
-      "missing": [
-        "input[name*=\"first\" i]",
-        "input[name*=\"last\" i]",
-        "input[type=\"email\"]",
-        "input[name*=\"city\" i]",
-        "input[name*=\"state\" i]",
-        "button[type=\"submit\"],input[type=\"submit\"]"
-      ]
     },
     "Addresses.com": {
       "status": "blocked",

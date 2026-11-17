@@ -10,7 +10,7 @@
 
 const { describe, test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
-const { startFixtureServer, findChromium } = require('./helpers/health-fixture-server');
+const { startFixtureServer, findChromium, EVENT_TYPES } = require('./helpers/health-fixture-server');
 const { checkBroker, checkAllBrokers } = require('../lib/broker-health');
 
 const executablePath = findChromium();
@@ -98,6 +98,18 @@ describe('checkBroker against fixture pages', { skip: executablePath ? false : '
     assert.equal(r.status, 'ok', r.detail);
   });
 
+  test('a real form with 2 of 4 fields renamed and its usual CAPTCHA widget is drifted, not blocked (H1)', async () => {
+    const r = await check(broker('/captcha-drifted', {
+      captchaLikely: true,
+      formFields: {
+        'input[name="first"]': 'Jane', 'input[name="last"]': 'Sample',
+        'input[name="email"]': 'jane.sample@example.com', 'input[name="zip"]': '90001',
+      },
+    }));
+    assert.equal(r.status, 'drifted', r.detail);
+    assert.deepEqual(r.missing.sort(), ['input[name="email"]', 'input[name="zip"]']);
+  });
+
   test('a form that a script draws a moment after load is found, not drifted', async () => {
     const r = await check(broker('/late-form'), { settleMs: 3000 });
     assert.equal(r.status, 'ok', r.detail);
@@ -111,9 +123,62 @@ describe('checkBroker against fixture pages', { skip: executablePath ? false : '
     assert.deepEqual(absent.missing, ['button[type="submit"]:has-text("Nonexistent")']);
   });
 
+  describe('a selector counts only when it matches a VISIBLE element (H5)', () => {
+    for (const kind of ['display', 'visibility', 'offscreen', 'aria', 'tiny', 'tabindex', 'parent']) {
+      test(`an email field that is hidden by ${kind} is missing, so the form is drifted`, async () => {
+        const r = await check(broker(`/hidden/${kind}`));
+        assert.equal(r.status, 'drifted', r.detail);
+        assert.deepEqual(r.missing, ['input[name="email"]']);
+      });
+    }
+
+    test('a hidden submit button is missing too', async () => {
+      const r = await check(broker('/hidden/submit'));
+      assert.equal(r.status, 'drifted', r.detail);
+      assert.deepEqual(r.missing, ['button[type="submit"]']);
+    });
+
+    test('a hidden submit button is missing when the selector is a Playwright one', async () => {
+      const r = await check(broker('/hidden/submit', { submitSelector: 'button[type="submit"]:has-text("Remove")' }));
+      assert.equal(r.status, 'drifted', r.detail);
+    });
+
+    test('a hidden duplicate does not hide a visible field with the same selector', async () => {
+      const r = await check(broker('/hidden/duplicate-first'));
+      assert.equal(r.status, 'ok', r.detail);
+    });
+
+    test('a comma list needs only one visible alternative', async () => {
+      const r = await check(broker('/hidden/display', { formFields: { 'input[name="nope"],input[name="email"],input[type="email"]': 'x' } }));
+      assert.equal(r.status, 'drifted');
+      const ok = await check(broker('/ok', { formFields: { 'input[name="nope"],input[name="email"]': 'x' } }));
+      assert.equal(ok.status, 'ok', ok.detail);
+    });
+  });
+
+  describe('a page on another domain is drifted, for every method (H5)', () => {
+    test('a form broker that redirects off its domain', async () => {
+      const r = await check(broker('/redirect-offsite'));
+      assert.equal(r.status, 'drifted', r.detail);
+      assert.match(r.detail, /redirected to localhost/);
+    });
+
+    test('a manual broker that redirects off its domain', async () => {
+      const r = await check(broker('/redirect-offsite', { method: 'manual', formFields: undefined, submitSelector: undefined }));
+      assert.equal(r.status, 'drifted', r.detail);
+      assert.match(r.detail, /redirected to localhost/);
+    });
+
+    test('a redirect within the same site is fine', async () => {
+      const r = await check(broker('/redirect-same-site'));
+      assert.equal(r.status, 'ok', r.detail);
+    });
+  });
+
   test('a manual broker only has to answer', async () => {
     const r = await check(broker('/ok', { method: 'manual', formFields: undefined, submitSelector: undefined }));
     assert.equal(r.status, 'ok');
+    assert.match(r.detail, /a manual broker's form is not checked/);
     assert.equal((await check(broker('/gone', { method: 'manual' }))).status, 'dead');
   });
 
@@ -139,5 +204,72 @@ describe('checkBroker against fixture pages', { skip: executablePath ? false : '
     assert.ok(seen.length >= 4);
     assert.deepEqual([...new Set(seen.map((r) => r.method))], ['GET']);
     assert.equal(seen.some((r) => /^\/(search|submit)/.test(r.path)), false, 'no search URL and no form post');
+  });
+
+  describe('read-only, seen from inside the page: the check causes no input event of any kind', () => {
+    // The request log only sees traffic. A typed character, a click or a requestSubmit() that
+    // sends nothing leaves no trace there, so every fixture page records these events itself.
+    const eventsAfterCheck = async (b, opts = { settleMs: 0 }) => {
+      const page = await context.newPage();
+      try {
+        const result = await checkBroker(page, b, opts);
+        return { result, events: await page.evaluate(() => window.__events) };
+      } finally { await page.close(); }
+    };
+
+    test('the recorder is live: a click the test performs itself is recorded (so silence means something)', async () => {
+      const page = await context.newPage();
+      try {
+        await page.goto(`${server.origin}/ok`);
+        await page.click('h1');
+        await page.fill('input[name="email"]', 'a@example.com');
+        await page.press('input[name="email"]', 'Tab');
+        const events = await page.evaluate(() => window.__events);
+        for (const type of ['click', 'input', 'keydown', 'change']) {
+          assert.ok(events.some((e) => e.startsWith(`${type} `)), `no ${type} in: ${events}`);
+        }
+        for (const type of ['input', 'change', 'click', 'keydown', 'submit']) assert.ok(EVENT_TYPES.includes(type));
+      } finally { await page.close(); }
+    });
+
+    test('no input, change, click, key or submit event fires, on any kind of page or selector', async () => {
+      const cases = [
+        broker('/ok'),
+        broker('/ok', { submitSelector: 'button[type="submit"]:has-text("Remove")' }),
+        broker('/ok', { formFields: { 'input[name="email"],input[type="email"]': 'x' } }),
+        broker('/drifted'),
+        broker('/captcha-form', { captchaLikely: true }),
+        broker('/captcha-drifted', { formFields: { 'input[name="first"]': 'Jane', 'input[name="zip"]': '90001' } }),
+        broker('/hidden/display'),
+        broker('/hidden/submit', { submitSelector: 'button[type="submit"]:has-text("Remove")' }),
+        broker('/ok', { method: 'manual', formFields: undefined, submitSelector: undefined }),
+        broker('/wall'),
+      ];
+      for (const b of cases) {
+        const { events } = await eventsAfterCheck(b);
+        assert.deepEqual(events, [], `${b.optOutUrl} ${b.submitSelector}: ${events}`);
+      }
+      const late = await eventsAfterCheck(broker('/late-form'), { settleMs: 3000 });
+      assert.equal(late.result.status, 'ok', late.result.detail);
+      assert.deepEqual(late.events, [], 'waiting for a script-drawn form does not touch it either');
+    });
+
+    test('the page object is only asked to look: goto, evaluate, locator reads, waits and close', async () => {
+      const used = new Set();
+      const spy = (target) => new Proxy(target, {
+        get(obj, key) {
+          const value = obj[key];
+          if (typeof key === 'string') used.add(key);
+          return typeof value === 'function' ? value.bind(obj) : value;
+        },
+      });
+      const real = await context.newPage();
+      try {
+        await checkBroker(spy(real), broker('/ok', { submitSelector: 'button[type="submit"]:has-text("Remove")' }), { settleMs: 0 });
+      } finally { await real.close(); }
+      const allowed = new Set(['goto', 'evaluate', 'locator', 'waitForTimeout', 'url', 'title', 'content', 'then']);
+      const unexpected = [...used].filter((k) => !allowed.has(k));
+      assert.deepEqual(unexpected, [], `page methods used: ${[...used]}`);
+    });
   });
 });

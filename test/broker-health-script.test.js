@@ -68,9 +68,23 @@ describe('scripts/broker-health.js', () => {
     assert.equal(written.results.M.status, 'n/a');
   });
 
+  test('a result for a broker that is no longer in the list is not carried over, and the summary agrees (H6)', async () => {
+    const file = tmpFile();
+    fs.writeFileSync(file, JSON.stringify({
+      runner: 'local',
+      summary: { ok: 1, drifted: 0, blocked: 0, dead: 1, error: 0, na: 0, total: 2 },
+      results: { A: { status: 'ok' }, 'Gone Broker': { status: 'dead' } },
+    }));
+    await run({ argv: [], file, launch: fakeLauncher().launch, brokers: LIST, now: () => NOW, io: quiet });
+    const written = JSON.parse(fs.readFileSync(file, 'utf8'));
+    assert.deepEqual(Object.keys(written.results), ['A', 'B', 'M']);
+    assert.equal(written.summary.dead, 0);
+    assert.equal(written.summary.total, 2);
+  });
+
   test('previousStatus is read from the file as it was before the run', async () => {
     const file = tmpFile();
-    fs.writeFileSync(file, JSON.stringify({ results: { A: { status: 'drifted' } } }));
+    fs.writeFileSync(file, JSON.stringify({ runner: 'local', results: { A: { status: 'drifted' } } }));
     await run({ argv: ['--runner', 'local'], file, launch: fakeLauncher().launch, brokers: LIST, now: () => NOW, io: quiet });
     const written = JSON.parse(fs.readFileSync(file, 'utf8'));
     assert.equal(written.runner, 'local');
@@ -119,12 +133,60 @@ describe('scripts/broker-health.js', () => {
     assert.equal(code, 2);
   });
 
+  // The behavioural proof that nothing is typed, clicked or submitted lives in
+  // test/broker-health-check.test.js (a real browser, events recorded inside the page).
+  // This is the static back-stop behind it: a source scan can only catch the obvious spellings,
+  // so it lists every Playwright input method rather than three.
+  const INPUT_API = /\.(fill|type|press|pressSequentially|click|dblclick|tap|check|uncheck|setChecked|selectOption|setInputFiles|dispatchEvent|dragTo|hover|focus|blur)\(|\.keyboard\b|\.mouse\b|\.touchscreen\b|requestSubmit|\.submit\(|\.click\(|insertText|execCommand/;
+
   test('the script does not import the stealth script or touch the CAPTCHA solver', () => {
     const source = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'broker-health.js'), 'utf8');
     assert.doesNotMatch(source, /require\([^)]*(stealth|capsolver|manual-captcha)/i);
     assert.doesNotMatch(source, /addInitScript|solveCaptcha|detectAndSolveCaptcha/);
+    assert.doesNotMatch(source, INPUT_API);
     const lib = fs.readFileSync(path.join(__dirname, '..', 'lib', 'broker-health.js'), 'utf8');
     assert.doesNotMatch(lib, /require\([^)]*stealth/i);
-    assert.doesNotMatch(lib, /addInitScript|solveCaptcha|detectAndSolveCaptcha|\.fill\(|\.click\(|\.type\(/);
+    assert.doesNotMatch(lib, /addInitScript|solveCaptcha|detectAndSolveCaptcha/);
+    assert.doesNotMatch(lib, INPUT_API);
+  });
+
+  test('the static scan really catches each way of typing, clicking or submitting (so it can fail)', () => {
+    for (const bad of [
+      "page.fill('x', 'y')", "page.type('x', 'y')", "el.press('Enter')", "page.keyboard.press('a')", "page.mouse.click(1, 2)",
+      "loc.selectOption('a')", "loc.check()", "form.requestSubmit()", "form.submit()", "el.dispatchEvent(e)", "loc.setInputFiles('f')",
+    ]) assert.match(bad, INPUT_API, bad);
+    for (const fine of ["page.goto(url)", "page.evaluate(fn)", "page.locator(s).count()", "await page.waitForTimeout(5)"]) {
+      assert.doesNotMatch(fine, INPUT_API, fine);
+    }
+  });
+
+  test('the page the script drives is only used to look: goto, evaluate and waits (a stub page that throws on anything else)', async () => {
+    const allowed = new Set(['goto', 'evaluate', 'waitForTimeout', 'locator', 'close']);
+    const seen = new Set();
+    const launch = async () => ({
+      async newContext() {
+        return {
+          async newPage() {
+            return new Proxy({
+              async goto() { return { status: () => 200, headers: () => ({}) }; },
+              async evaluate() { return null; },
+              async waitForTimeout() {},
+              async close() {},
+            }, {
+              get(target, key) {
+                if (typeof key !== 'string' || key === 'then') return undefined;
+                seen.add(key);
+                if (!allowed.has(key)) throw new Error(`the health check used page.${key}`);
+                return target[key];
+              },
+            });
+          },
+        };
+      },
+      async close() {},
+    });
+    const code = await run({ argv: [], file: tmpFile(), launch, brokers: LIST, now: () => NOW, io: quiet });
+    assert.equal(code, 0);
+    assert.ok(seen.has('goto'));
   });
 });

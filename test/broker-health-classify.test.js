@@ -70,6 +70,54 @@ describe('drifted', () => {
   });
 });
 
+describe('a page on another domain (H5)', () => {
+  const moved = (over = {}) => page({
+    requestedUrl: 'https://www.example.com/optout', url: 'https://parked.example.net/for-sale', ...over,
+  });
+
+  test('a final URL on a different registrable domain is drifted, and the detail says where', () => {
+    const r = classifyHealth(moved());
+    assert.equal(r.status, 'drifted');
+    assert.match(r.detail, /redirected to parked\.example\.net/);
+    assert.equal(r.redirectedTo, 'parked.example.net');
+  });
+
+  test('for every method: a manual broker (no selectors) that lands on a parking page is drifted too', () => {
+    const r = classifyHealth(moved({ selectors: [], missing: [], method: 'manual' }));
+    assert.equal(r.status, 'drifted');
+    assert.match(r.detail, /redirected to parked\.example\.net/);
+  });
+
+  test('another subdomain of the same site is not a redirect off the site', () => {
+    const r = classifyHealth(page({ requestedUrl: 'https://www.example.com/optout', url: 'https://privacy.example.com/request' }));
+    assert.equal(r.status, 'ok');
+  });
+
+  test('two unrelated .co.uk sites are two sites', () => {
+    const r = classifyHealth(page({ requestedUrl: 'https://www.one.co.uk/optout', url: 'https://www.two.co.uk/optout' }));
+    assert.equal(r.status, 'drifted');
+  });
+
+  test('a redirect to a challenge page is still blocked: the wall wins', () => {
+    const r = classifyHealth(moved({ url: 'https://other.example.net/captcha?x=1' }));
+    assert.equal(r.status, 'blocked');
+  });
+
+  test('the missing selectors are not reported for a page on another domain: they were never looked for on the right page', () => {
+    const r = classifyHealth(moved({ missing: ['input[name="email"]'] }));
+    assert.equal(r.status, 'drifted');
+    assert.equal(r.missing, undefined);
+  });
+});
+
+describe('a manual broker is only checked for answering (H5)', () => {
+  test('the label stays ok, but the detail says what was and was not checked', () => {
+    const r = classifyHealth(page({ selectors: [], missing: [], method: 'manual' }));
+    assert.equal(r.status, 'ok');
+    assert.match(r.detail, /the page answers; a manual broker's form is not checked/);
+  });
+});
+
 describe('blocked, never drifted', () => {
   test('a Cloudflare interstitial', () => {
     const r = classifyHealth(page({ markers: ['cloudflare-challenge'], missing: ['x', 'y'] }));
@@ -93,14 +141,51 @@ describe('blocked, never drifted', () => {
     assert.equal(classifyHealth(page({ status: 503, title: 'Attention Required! | Cloudflare', missing: ['x'] })).status, 'blocked');
   });
 
-  test('a CAPTCHA on a page whose selectors are missing: the widget may be hiding the form', () => {
-    const r = classifyHealth(page({ captchaPresent: true, missing: ['input[name="email"]'] }));
+  test('a CAPTCHA on a page where EVERY selector is missing: the widget may be hiding the form', () => {
+    const r = classifyHealth(page({ captchaPresent: true, selectors: ['input[name="email"]', 'button[type="submit"]'], missing: ['input[name="email"]', 'button[type="submit"]'] }));
     assert.equal(r.status, 'blocked');
     assert.match(r.detail, /CAPTCHA/);
   });
 
+  test('a visible CAPTCHA widget alone, with every selector missing, is also blocked', () => {
+    const r = classifyHealth(page({ markers: ['recaptcha'], selectors: ['a', 'b'], missing: ['a', 'b'] }));
+    assert.equal(r.status, 'blocked');
+  });
+
   test('a redirect to a challenge path', () => {
     const r = classifyHealth(page({ url: 'https://www.example.com/captcha?from=%2Foptout', missing: ['x'] }));
+    assert.equal(r.status, 'blocked');
+  });
+});
+
+describe('drift beside a CAPTCHA widget is still drift (H1)', () => {
+  // A normal opt-out form carries its usual reCAPTCHA or Turnstile widget. If the
+  // site renamed two of four fields, some selectors still match, so the form IS
+  // visible: that is drift, and the issue must open.
+  test('some selectors match and some do not, with a CAPTCHA widget on the page: drifted', () => {
+    const r = classifyHealth(page({
+      captchaPresent: true,
+      selectors: ['input[name="a"]', 'input[name="b"]', 'input[name="c"]', 'button[type="submit"]'],
+      missing: ['input[name="a"]', 'input[name="b"]'],
+    }));
+    assert.equal(r.status, 'drifted');
+    assert.deepEqual(r.missing, ['input[name="a"]', 'input[name="b"]']);
+  });
+
+  test('the same with a visible CAPTCHA frame marker (a weak wall) is drifted', () => {
+    const r = classifyHealth(page({
+      markers: ['turnstile'],
+      selectors: ['input[name="a"]', 'button[type="submit"]'],
+      missing: ['input[name="a"]'],
+    }));
+    assert.equal(r.status, 'drifted');
+  });
+
+  test('a strong wall still wins over partly matching selectors', () => {
+    const r = classifyHealth(page({
+      markers: ['cloudflare-challenge'], captchaPresent: true,
+      selectors: ['a', 'b'], missing: ['a'],
+    }));
     assert.equal(r.status, 'blocked');
   });
 });
