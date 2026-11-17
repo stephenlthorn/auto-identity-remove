@@ -23,7 +23,8 @@
 
   "capsolver": {
     "_comment": "Sign up free at capsolver.com - pay-as-you-go, costs pennies/month for this use case",
-    "apiKey": "CAP-YOUR_KEY_HERE"
+    "apiKey": "CAP-YOUR_KEY_HERE",
+    "_maxSolvesPerRun_comment": "Optional ceiling on paid solves per run, shared by every broker and every person. Add \"maxSolvesPerRun\": 25 (a whole number of 1 or more) to turn it on; leave it out for no cap. A solve counts when a paid task is created. Once the cap is used up the remaining CAPTCHA brokers are logged as captcha_failed (\"solve cap reached\") unless you solve them by hand; run `aidr captchas` to retry them. A value that is not a whole number of 1 or more is reported and allows no paid solve."
   },
 
   "captcha": {
