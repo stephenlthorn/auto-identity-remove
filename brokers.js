@@ -158,22 +158,6 @@ function buildBrokers(person) {
 
   return [
 
-  // ═══ Priority 1 - California DELETE Act portal (covers all ~500 CA-registered brokers) ═══
-
-  // CA DROP (Delete Request and Opt-out Platform) is not yet live as of late 2025.
-  // SB 362 broker-side compliance deadline is August 1, 2026.
-  // Keeping this entry as manual with the official CPPA registry landing page.
-  {
-    name: 'California DELETE Portal',
-    optOutUrl: 'https://cppa.ca.gov/data_broker_registry/',
-    method: 'manual',
-    priority: 1,
-    confidence: 'documented_not_live',
-    usOnly: false,
-    note: 'CA DROP delete portal is not yet live. SB 362 broker-side compliance deadline is August 1, 2026.',
-    notes: 'CA DROP (Delete Request and Opt-out Platform) under SB 362 is not yet live. The broker-side compliance deadline is August 1, 2026. CPPA has missed several preceding milestones; ongoing litigation (Data Brokers Association v. Bonta) may further delay. Official registry: https://cppa.ca.gov/data_broker_registry/',
-  },
-
   // ═══ Priority 1 - High-traffic people-search sites ═══════════════════════
 
   {
@@ -772,11 +756,17 @@ function buildBrokers(person) {
     priority: 3,
   },
 
+  // California's DROP (Delete Request and Opt-out Platform), run by the California Privacy
+  // Protection Agency. Open to consumers since 2026-01-01; registered brokers have had to
+  // process it since 2026-08-01. The state verifies residency, so this stays manual: the
+  // person submits it, then records the date with `aidr drop --done` (lib/drop.js).
+  // californiaOnly: watcher.js shows it only to people whose state is California.
   {
     name: 'CalPrivacy DROP',
     method: 'manual',
-    optOutUrl: 'https://cppa.ca.gov/data_broker_registry/',
-    notes: 'California one-stop opt-out: submits to all 4000+ registered CA data brokers. Submit once if you are a CA resident.',
+    optOutUrl: 'https://consumer.drop.privacy.ca.gov',
+    californiaOnly: true,
+    notes: 'California residents: one request covers every broker on the state registry, and brokers must delete within 45 days of picking it up (up to 90 days in all). Open to consumers since 2026-01-01; brokers have processed it since 2026-08-01. Submit it at consumer.drop.privacy.ca.gov, then run: aidr drop --done',
     priority: 1,
   },
 
