@@ -37,7 +37,7 @@ const { renderAuditMarkdown, writeAuditFile, timestampForFilename } = require('.
 const { buildStealthScript } = require('./lib/stealth');
 const { buildLaunchOptions, resolveHeadless, isLowMemory, createPersonContexts, createThrowawayContexts, utilityProfileDir, browserConfigProblems, describeProxy } = require('./lib/browser');
 const { installShutdownHandlers } = require('./lib/shutdown');
-const { loadRegistryHostsSafe, loadCaBrokerCountSafe, makeCoveredByDrop, dropRunNotes, brokerAppliesToPerson } = require('./lib/drop');
+const { loadRegistryHostsSafe, loadCaBrokerCountSafe, makeCoveredByDrop, dropRunNotes, brokerAppliesToPerson, recordedDropFor } = require('./lib/drop');
 const { writePrivateFile, mkdirPrivate } = require('./lib/private-fs');
 const { resolveMode } = require('./lib/mode-dispatch');
 const { resolvePaths } = require('./lib/paths');
@@ -1444,9 +1444,14 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
     console.log('── Email opt-outs ─────────────────────────────────────────');
     await sendOptOutEmails(brokers, config, undefined, { submissionEmailFor: (p) => submissionEmails.get(p), onlyPerson: person, dryRun: DRY_RUN, include });
 
+    // The manual DROP entry is a to-do only until the request is recorded; after that it is listed
+    // as done, with the date, and never offered again (lib/drop.js).
+    const dropDone = new Map();
     let sorted = personBrokers
       .filter(b => b.method !== 'email' && include(b.name) && brokerAppliesToPerson(b, person))
+      .filter(b => { const day = recordedDropFor(b, person, state); if (day) dropDone.set(b, day); return !day; })
       .sort((a, b) => (a.priority || 9) - (b.priority || 9));
+    for (const [broker, day] of dropDone) logResult(broker.name, 'skipped', `already done: your DROP request was recorded on ${day}`);
 
     if (RESUME) {
       // Only the person the explicit checkpoint belongs to resumes mid-list; planResume
