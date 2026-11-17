@@ -44,6 +44,8 @@ const ROUTES = {
   '/hidden/tabindex': () => ({ body: hiddenForm('<input name="email" type="email" tabindex="-1">') }),
   '/hidden/parent': () => ({ body: hiddenForm('<div style="display:none"><input name="email" type="email"></div>') }),
   '/hidden/submit': () => ({ body: hiddenSubmit('style="display:none"') }),
+  // Keeps its box but cannot be seen or clicked: only the visibility test catches it (a button is not a text field).
+  '/hidden/submit-visibility': () => ({ body: hiddenSubmit('style="visibility:hidden"') }),
   // A hidden duplicate first, the real field second: a visible match exists.
   '/hidden/duplicate-first': () => ({ body: hiddenForm('<input name="email" type="email" style="display:none"><input name="email" type="email">') }),
   '/redirect-offsite': (req) => ({ status: 302, headers: { location: `http://localhost:${req.headers.host.split(':')[1]}/ok` }, body: '' }),

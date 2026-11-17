@@ -138,6 +138,12 @@ describe('checkBroker against fixture pages', { skip: executablePath ? false : '
       assert.deepEqual(r.missing, ['button[type="submit"]']);
     });
 
+    test('a submit button that keeps its box but is visibility:hidden is missing too', async () => {
+      const r = await check(broker('/hidden/submit-visibility'));
+      assert.equal(r.status, 'drifted', r.detail);
+      assert.deepEqual(r.missing, ['button[type="submit"]']);
+    });
+
     test('a hidden submit button is missing when the selector is a Playwright one', async () => {
       const r = await check(broker('/hidden/submit', { submitSelector: 'button[type="submit"]:has-text("Remove")' }));
       assert.equal(r.status, 'drifted', r.detail);
