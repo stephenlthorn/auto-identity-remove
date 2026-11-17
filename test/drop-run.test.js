@@ -16,12 +16,14 @@ const path = require('node:path');
 const { createSandbox, runWatcher, runnableConfig } = require('./helpers/watcher-sandbox');
 const drop = require('../lib/drop');
 
+// The recorded days by person (each record also carries the identity fingerprint, see drop-identity.test.js).
+const days = (table) => Object.fromEntries(Object.entries(table || {}).map(([name, rec]) => [name, rec.submittedAt]));
 const person = (over) => ({
   firstName: 'Jane', lastName: 'Sample', fullName: 'Jane Sample', city: 'Fresno', state: 'CA', zip: '93701', country: 'US',
   email: 'jane@sample-test.example', phone: '5595550101', phoneFormatted: '(559) 555-0101', ...over,
 });
 const config = (persons, extra = {}) => runnableConfig({ persons, ...extra });
-const writeRegistry = (sandbox, hosts) => fs.writeFileSync(path.join(sandbox.repo, 'data', 'feeds-brokers.json'), JSON.stringify({ brokers: [], registryHosts: hosts, registries: [], updatedAt: "2026-11-17T00:00:00.000Z" }));
+const writeRegistry = (sandbox, hosts, count = Object.keys(hosts).length) => fs.writeFileSync(path.join(sandbox.repo, 'data', 'feeds-brokers.json'), JSON.stringify({ brokers: [], registryHosts: hosts, registries: { CA: { ok: true, count, knownCount: count } }, updatedAt: "2026-11-17T00:00:00.000Z" }));
 
 // A row of the shipped Markup dataset: generic, and not an explicit broker.
 const ROW = { name: 'Explorium Inc.', host: 'explorium.ai' };
@@ -29,7 +31,7 @@ const ROW = { name: 'Explorium Inc.', host: 'explorium.ai' };
 test('aidr drop for a California person: what it is, the URL, the status, the registry count', async () => {
   const sandbox = createSandbox({ config: config([person()]) });
   try {
-    writeRegistry(sandbox, { 'a.example': ['CA'], 'b.example': ['CA', 'VT'], 'c.example': ['VT'] });
+    writeRegistry(sandbox, { 'a.example': ['CA'], 'b.example': ['CA', 'VT'], 'c.example': ['VT'] }, 2);
     const r = await runWatcher(sandbox, ['--drop']);
     assert.equal(r.code, 0, r.stdout + r.stderr);
     assert.match(r.stdout, /Delete Request and Opt-out Platform/);
@@ -56,7 +58,7 @@ test('aidr drop --done --on records the day in state.json; --clear removes it', 
     const done = await runWatcher(sandbox, ['--drop', '--done', '--on', '2026-09-01']);
     assert.equal(done.code, 0, done.stdout + done.stderr);
     assert.match(done.stdout, /brokers have until 2026-11-30/);
-    assert.deepEqual(sandbox.readState().drop, { 'Jane Sample': { submittedAt: '2026-09-01' } });
+    assert.deepEqual(days(sandbox.readState().drop), { 'Jane Sample': '2026-09-01' });
     assert.ok(sandbox.readState().optOuts.Spokeo, 'the opt-out history is untouched');
 
     const cleared = await runWatcher(sandbox, ['--drop', '--clear']);
@@ -90,7 +92,7 @@ test('--person picks one of several people', async () => {
   try {
     const r = await runWatcher(sandbox, ['--drop', '--done', '--on', '2026-09-01', '--person', 'Janet Sample']);
     assert.equal(r.code, 0, r.stdout + r.stderr);
-    assert.deepEqual(sandbox.readState().drop, { 'Janet Sample': { submittedAt: '2026-09-01' } });
+    assert.deepEqual(days(sandbox.readState().drop), { 'Janet Sample': '2026-09-01' });
   } finally { sandbox.cleanup(); }
 });
 
@@ -199,4 +201,29 @@ test('aidr complaints drafts a DROP complaint only when verification found a lis
     assert.equal(withoutEvidence.code, 0, withoutEvidence.stdout + withoutEvidence.stderr);
     assert.deepEqual(complaintFiles(ageOnly), []);
   } finally { evidence.cleanup(); ageOnly.cleanup(); }
+});
+
+test('a mistyped drop.alsoSubmit submits the covered row and the run says why, once (D6)', async () => {
+  const sandbox = createSandbox({ config: config([person()], { drop: { alsoSubmit: 'true' } }), state: { optOuts: {}, drop: { 'Jane Sample': { submittedAt: '2026-09-01' } } } });
+  try {
+    writeRegistry(sandbox, { [ROW.host]: ['CA'] });
+    const r = await runOnlyRow(sandbox);
+    assert.equal(r.code, 0, r.stdout + r.stderr);
+    assert.equal(lookedUp(sandbox), true, 'the row was visited, not skipped');
+    assert.doesNotMatch(r.stdout, /covered by DROP/);
+    assert.equal(r.stdout.split('\n').filter(l => /drop\.alsoSubmit must be true or false/.test(l)).length, 1, r.stdout);
+  } finally { sandbox.cleanup(); }
+});
+
+// D12: a bundled row on a shared form platform is never "covered" by a platform domain.
+test('a bundled row on a shared form platform is still visited, even if the registry file lists the platform', async () => {
+  const platformRow = { name: 'Path2Response LLC', host: 'privacyportal-cdn.onetrust.com' };
+  const sandbox = createSandbox({ config: config([person()]), state: { optOuts: {}, drop: { 'Jane Sample': { submittedAt: '2026-09-01' } } } });
+  try {
+    writeRegistry(sandbox, { 'onetrust.com': ['CA'], 'co.uk': ['CA'], 'acme-data.example': ['CA'] });
+    const r = await runWatcher(sandbox, ['--only', platformRow.name]);
+    assert.equal(r.code, 0, r.stdout + r.stderr);
+    assert.equal(sandbox.networkAttempts().some(e => String(e.host || e.url || '').includes(platformRow.host)), true, 'the portal host was looked up');
+    assert.doesNotMatch(r.stdout, /covered by DROP/);
+  } finally { sandbox.cleanup(); }
 });

@@ -43,12 +43,11 @@ test('a junk dropCovered value counts as zero', () => {
   assert.equal(computeExposureScore({ state: STATE, dropCovered: 'lots' }).dropCovered, 0);
 });
 
-test('dropCoveredCount: the California registry size when a California person has a request, else 0', () => {
-  const registryHosts = { 'a.example': ['CA'], 'b.example': ['VT'] };
+test('dropCoveredCount: the California registry broker count when a California person has a request, else 0', () => {
   const jane = { firstName: 'Jane', lastName: 'Sample', state: 'CA' };
   const bob = { firstName: 'Bob', lastName: 'Sample', state: 'TX' };
   const recorded = { drop: { 'Jane Sample': { submittedAt: '2026-09-01' } } };
-  assert.equal(dropCoveredCount({ persons: [jane, bob], state: recorded, registryHosts }), 1);
-  assert.equal(dropCoveredCount({ persons: [jane], state: {}, registryHosts }), 0);
-  assert.equal(dropCoveredCount({ persons: [bob], state: { drop: { 'Bob Sample': { submittedAt: '2026-09-01' } } }, registryHosts }), 0);
+  assert.equal(dropCoveredCount({ persons: [jane, bob], state: recorded, registryCount: 412 }), 412);
+  assert.equal(dropCoveredCount({ persons: [jane], state: {}, registryCount: 412 }), 0);
+  assert.equal(dropCoveredCount({ persons: [bob], state: { drop: { 'Bob Sample': { submittedAt: '2026-09-01' } } }, registryCount: 412 }), 0);
 });

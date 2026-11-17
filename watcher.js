@@ -37,7 +37,7 @@ const { renderAuditMarkdown, writeAuditFile, timestampForFilename } = require('.
 const { buildStealthScript } = require('./lib/stealth');
 const { buildLaunchOptions, resolveHeadless, isLowMemory, createPersonContexts, createThrowawayContexts, utilityProfileDir, browserConfigProblems, describeProxy } = require('./lib/browser');
 const { installShutdownHandlers } = require('./lib/shutdown');
-const { loadRegistryHosts, makeCoveredByDrop, dropRunNotes, brokerAppliesToPerson } = require('./lib/drop');
+const { loadRegistryHostsSafe, loadCaBrokerCountSafe, makeCoveredByDrop, dropRunNotes, brokerAppliesToPerson, recordedDropFor } = require('./lib/drop');
 const { writePrivateFile, mkdirPrivate } = require('./lib/private-fs');
 const { resolveMode } = require('./lib/mode-dispatch');
 const { resolvePaths } = require('./lib/paths');
@@ -374,7 +374,7 @@ function modeFreeze() {
 // DROP verifies identity itself, so this never submits anything: it prints what to do,
 // and keeps the date the person did it (lib/drop.js).
 function modeDrop() {
-  const { runDrop, todayDay, californiaDomains, DROP_URL } = require('./lib/drop');
+  const { runDrop, todayDay, DROP_URL } = require('./lib/drop');
   const { persons } = loadConfigOrExit();
   const state = loadState();
 
@@ -387,8 +387,9 @@ function modeDrop() {
       persons,
       state,
       options: { done: ARGS.done, clear: ARGS.clear, on: ARGS.on, person: ARGS.person },
-      registryCount: californiaDomains(loadRegistryHosts()).size,
+      registryCount: loadCaBrokerCountSafe(),
       today: todayDay(),
+      utcToday: todayDay(new Date(), 0),
     });
   } finally {
     if (guard) guard.release();
@@ -506,7 +507,7 @@ function modeScore() {
   // A recorded DROP request is shown beside the score, never inside it (lib/exposure.js).
   let dropCovered = 0;
   try {
-    dropCovered = require('./lib/drop').dropCoveredCount({ persons: getPersonsFromConfig(readConfigQuietly()), state, registryHosts: loadRegistryHosts() });
+    dropCovered = require('./lib/drop').dropCoveredCount({ persons: getPersonsFromConfig(readConfigQuietly()), state, registryCount: loadCaBrokerCountSafe() });
   } catch (_) { /* no readable config: the score does not need one */ }
   const summary = computeExposureScore({ state, brokers, dropCovered, ...loadPersistedSignals() });
 
@@ -636,7 +637,7 @@ async function modeComplaints() {
   // California DROP: a registry broker still listing someone after the request's window.
   const dropOverdue = findDropOverdue(state, {
     persons,
-    registryHosts: loadRegistryHosts(),
+    registryHosts: loadRegistryHostsSafe(),
     hostFor: (name) => { const b = brokerMap.get(name); return b && (b.optOutUrl || b.searchUrl); },
   });
   if (overdueList.length === 0 && dropOverdue.length === 0) {
@@ -1509,9 +1510,14 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
     }
     await sendOptOutEmails(brokers, config, undefined, { submissionEmailFor: (p) => submissionEmails.get(p), onlyPerson: person, dryRun: DRY_RUN, include: emailInclude });
 
+    // The manual DROP entry is a to-do only until the request is recorded; after that it is listed
+    // as done, with the date, and never offered again (lib/drop.js).
+    const dropDone = new Map();
     let sorted = personBrokers
       .filter(b => b.method !== 'email' && include(b.name) && brokerAppliesToPerson(b, person))
+      .filter(b => { const day = recordedDropFor(b, person, state); if (day) dropDone.set(b, day); return !day; })
       .sort((a, b) => (a.priority || 9) - (b.priority || 9));
+    for (const [broker, day] of dropDone) logResult(broker.name, 'skipped', `already done: your DROP request was recorded on ${day}`);
 
     if (RESUME) {
       // Only the person the explicit checkpoint belongs to resumes mid-list; planResume
@@ -1647,7 +1653,7 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
   });
 
   // DROP: what the person should know once per run, and the registry list the generic pass skips by.
-  const dropRegistryHosts = loadRegistryHosts();
+  const dropRegistryHosts = loadRegistryHostsSafe();
   for (const line of dropRunNotes({ persons, state, config, registryHosts: dropRegistryHosts })) console.log(`\n${line}`);
 
   const genericTotals = {};
