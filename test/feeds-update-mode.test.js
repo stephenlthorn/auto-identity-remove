@@ -34,7 +34,7 @@ test('runUpdateBrokers derives explicit hosts and passes them to buildFn', async
   assert.equal(capturedHosts.size, 2);
 });
 
-test('runUpdateBrokers writes the normalized broker array via writeFn', async () => {
+test('runUpdateBrokers writes the normalized brokers (inside the feeds file) via writeFn', async () => {
   const brokerList = [
     { name: 'Acme', optOutUrl: 'https://acme.example.com/opt-out', method: 'direct-form', source: 'ca' },
   ];
@@ -42,7 +42,8 @@ test('runUpdateBrokers writes the normalized broker array via writeFn', async ()
   let written = null;
   const writeFn = (payload) => { written = payload; };
   const result = await runUpdateBrokers({ buildFn, writeFn, brokers: [], logFn: () => {} });
-  assert.deepEqual(written, brokerList);
+  assert.deepEqual(written.brokers, brokerList);
+  assert.deepEqual(written.registryHosts, {});
   assert.equal(result.stats.total, 1);
 });
 

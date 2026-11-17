@@ -79,6 +79,7 @@ test('normalizeFeedRow maps a California-style row to a generic broker entry', (
     optOutUrl: 'https://acme.example.com/opt-out',
     method: 'direct-form',
     source: 'ca',
+    registries: ['CA'],
   });
 });
 

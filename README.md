@@ -26,7 +26,7 @@ Beyond the monthly run, it can also:
 - **Stay private** - submit from a masked relay email (SimpleLogin), encrypt `config.json` at rest (AES-256-GCM, opt-in via `AIDR_PASSPHRASE`), and detect success/confirmation text in 6 languages
 - **Run from a browser** - an optional local web dashboard with a first-run config wizard, live run console, status board and a **History** tab of past runs (`aidr dashboard`)
 - **Stay in control of the job** - solve the CAPTCHAs a solver cannot (`aidr captchas`), check and remove the monthly job (`aidr schedule`), resume a killed run, check your config (`aidr config check`) and purge old PII files (`aidr purge`)
-- **Keep coverage fresh** - pull the broker list from the official California (SB 362) and Vermont registries (`aidr update-brokers`), and keep brokers you *want* to stay listed on via an allowlist
+- **Keep coverage fresh** - pull the broker list from the California Privacy Protection Agency's current data broker registry (`aidr update-brokers`; Vermont no longer offers a file export, and Texas and Oregon have none), and keep brokers you *want* to stay listed on via an allowlist
 
 ---
 
@@ -127,7 +127,7 @@ maps to an existing entrypoint:
 | `aidr freeze` | Shows the credit/identity-freeze checklist and its status |
 | `aidr complaints` | Generates regulator complaints for brokers past the CCPA/GDPR deadline |
 | `aidr know` | Sends CCPA/GDPR right-to-know requests |
-| `aidr update-brokers` | Refreshes the broker list from the CA + Vermont registries |
+| `aidr update-brokers` | Refreshes the broker list from the current California registry |
 | `aidr list` | Lists configured brokers and their last-known status |
 | `aidr doctor` | Self-diagnoses your environment and configuration |
 | `aidr config check` | Checks `config.json`, the passphrase source and where state lives; exits 1 on a problem |
@@ -834,13 +834,18 @@ Only brokers tagged `acceptsBogus: true` in `brokers.js` will receive noise subm
 
 ### Refreshing the broker list (`--update-brokers`)
 
-The bundled Markup dataset is from January 2023 and is increasingly stale. Refresh the broker coverage from the official, auto-updating state data-broker registries:
+The bundled Markup dataset is from January 2023 and is increasingly stale. Refresh the broker coverage from the state data-broker registries that publish a file:
 
 ```bash
 node watcher.js --update-brokers
 ```
 
-This fetches the California (SB-362) and Vermont registries over HTTP (no browser is launched), normalizes each entry, dedups it by hostname against the explicit brokers in `brokers.js`, and writes `data/feeds-brokers.json`. The generic runner loads that file alongside the Markup dataset on the next run; the Markup data stays as the fallback, so a failed or skipped refresh never reduces coverage. Override the registry URLs with the `CA_REGISTRY_URL` / `VT_REGISTRY_URL` environment variables if the official endpoints move.
+This reads the California Privacy Protection Agency's current data broker registry over HTTP (no browser is launched), normalizes each entry (preferring the registry's consumer-rights page as the opt-out URL), dedups it by hostname against the explicit brokers in `brokers.js`, and writes `data/feeds-brokers.json`. Each broker records which registries list it (`registries`), and the file keeps a `registryHosts` map of every registry domain to the registries that list it. The command prints one line per registry with its count or its failure. A registry that fails (an HTML page, an error status, or no rows) is reported as failed and its rows from the earlier run are kept, with their date; the command exits non-zero only when every registry failed. Other states:
+
+- **Vermont** no longer offers a file export, so it is skipped with a one-line note. Set `VT_REGISTRY_URL` to a CSV of your own to read it.
+- **Texas and Oregon** run their registries as web applications only, with no CSV, spreadsheet or JSON export, so they are not read.
+
+The generic runner loads the file alongside the Markup dataset on the next run; the Markup data stays as the fallback, so a failed or skipped refresh never reduces coverage. Override the California URL with `CA_REGISTRY_URL` if the official endpoint moves.
 
 ---
 

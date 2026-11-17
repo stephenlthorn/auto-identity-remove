@@ -815,8 +815,8 @@ async function modeDoctor() {
 async function modeUpdateBrokers() {
   const brokers = require('./brokers');
   const { runUpdateBrokers } = require('./lib/feeds');
-  await runUpdateBrokers({ brokers, logFn: (m) => console.log(m) });
-  process.exit(0);
+  const outcome = await runUpdateBrokers({ brokers, logFn: (m) => console.log(m) });
+  process.exit(outcome.exitCode);
 }
 
 // ── --install-scheduler: register with OS scheduler and exit ─────────────────
