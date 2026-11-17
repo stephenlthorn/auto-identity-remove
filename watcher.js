@@ -37,6 +37,7 @@ const { renderAuditMarkdown, writeAuditFile, timestampForFilename } = require('.
 const { buildStealthScript } = require('./lib/stealth');
 const { buildLaunchOptions, resolveHeadless, isLowMemory, createPersonContexts, createThrowawayContexts, utilityProfileDir, browserConfigProblems, describeProxy } = require('./lib/browser');
 const { installShutdownHandlers } = require('./lib/shutdown');
+const { loadRegistryHosts, makeCoveredByDrop, dropRunNotes, brokerAppliesToPerson } = require('./lib/drop');
 const { writePrivateFile, mkdirPrivate } = require('./lib/private-fs');
 const { resolveMode } = require('./lib/mode-dispatch');
 const { resolvePaths } = require('./lib/paths');
@@ -85,6 +86,7 @@ const KEEP_PLAINTEXT  = ARGS.keepPlaintext;
 const KNOW_MODE       = ARGS.know;
 const KNOW_STATUS     = ARGS.knowStatus;
 const COMPLAINTS_MODE = ARGS.complaints;
+const DROP_MODE       = ARGS.drop;
 
 // ── Credit / identity freeze guided checklist ────────────────────────────────
 const FREEZE_DONE_KEY  = ARGS.freezeDone;
@@ -358,6 +360,42 @@ function modeFreeze() {
   process.exit(0);
 }
 
+// -- aidr drop: California's DROP request (show, record, clear) ---------------
+// DROP verifies identity itself, so this never submits anything: it prints what to do,
+// and keeps the date the person did it (lib/drop.js).
+function modeDrop() {
+  const { runDrop, todayDay, californiaDomains, DROP_URL } = require('./lib/drop');
+  const { persons } = loadConfigOrExit();
+  const state = loadState();
+
+  // Recording and clearing write state.json, so they take the lock like --freeze-done.
+  const isMutation = ARGS.done || ARGS.clear;
+  const guard = isMutation ? acquireRunLock(LOCK_PATH) : null;
+  let result;
+  try {
+    result = runDrop({
+      persons,
+      state,
+      options: { done: ARGS.done, clear: ARGS.clear, on: ARGS.on, person: ARGS.person },
+      registryCount: californiaDomains(loadRegistryHosts()).size,
+      today: todayDay(),
+    });
+  } finally {
+    if (guard) guard.release();
+  }
+
+  const out = result.code === 0 ? console.log : console.error;
+  out('\n' + result.lines.join('\n') + '\n');
+  // Open the page only for someone sitting at a desktop who still has to file: never in
+  // a scheduled or piped run, and never after they just recorded or cleared something.
+  const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY) && canOpenBrowser();
+  if (result.code === 0 && result.pending && !isMutation && !DRY_RUN && interactive) {
+    console.log(`Opening ${DROP_URL} in your browser...\n`);
+    openInBrowser([DROP_URL]);
+  }
+  process.exit(result.code);
+}
+
 // -- --encrypt-config / --decrypt-config: at-rest encryption migration --------
 function modeEncryption() {
   const { encryptConfigToDisk, decryptConfigToDisk, getPassphrase, PASSPHRASE_ENV, PASSPHRASE_FILE_ENV } = require('./lib/config');
@@ -455,7 +493,12 @@ function modeScore() {
 
   // The SERP signal is the latest conclusive scan and the breach count is the
   // last real HIBP result, not the hard-coded 0 this used to pass.
-  const summary = computeExposureScore({ state, brokers, ...loadPersistedSignals() });
+  // A recorded DROP request is shown beside the score, never inside it (lib/exposure.js).
+  let dropCovered = 0;
+  try {
+    dropCovered = require('./lib/drop').dropCoveredCount({ persons: getPersonsFromConfig(readConfigQuietly()), state, registryHosts: loadRegistryHosts() });
+  } catch (_) { /* no readable config: the score does not need one */ }
+  const summary = computeExposureScore({ state, brokers, dropCovered, ...loadPersistedSignals() });
 
   const priorHistory = loadExposureHistory();
   console.log('\n' + formatScoreReport(summary, priorHistory));
@@ -568,7 +611,7 @@ async function modeBreachCheck() {
 //    response window (CCPA 45d / GDPR 30d) and write text + PDF to logs/. ─────
 async function modeComplaints() {
   const brokers = require('./brokers');
-  const { findOverdue, findOverdueKnowRequests, formatOverdueKnowNote, complainantFor, buildComplaintsForBroker, writeComplaintFiles } = require('./lib/complaint');
+  const { findOverdue, findOverdueKnowRequests, formatOverdueKnowNote, complainantFor, buildComplaintsForBroker, writeComplaintFiles, findDropOverdue, buildDropComplaint } = require('./lib/complaint');
 
   const { config, persons } = loadConfigOrExit();
   const state   = loadState();
@@ -580,7 +623,13 @@ async function modeComplaints() {
   if (knowNote) console.log('\n' + knowNote);
 
   const overdueList = findOverdue(state, { persons });
-  if (overdueList.length === 0) {
+  // California DROP: a registry broker still listing someone after the request's window.
+  const dropOverdue = findDropOverdue(state, {
+    persons,
+    registryHosts: loadRegistryHosts(),
+    hostFor: (name) => { const b = brokerMap.get(name); return b && (b.optOutUrl || b.searchUrl); },
+  });
+  if (overdueList.length === 0 && dropOverdue.length === 0) {
     console.log('\nNo broker qualifies for a complaint: it needs a deletion request past its response window and a verification (run --verify) that your data is still listed.\n');
     process.exit(0);
   }
@@ -595,7 +644,7 @@ async function modeComplaints() {
     for (const { overdue } of unmatched) console.log(`  - ${overdue.broker}${overdue.person ? ` (${overdue.person})` : ''}`);
   }
   const matched = complainants.filter(c => c.person);
-  if (matched.length === 0) {
+  if (matched.length === 0 && dropOverdue.length === 0) {
     console.log('\nNo complaint was written.\n');
     process.exit(0);
   }
@@ -615,6 +664,14 @@ async function modeComplaints() {
     );
     return { broker: overdue.broker, person: overdue.person, complaints: buildComplaintsForBroker({ person, broker, overdue }) };
   });
+
+  for (const row of dropOverdue) {
+    const person = complainantFor(row, persons);
+    if (!person) continue;
+    const broker = brokerMap.get(row.broker) || { name: row.broker };
+    console.log(pad(row.broker, 32) + pad('DROP', 8) + pad(String(row.daysOverdue), 14) + row.submittedAt);
+    entries.push({ broker: row.broker, person: row.person, complaints: [buildDropComplaint({ person, broker, overdue: row })] });
+  }
 
   // Complaints carry the complainant's name, address, email and phone.
   mkdirPrivate(outDir);
@@ -1376,7 +1433,7 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
     await sendOptOutEmails(brokers, config, undefined, { submissionEmailFor: (p) => submissionEmails.get(p), onlyPerson: person, dryRun: DRY_RUN, include });
 
     let sorted = personBrokers
-      .filter(b => b.method !== 'email' && include(b.name))
+      .filter(b => b.method !== 'email' && include(b.name) && brokerAppliesToPerson(b, person))
       .sort((a, b) => (a.priority || 9) - (b.priority || 9));
 
     if (RESUME) {
@@ -1498,6 +1555,10 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
     noSolver: NO_CAPSOLVER,
   });
 
+  // DROP: what the person should know once per run, and the registry list the generic pass skips by.
+  const dropRegistryHosts = loadRegistryHosts();
+  for (const line of dropRunNotes({ persons, state, config, registryHosts: dropRegistryHosts })) console.log(`\n${line}`);
+
   const genericTotals = {};
   for (const [index, person] of persons.entries()) {
     if (relaySkipped.has(person)) continue;
@@ -1530,6 +1591,8 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
       include,
       // Lets the generic pass drop rows that are the same company as an explicit broker.
       explicitBrokers: brokers,
+      // California DROP: rows the person's recorded request already covers are not visited.
+      coveredByDrop: makeCoveredByDrop({ person, state, config, registryHosts: dropRegistryHosts }) || undefined,
       // R2: write a resume point as the pass advances, and pick one back up. A filtered
       // run writes none: its rows are not the interrupted full run's, and a checkpoint
       // of its own would replace the one a killed full run is waiting on (CLI2-10).
@@ -1704,6 +1767,7 @@ async function dispatch() {
   }
 
   if (FREEZE_MODE)                     return modeFreeze();
+  if (DROP_MODE)                       return modeDrop();
   if (ENCRYPT_CONFIG || DECRYPT_CONFIG) return modeEncryption();
   if (LIST_MODE)                       return modeList();
   if (SCORE_MODE)                      return modeScore();

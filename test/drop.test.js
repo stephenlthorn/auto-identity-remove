@@ -128,7 +128,7 @@ test('loadRegistryHosts: reads registryHosts, and a missing file or key is an em
     assert.deepEqual(drop.loadRegistryHosts({ filePath: file }), {}, 'the old array shape has no registryHosts');
     fs.writeFileSync(file, '{not json');
     assert.deepEqual(drop.loadRegistryHosts({ filePath: file }), {});
-    fs.writeFileSync(file, JSON.stringify({ rows: [], registryHosts: REGISTRY }));
+    fs.writeFileSync(file, JSON.stringify({ brokers: [], registryHosts: REGISTRY }));
     assert.deepEqual(drop.loadRegistryHosts({ filePath: file }), REGISTRY);
     fs.writeFileSync(file, JSON.stringify({ registryHosts: { 'WWW.Acme-Data.example': ['ca'], 'bad.example': 'CA', 'worse.example': [] } }));
     assert.deepEqual(drop.loadRegistryHosts({ filePath: file }), { 'acme-data.example': ['CA'] }, 'normalised; malformed rows dropped');
@@ -340,4 +340,10 @@ test('dropRunNotes: a record with an empty registry list says to run update-brok
 
 test('dropRunNotes: alsoSubmit silences the empty-registry line (nothing would be skipped anyway)', () => {
   assert.deepEqual(notes({ state: STATE_WITH_DROP, registryHosts: {}, config: { drop: { alsoSubmit: true } } }), []);
+});
+
+test('brokerAppliesToPerson: a californiaOnly entry is for California residents only', () => {
+  assert.equal(drop.brokerAppliesToPerson({ name: 'CalPrivacy DROP', californiaOnly: true }, JANE), true);
+  assert.equal(drop.brokerAppliesToPerson({ name: 'CalPrivacy DROP', californiaOnly: true }, BOB), false);
+  assert.equal(drop.brokerAppliesToPerson({ name: 'Spokeo' }, BOB), true);
 });
