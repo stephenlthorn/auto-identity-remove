@@ -195,3 +195,37 @@ test('a search-only broker is not described as "nothing typed"', () => {
   report.addSearch('Other', ['full name']);
   assert.ok(!/nothing typed/.test(report.renderTables().join('\n')));
 });
+
+test('F2: a non-US person\'s country is a detail, not "fixed text"', () => {
+  const build = (p) => [{ name: 'Fixture', formFields: { 'input[name*="state" i]': p.state } }];
+  const t = fr.templatesFor('Fixture', build, { ...PERSON, country: 'GB' });
+  const countrySel = Object.keys(t).find(sel => /country/.test(sel));
+  assert.deepEqual(t[countrySel], ['country']);
+  assert.deepEqual(fr.detailLabels(['country', 'zip']), ['ZIP', 'country']);
+  assert.deepEqual(fr.detailLabels(['country']), ['country']);
+});
+
+test('F2: entriesFromTyped names the field that took the value when fillForm says which', () => {
+  const e = fr.entriesFromTyped([{ selector: 'input[name*="first" i]', field: 'applicant_first_name', value: 'x' }], { 'input[name*="first" i]': ['firstName'] });
+  assert.equal(e[0].field, 'applicant_first_name');
+  assert.deepEqual(e[0].details, ['first name']);
+});
+
+test('F2: optOutUrlDetailsFor reads the details in the opt-out URL itself', () => {
+  const build = (p) => [
+    { name: 'Q', optOutUrl: `https://q.example/optout?name=${encodeURIComponent(p.fullName)}&email=${encodeURIComponent(p.email)}`, formFields: {} },
+    { name: 'Plain', optOutUrl: 'https://q.example/optout', formFields: {} },
+  ];
+  assert.deepEqual(fr.optOutUrlDetailsFor('Q', build, PERSON), ['fullName', 'email']);
+  assert.deepEqual(fr.optOutUrlDetailsFor('Plain', build, PERSON), []);
+  assert.equal(fr.optOutUrlDetailsFor('Nope', build, PERSON), null);
+});
+
+test('F2: the table marks details sent in the opt-out URL and counts them', () => {
+  const report = fr.createFieldReport({ log() {} });
+  report.addUrl('Q', ['full name', 'email']);
+  report.add('Q', [{ field: 'zip', details: ['ZIP'] }]);
+  const table = report.renderTables().join('\n');
+  assert.match(table, /Q\s+\|\s+ZIP; opt-out URL: full name, email/);
+  assert.match(table, /opt-out URL sends email: 1 of 1/);
+});
