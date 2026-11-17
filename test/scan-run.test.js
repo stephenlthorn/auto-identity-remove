@@ -12,6 +12,9 @@ const searchBroker = (name, extra = {}) => ({
   method: 'search-form',
   searchUrl: `https://${name.toLowerCase()}.example/search`,
   listingPattern: /listing/i,
+  // These tests are about how a scan works; whether an empty answer may drive a skip
+  // (searchCheckedAt) is covered in scan-unvalidated.test.js.
+  searchCheckedAt: '2026-11-17',
   ...extra,
 });
 const directWithSearch = (name) => ({ ...searchBroker(name), method: 'direct-form', optOutUrl: `https://${name.toLowerCase()}.example/optout` });

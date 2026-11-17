@@ -45,6 +45,7 @@ const { openJournal, journalPathFor, countResults } = require('./lib/journal');
 const { startHeartbeat, defaultHeartbeatPath, outcomeFromResults } = require('./lib/heartbeat');
 const { OFFLINE_HINT } = require('./lib/outage');
 const { applyFoundOnly, hasAnyScan } = require('./lib/scan');
+const { scanReportLines } = require('./lib/scan-report');
 const { scanSettings } = require('./lib/scan-config');
 const { applyRetention } = require('./lib/retention');
 const { isPlaceholderKey, detectAndSolveCaptcha } = require('./lib/captcha');
@@ -1274,30 +1275,14 @@ async function runScanMode(contexts, { brokers, persons, state, config }) {
   await contexts.close();
 
   const label = (e) => (persons.length > 1 && e.person ? `${e.broker} (${personName(e.person)})` : e.broker);
-  const cannotSearch = new Set(result.unsearchable.map(e => e.broker));
   console.log('\n' + '='.repeat(54));
   console.log('Scan results - ' + new Date().toLocaleString());
   console.log('='.repeat(54));
-  console.log(`  found          : ${result.found.length}`);
-  console.log(`  not found      : ${result.not_found.length}`);
-  console.log(`  could not tell : ${result.unknown.length}`);
-  console.log(`  cannot search  : ${cannotSearch.size} broker(s) (and the generic brokers, which have no search page)`);
-  if (result.found.length > 0) {
-    console.log('\nWhere you were found:');
-    for (const e of result.found) console.log(`  - ${label(e)}: ${e.listingUrl}${e.screenshot ? `\n      screenshot: ${e.screenshot}` : ''}`);
-  }
-  if (result.not_found.length > 0) {
-    console.log('\nWhere you were not found:');
-    console.log('  ' + result.not_found.map(label).join(', '));
-  }
-  if (result.unknown.length > 0) {
-    console.log('\nCould not tell (not the same as not listed):');
-    for (const e of result.unknown) console.log(`  - ${label(e)}: ${e.reason}`);
-  }
+  for (const line of scanReportLines(result, { label })) console.log(line);
   console.log(DRY_RUN ? '\nDry run: results not saved.' : `\nSaved to ${STATE_PATH}. Next: aidr run --found-only`);
   console.log('='.repeat(54) + '\n');
   // A scan that learned nothing at all (everything could not be told) should not look like a clean one.
-  const searched = result.found.length + result.not_found.length + result.unknown.length;
+  const searched = result.found.length + result.not_found.length + result.unvalidated.length + result.unknown.length;
   if (searched > 0 && result.unknown.length === searched) process.exitCode = 2;
 }
 

@@ -121,9 +121,11 @@ test('scan then run --found-only: found is submitted, not found is skipped, and 
     const scan = await runWatcher(sandbox, ['--scan'], answers);
     assert.equal(scan.code, 0, scan.stderr);
     assert.match(scan.stdout, /found          : 1/);
-    assert.match(scan.stdout, /not found      : 5/);
+    assert.match(scan.stdout, /not found      : 1/, 'only USPhonebook has a search step validated live');
+    assert.match(scan.stdout, /not validated  : 4/);
     assert.match(scan.stdout, /Where you were found:\n\s+- Spokeo: https:\/\/listing\.example\/Spokeo/);
-    assert.match(scan.stdout, /Where you were not found:\n\s+.*USPhonebook/);
+    assert.match(scan.stdout, /Where you were not found:\n\s+USPhonebook\n/);
+    assert.match(scan.stdout, /search is not validated:\n\s+.*Nuwber/);
     assert.deepEqual(gotos(sandbox), [], 'a scan opens no opt-out page (the search was answered by the preload)');
     const scans = sandbox.readState().scans;
     assert.equal(scans.Spokeo.outcome, 'found');
@@ -205,12 +207,12 @@ test('found-only: found is submitted, not_found is skipped with its reason, an u
 });
 
 test('found-only: with scan.unknown "submit" (the default) an unscanned broker still runs', async () => {
-  const state = { optOuts: {}, scans: { Spokeo: { at: daysAgo(2), outcome: 'not_found', fp: personFingerprint(ADA), sh: shOf('Spokeo') } } };
+  const state = { optOuts: {}, scans: { USPhonebook: { at: daysAgo(2), outcome: 'not_found', fp: personFingerprint(ADA), sh: shOf('USPhonebook') } } };
   await inSandbox({ config: oneAda(), state }, async (sandbox) => {
-    const r = await runWatcher(sandbox, ['--found-only', '--only', 'Spokeo,Nuwber']);
+    const r = await runWatcher(sandbox, ['--found-only', '--only', 'USPhonebook,Nuwber']);
     assert.equal(r.code, 0, r.stderr);
     const opened = gotos(sandbox);
-    assert.ok(!opened.some(u => u.includes('spokeo.com')));
+    assert.ok(!opened.some(u => u.includes('usphonebook.com')));
     assert.ok(opened.some(u => u.includes('nuwber.com')));
   });
 });
@@ -226,12 +228,16 @@ test('found-only with scan.unknown "skip": the email and generic passes are skip
   });
 });
 
-test('found-only with scan.unknown "submit": the generic pass runs as today', async () => {
-  const state = { optOuts: {}, scans: { Spokeo: { at: daysAgo(2), outcome: 'not_found', fp: personFingerprint(ADA), sh: shOf('Spokeo') } } };
+test('found-only with scan.unknown "submit": the generic pass runs, and says nothing about leaving it out', async () => {
+  const state = { optOuts: {}, scans: { Spokeo: { at: daysAgo(2), outcome: 'found', listingUrl: 'https://www.spokeo.com/x', fp: personFingerprint(ADA), sh: shOf('Spokeo') } } };
   await inSandbox({ config: oneAda(), state }, async (sandbox) => {
-    const r = await runWatcher(sandbox, ['--found-only', '--only', 'Spokeo'], { timeoutMs: 90000 });
-    assert.equal(r.code, 0, r.stderr);
+    // No --only: --only Spokeo would exclude the generic pass anyway and prove nothing.
+    const r = await runWatcher(sandbox, ['--found-only'], { timeoutMs: 120000 });
+    // Every broker errors against the fake browser, which makes the exit code 1 by design.
+    assert.equal(r.timedOut, false);
+    assert.doesNotMatch(r.stderr, /Fatal/);
     assert.doesNotMatch(r.stdout, /cannot be searched, so scan\.unknown/);
+    assert.ok(sandbox.fakeEvents().filter(e => e.event === 'dns').length > 0, 'the generic pass looked hosts up');
   });
 });
 

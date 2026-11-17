@@ -901,16 +901,26 @@ The latest result for each person and broker is saved in `state.json` under `sca
 | Result | Meaning |
 |--------|---------|
 | `found` | The search page showed a listing. The URL is kept and the search page is screenshotted into the snapshots directory (private permissions, and removed by `aidr purge` like the others) |
-| `not_found` | The search page loaded and showed no listing |
+| `not_found` | The search page loaded and showed no listing. `aidr scan` files it under "Where you were not found" only for a broker whose search step was validated live (`searchCheckedAt` in `brokers.js`); for the others it prints "No listing seen, but this site's search is not validated", because a site whose result links stopped matching would give the same empty answer on a normal results page |
 | `unknown` | **Could not tell**: a bot wall, a failed navigation, a non-2xx answer, a browser that would not start. This is never recorded as `not_found` |
+
+Each record also carries `sh`, a one-way hash of the exact search address that was
+searched (never the address itself: it holds your name). `--found-only` trusts a record only
+when its hash is your current search at that broker, so fixing a wrong state or a full name
+in `config.json` makes every older result count as never scanned instead of leaving the old
+"not listed" in force for 30 days. A record from an older version has no hash and counts the
+same way. A search whose details are blank (no full name, no state) is not made: it is
+recorded as could not tell, with the missing detail named, never as not found.
 
 `aidr run --found-only` runs the normal opt-out pass, narrowed by the scan:
 
 - A broker the latest scan says is `found` is submitted. One it says is `not_found` is
-  skipped, and the run log says why ("not listed (scan of 2026-11-17)").
-- A broker whose scan is `unknown`, older than `scan.maxAgeDays`, missing, or that
-  cannot be searched at all follows `scan.unknown`: `submit` (the default) or `skip`. A
-  skip is logged with its reason.
+  skipped, and the run log says why ("not listed (scan of 2026-11-17)"), but only when that
+  broker's search step was validated live. A `found` from any searchable broker is used.
+- A broker whose scan is `unknown`, older than `scan.maxAgeDays`, missing (or made for
+  different details), that cannot be searched at all, or whose empty result comes from a
+  search step that was never validated follows `scan.unknown`: `submit` (the default) or
+  `skip`. A skip is logged with its reason.
 - The email opt-outs and the ~490 generic brokers cannot be searched, so they follow
   `scan.unknown` as a whole. With `skip` the run says in one line that they were skipped
   and why; with `submit` they run as before.

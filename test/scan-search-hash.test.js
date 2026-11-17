@@ -19,7 +19,10 @@ const janeInCA = { ...jane, state: 'CA' };
 const NOW = new Date('2026-11-17T12:00:00.000Z');
 const daysBefore = (n) => new Date(NOW.getTime() - n * 86400000).toISOString();
 
-const spokeoFor = (person) => brokers.forPerson(person).find(b => b.name === 'Spokeo');
+// USPhonebook is the one searchable broker whose search step was validated live, so its
+// "not listed" is the kind that can drive a skip.
+const spokeoFor = (person) => brokers.forPerson(person).find(b => b.name === 'USPhonebook');
+const realSpokeoFor = (person) => brokers.forPerson(person).find(b => b.name === 'Spokeo');
 const ref = (brokerName, person = jane) => ({ brokerName, person, personCount: 1, persons: [person], personIndex: 0 });
 
 const makeContext = () => ({ newPage: async () => ({ close: async () => {} }) });
@@ -40,7 +43,7 @@ test('the scan record carries the hash of the search it made and never the searc
   await runScan(makeContext(), [broker], [jane], {
     state, brokersFor: (p) => [spokeoFor(p)], findUrl: async () => null, now: NOW,
   });
-  const record = state.scans.Spokeo;
+  const record = state.scans.USPhonebook;
   assert.equal(record.sh, searchHash(broker.searchUrl));
   const stored = JSON.stringify(state);
   assert.doesNotMatch(stored, /Jane(%20|\+| |-)Sample/i);
@@ -52,7 +55,7 @@ test('S1 scenario: scanned with the wrong state, the fixed state is "never scann
   await runScan(makeContext(), [spokeoFor(jane)], [jane], {
     state, brokersFor: (p) => [spokeoFor(p)], findUrl: async () => null, now: new Date(daysBefore(3)),
   });
-  assert.equal(state.scans.Spokeo.outcome, 'not_found');
+  assert.equal(state.scans.USPhonebook.outcome, 'not_found');
 
   const run = (person, config = {}) => applyFoundOnly({
     brokers: [spokeoFor(person)], person, personCount: 1, persons: [person], personIndex: 0, state, config, now: NOW,
@@ -69,12 +72,13 @@ test('S1 scenario: scanned with the wrong state, the fixed state is "never scann
 
 test('a changed full name is a different search too', () => {
   const state = { optOuts: {} };
-  recordScan(state, ref('Spokeo'), { outcome: 'not_found', at: daysBefore(2), searchHash: searchHash(spokeoFor(jane).searchUrl) });
-  const renamed = { ...jane, fullName: 'Jane Q Sample' };
-  const plan = applyFoundOnly({
-    brokers: [spokeoFor(renamed)], person: renamed, personCount: 1, persons: [renamed], personIndex: 0, state, config: {}, now: NOW,
-  });
-  assert.equal(plan.skipped.length, 0);
+  recordScan(state, ref('Spokeo'), { outcome: 'not_found', at: daysBefore(2), searchHash: searchHash(realSpokeoFor(jane).searchUrl) });
+  const basisFor = (person) => applyFoundOnly({
+    brokers: [realSpokeoFor(person)], person, personCount: 1, persons: [person], personIndex: 0, state,
+    config: { scan: { unknown: 'skip' } }, now: NOW,
+  }).skipped[0].decision.basis;
+  assert.equal(basisFor(jane), 'unvalidated', 'the same search: the record is read (and, for Spokeo, not trusted for a skip)');
+  assert.equal(basisFor({ ...jane, fullName: 'Jane Q Sample' }), 'missing', 'another name: nothing ever searched for it');
 });
 
 test('a record written without a hash (older code) counts as never scanned', () => {
@@ -97,27 +101,27 @@ test('a matching hash is trusted as before', () => {
 
 test('a sighting from a search that was since changed is not carried into the new one', () => {
   const state = { optOuts: {} };
-  recordScan(state, ref('Spokeo'), { outcome: 'found', at: daysBefore(10), listingUrl: 'https://s.example/a', searchHash: 'aaaaaaaaaaaaaaaa' });
-  recordScan(state, ref('Spokeo'), { outcome: 'not_found', at: daysBefore(1), searchHash: 'bbbbbbbbbbbbbbbb' });
-  assert.equal(state.scans.Spokeo.lastFoundAt, undefined);
-  assert.equal(state.scans.Spokeo.sh, 'bbbbbbbbbbbbbbbb');
+  recordScan(state, ref('USPhonebook'), { outcome: 'found', at: daysBefore(10), listingUrl: 'https://s.example/a', searchHash: 'aaaaaaaaaaaaaaaa' });
+  recordScan(state, ref('USPhonebook'), { outcome: 'not_found', at: daysBefore(1), searchHash: 'bbbbbbbbbbbbbbbb' });
+  assert.equal(state.scans.USPhonebook.lastFoundAt, undefined);
+  assert.equal(state.scans.USPhonebook.sh, 'bbbbbbbbbbbbbbbb');
 });
 
 test('a result with no hash of its own (the list could not be built) keeps the old hash and sighting', () => {
   const state = { optOuts: {} };
-  recordScan(state, ref('Spokeo'), { outcome: 'found', at: daysBefore(10), listingUrl: 'https://s.example/a', searchHash: 'aaaaaaaaaaaaaaaa' });
-  recordScan(state, ref('Spokeo'), { outcome: 'unknown', at: daysBefore(1), reason: 'could not build broker list' });
-  assert.equal(state.scans.Spokeo.sh, 'aaaaaaaaaaaaaaaa');
-  assert.equal(state.scans.Spokeo.lastFoundAt, daysBefore(10));
-  assert.equal(readScan(state, 'Spokeo', jane, 1).outcome, 'unknown');
+  recordScan(state, ref('USPhonebook'), { outcome: 'found', at: daysBefore(10), listingUrl: 'https://s.example/a', searchHash: 'aaaaaaaaaaaaaaaa' });
+  recordScan(state, ref('USPhonebook'), { outcome: 'unknown', at: daysBefore(1), reason: 'could not build broker list' });
+  assert.equal(state.scans.USPhonebook.sh, 'aaaaaaaaaaaaaaaa');
+  assert.equal(state.scans.USPhonebook.lastFoundAt, daysBefore(10));
+  assert.equal(readScan(state, 'USPhonebook', jane, 1).outcome, 'unknown');
 });
 
 test('blank search inputs: "could not tell" with a reason that names the missing detail, never not_found', async () => {
   const handWritten = { firstName: 'Jane', lastName: 'Sample', zip: '78701', email: 'jane@example.org' };
   const state = { optOuts: {} };
   let searched = 0;
-  const result = await runScan(makeContext(), [spokeoFor(handWritten)], [handWritten], {
-    state, brokersFor: (p) => [spokeoFor(p)], findUrl: async () => { searched += 1; return null; }, now: NOW,
+  const result = await runScan(makeContext(), [realSpokeoFor(handWritten)], [handWritten], {
+    state, brokersFor: (p) => [realSpokeoFor(p)], findUrl: async () => { searched += 1; return null; }, now: NOW,
   });
   assert.equal(searched, 0, 'a search that cannot name the person is not made');
   assert.equal(result.not_found.length, 0);
