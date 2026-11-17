@@ -32,6 +32,16 @@ const ROUTES = {
   '/gone': () => ({ status: 404, body: page('<h1>Not found</h1>', 'Not found') }),
   '/broken': () => ({ status: 500, body: page('<h1>Oops</h1>', 'Oops') }),
   '/captcha-form': () => ({ body: page(`${FORM}<div class="g-recaptcha" data-sitekey="fixture-key"></div>`) }),
+  // 2 of 4 fields renamed, with the form's usual reCAPTCHA widget beside it.
+  '/captcha-drifted': () => ({
+    body: page(`<h1>Remove my listing</h1><p>Enter the details you used and press the button. We will remove the listing within ten days and send a confirmation message to that address.</p>
+      <form method="post" action="/submit">
+        <input name="first" type="text"><input name="last" type="text">
+        <input name="mail_addr" type="text"><input name="zip_code" type="text">
+        <div class="g-recaptcha" data-sitekey="fixture-key"></div>
+        <button type="submit">Remove</button>
+      </form>`),
+  }),
   '/late-form': () => ({
     body: page(`<h1>Remove my listing</h1><p>${'Loading the form, one moment please. '.repeat(4)}</p><div id="slot"></div>
       <script>setTimeout(function () { document.getElementById('slot').innerHTML = '<form method="post" action="/submit"><input name="email" type="email"><button type="submit">Remove</button></form>'; }, 700);</script>`),

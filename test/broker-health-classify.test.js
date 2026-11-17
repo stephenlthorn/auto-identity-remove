@@ -93,14 +93,51 @@ describe('blocked, never drifted', () => {
     assert.equal(classifyHealth(page({ status: 503, title: 'Attention Required! | Cloudflare', missing: ['x'] })).status, 'blocked');
   });
 
-  test('a CAPTCHA on a page whose selectors are missing: the widget may be hiding the form', () => {
-    const r = classifyHealth(page({ captchaPresent: true, missing: ['input[name="email"]'] }));
+  test('a CAPTCHA on a page where EVERY selector is missing: the widget may be hiding the form', () => {
+    const r = classifyHealth(page({ captchaPresent: true, selectors: ['input[name="email"]', 'button[type="submit"]'], missing: ['input[name="email"]', 'button[type="submit"]'] }));
     assert.equal(r.status, 'blocked');
     assert.match(r.detail, /CAPTCHA/);
   });
 
+  test('a visible CAPTCHA widget alone, with every selector missing, is also blocked', () => {
+    const r = classifyHealth(page({ markers: ['recaptcha'], selectors: ['a', 'b'], missing: ['a', 'b'] }));
+    assert.equal(r.status, 'blocked');
+  });
+
   test('a redirect to a challenge path', () => {
     const r = classifyHealth(page({ url: 'https://www.example.com/captcha?from=%2Foptout', missing: ['x'] }));
+    assert.equal(r.status, 'blocked');
+  });
+});
+
+describe('drift beside a CAPTCHA widget is still drift (H1)', () => {
+  // A normal opt-out form carries its usual reCAPTCHA or Turnstile widget. If the
+  // site renamed two of four fields, some selectors still match, so the form IS
+  // visible: that is drift, and the issue must open.
+  test('some selectors match and some do not, with a CAPTCHA widget on the page: drifted', () => {
+    const r = classifyHealth(page({
+      captchaPresent: true,
+      selectors: ['input[name="a"]', 'input[name="b"]', 'input[name="c"]', 'button[type="submit"]'],
+      missing: ['input[name="a"]', 'input[name="b"]'],
+    }));
+    assert.equal(r.status, 'drifted');
+    assert.deepEqual(r.missing, ['input[name="a"]', 'input[name="b"]']);
+  });
+
+  test('the same with a visible CAPTCHA frame marker (a weak wall) is drifted', () => {
+    const r = classifyHealth(page({
+      markers: ['turnstile'],
+      selectors: ['input[name="a"]', 'button[type="submit"]'],
+      missing: ['input[name="a"]'],
+    }));
+    assert.equal(r.status, 'drifted');
+  });
+
+  test('a strong wall still wins over partly matching selectors', () => {
+    const r = classifyHealth(page({
+      markers: ['cloudflare-challenge'], captchaPresent: true,
+      selectors: ['a', 'b'], missing: ['a'],
+    }));
     assert.equal(r.status, 'blocked');
   });
 });

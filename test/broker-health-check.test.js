@@ -98,6 +98,18 @@ describe('checkBroker against fixture pages', { skip: executablePath ? false : '
     assert.equal(r.status, 'ok', r.detail);
   });
 
+  test('a real form with 2 of 4 fields renamed and its usual CAPTCHA widget is drifted, not blocked (H1)', async () => {
+    const r = await check(broker('/captcha-drifted', {
+      captchaLikely: true,
+      formFields: {
+        'input[name="first"]': 'Jane', 'input[name="last"]': 'Sample',
+        'input[name="email"]': 'jane.sample@example.com', 'input[name="zip"]': '90001',
+      },
+    }));
+    assert.equal(r.status, 'drifted', r.detail);
+    assert.deepEqual(r.missing.sort(), ['input[name="email"]', 'input[name="zip"]']);
+  });
+
   test('a form that a script draws a moment after load is found, not drifted', async () => {
     const r = await check(broker('/late-form'), { settleMs: 3000 });
     assert.equal(r.status, 'ok', r.detail);
