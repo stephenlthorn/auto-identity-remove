@@ -106,7 +106,7 @@ function withSearchAnswers(sandbox, listed) {
       if (/(^|\\/)forms$/.test(request) && loaded && loaded.findListingUrl && !loaded.__answers) {
         loaded.__answers = true;
         const listed = new Set((process.env.AIDR_TEST_LISTED || '').split(',').filter(Boolean));
-        loaded.findListingUrl = async (page, broker) => (listed.has(broker.name) ? 'https://listing.example/' + broker.name : null);
+        loaded.findListingUrl = async (page, broker) => (listed.has(broker.name) ? 'https://listing.example/Ada-Lovelace/Austin-TX/' + broker.name + '-p123456789' : null);
       }
       return loaded;
     };
@@ -123,13 +123,17 @@ test('scan then run --found-only: found is submitted, not found is skipped, and 
     assert.match(scan.stdout, /found          : 1/);
     assert.match(scan.stdout, /not found      : 1/, 'only USPhonebook has a search step validated live');
     assert.match(scan.stdout, /not validated  : 4/);
-    assert.match(scan.stdout, /Where you were found:\n\s+- Spokeo: https:\/\/listing\.example\/Spokeo/);
+    // The sandbox's stdout is a pipe, not a terminal: the listing address holds the person's name,
+    // so only its host is printed (S11) and the full address is kept in the state file.
+    assert.match(scan.stdout, /Where you were found:\n\s+- Spokeo: listing\.example\n/);
+    assert.match(scan.stdout, /full listing URLs are in .*state\.json/);
+    assert.doesNotMatch(scan.stdout, /Ada-Lovelace|Austin-TX|p123456789/, 'no part of a listing path reaches stdout');
     assert.match(scan.stdout, /Where you were not found:\n\s+USPhonebook\n/);
     assert.match(scan.stdout, /search is not validated:\n\s+.*Nuwber/);
     assert.deepEqual(gotos(sandbox), [], 'a scan opens no opt-out page (the search was answered by the preload)');
     const scans = sandbox.readState().scans;
     assert.equal(scans.Spokeo.outcome, 'found');
-    assert.equal(scans.Spokeo.listingUrl, 'https://listing.example/Spokeo');
+    assert.equal(scans.Spokeo.listingUrl, 'https://listing.example/Ada-Lovelace/Austin-TX/Spokeo-p123456789');
     assert.equal(scans.USPhonebook.outcome, 'not_found');
 
     const run = await runWatcher(sandbox, ['--found-only', '--only', 'Spokeo,USPhonebook'], answers);

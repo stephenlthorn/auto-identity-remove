@@ -1278,7 +1278,7 @@ async function runScanMode(contexts, { brokers, persons, state, config }) {
   console.log('\n' + '='.repeat(54));
   console.log('Scan results - ' + new Date().toLocaleString());
   console.log('='.repeat(54));
-  for (const line of scanReportLines(result, { label })) console.log(line);
+  for (const line of scanReportLines(result, { label, interactive: Boolean(process.stdout.isTTY), statePath: STATE_PATH })) console.log(line);
   console.log(DRY_RUN ? '\nDry run: results not saved.' : `\nSaved to ${STATE_PATH}. Next: aidr run --found-only`);
   console.log('='.repeat(54) + '\n');
   // A scan that learned nothing at all (everything could not be told) should not look like a clean one.

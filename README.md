@@ -890,8 +890,11 @@ aidr run --found-only           # submit only where the scan found you
 `aidr scan` searches each broker that has a search step (a `searchUrl` and a
 `listingPattern`, whatever its opt-out method), for each person, in that person's own
 browser profile. **It submits nothing and sends no email.** It prints where you were
-found (with the listing URL), where you were not, where it could not tell (with the
-reason), and how many brokers cannot be searched. `--only` and `--skip` apply. It exits 2
+found, where you were not, where it could not tell (with the reason), and how many brokers
+cannot be searched. A listing address carries your name in its path, and output is often
+captured to a log, so on an interactive terminal it prints the full URL and anywhere else (cron,
+launchd, docker, a redirect) only the host, with one line saying the full URLs are in
+`state.json`. `--only` and `--skip` apply. It exits 2
 when it could not tell anywhere (every search failed, for instance offline), so a scheduled
 scan that learned nothing does not look like a clean one.
 
