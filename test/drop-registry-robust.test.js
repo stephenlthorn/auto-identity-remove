@@ -114,3 +114,62 @@ test('a poisoned registry file does not stop a run, aidr drop or aidr complaints
     assert.equal(complaints.code, 0, complaints.stdout + complaints.stderr);
   } finally { sandbox.cleanup(); }
 });
+
+// ─── D9: count brokers, not domains ─────────────────────────────────────────
+
+const countOf = (file) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aidr-drop-'));
+  try {
+    const filePath = path.join(dir, 'feeds-brokers.json');
+    if (file !== null) fs.writeFileSync(filePath, typeof file === 'string' ? file : JSON.stringify(file));
+    return drop.loadCaBrokerCount({ filePath });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+};
+
+test('loadCaBrokerCount reads the number of California registry BROKERS, not the number of domains (D9)', () => {
+  const hosts = { 'a.example': ['CA'], 'b.example': ['CA'] };
+  assert.equal(countOf({ registryHosts: hosts, registries: { CA: { ok: true, count: 5, knownCount: 5 } } }), 5, '5 brokers share 2 domains');
+  assert.equal(countOf({ registryHosts: hosts, registries: { CA: { ok: true, count: 5 } } }), 5, 'a file without knownCount');
+});
+
+test('a failed run that kept the earlier rows still knows how many brokers the registry has', () => {
+  assert.equal(countOf({ registries: { CA: { ok: false, count: 0, knownCount: 412, carriedOver: true } } }), 412);
+  assert.equal(countOf({ registries: { CA: { ok: false, count: 0 } } }), 0);
+});
+
+test('loadCaBrokerCount: a missing, broken or older-shaped file is 0, never an error', () => {
+  assert.equal(countOf(null), 0);
+  assert.equal(countOf('{nope'), 0);
+  assert.equal(countOf([{ name: 'x' }]), 0);
+  assert.equal(countOf({ registries: { CA: { ok: true, count: 'many' } } }), 0);
+  assert.equal(countOf({ registries: { CA: { ok: true, count: -3 } } }), 0);
+});
+
+test('update-brokers records knownCount: this run when it worked, the earlier one when it failed', async () => {
+  const rows = [row('1', 'A', 'a.example'), row('2', 'B', 'a.example'), row('3', 'C', 'c.example')];
+  const ok = await feeds.buildFeedsFile({ fetchImpl: stubFetch(caCsv(rows)), caUrl: CA_URL, now: NOW, explicitHosts: [] });
+  assert.equal(ok.registries.CA.count, 3);
+  assert.equal(ok.registries.CA.knownCount, 3);
+
+  const failed = await feeds.buildFeedsFile({
+    fetchImpl: async () => ({ ok: false, status: 403, headers: new Map(), text: async () => '' }),
+    caUrl: CA_URL, now: NOW, explicitHosts: [], previous: { brokers: [], registryHosts: {}, registries: { CA: ok.registries.CA } },
+  });
+  assert.equal(failed.registries.CA.ok, false);
+  assert.equal(failed.registries.CA.knownCount, 3, 'the earlier count is kept');
+});
+
+test('aidr drop prints the broker count from the registries block, not the domain count (D9)', async () => {
+  const sandbox = createSandbox({ config: runnableConfig({ persons: [person()] }) });
+  try {
+    fs.writeFileSync(path.join(sandbox.repo, 'data', 'feeds-brokers.json'), JSON.stringify({
+      brokers: [], registryHosts: { 'a.example': ['CA'], 'b.example': ['CA'] },
+      registries: { CA: { ok: true, count: 412, knownCount: 412 } }, updatedAt: '2026-11-17T00:00:00.000Z',
+    }));
+    const r = await runWatcher(sandbox, ['--drop']);
+    assert.equal(r.code, 0, r.stdout + r.stderr);
+    assert.match(r.stdout, /knows 412 registry brokers/);
+  } finally { sandbox.cleanup(); }
+});

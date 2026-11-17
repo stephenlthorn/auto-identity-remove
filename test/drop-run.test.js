@@ -23,7 +23,7 @@ const person = (over) => ({
   email: 'jane@sample-test.example', phone: '5595550101', phoneFormatted: '(559) 555-0101', ...over,
 });
 const config = (persons, extra = {}) => runnableConfig({ persons, ...extra });
-const writeRegistry = (sandbox, hosts) => fs.writeFileSync(path.join(sandbox.repo, 'data', 'feeds-brokers.json'), JSON.stringify({ brokers: [], registryHosts: hosts, registries: [], updatedAt: "2026-11-17T00:00:00.000Z" }));
+const writeRegistry = (sandbox, hosts, count = Object.keys(hosts).length) => fs.writeFileSync(path.join(sandbox.repo, 'data', 'feeds-brokers.json'), JSON.stringify({ brokers: [], registryHosts: hosts, registries: { CA: { ok: true, count, knownCount: count } }, updatedAt: "2026-11-17T00:00:00.000Z" }));
 
 // A row of the shipped Markup dataset: generic, and not an explicit broker.
 const ROW = { name: 'Explorium Inc.', host: 'explorium.ai' };
@@ -31,7 +31,7 @@ const ROW = { name: 'Explorium Inc.', host: 'explorium.ai' };
 test('aidr drop for a California person: what it is, the URL, the status, the registry count', async () => {
   const sandbox = createSandbox({ config: config([person()]) });
   try {
-    writeRegistry(sandbox, { 'a.example': ['CA'], 'b.example': ['CA', 'VT'], 'c.example': ['VT'] });
+    writeRegistry(sandbox, { 'a.example': ['CA'], 'b.example': ['CA', 'VT'], 'c.example': ['VT'] }, 2);
     const r = await runWatcher(sandbox, ['--drop']);
     assert.equal(r.code, 0, r.stdout + r.stderr);
     assert.match(r.stdout, /Delete Request and Opt-out Platform/);

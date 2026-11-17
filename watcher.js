@@ -37,7 +37,7 @@ const { renderAuditMarkdown, writeAuditFile, timestampForFilename } = require('.
 const { buildStealthScript } = require('./lib/stealth');
 const { buildLaunchOptions, resolveHeadless, isLowMemory, createPersonContexts, createThrowawayContexts, utilityProfileDir, browserConfigProblems, describeProxy } = require('./lib/browser');
 const { installShutdownHandlers } = require('./lib/shutdown');
-const { loadRegistryHostsSafe, makeCoveredByDrop, dropRunNotes, brokerAppliesToPerson } = require('./lib/drop');
+const { loadRegistryHostsSafe, loadCaBrokerCountSafe, makeCoveredByDrop, dropRunNotes, brokerAppliesToPerson } = require('./lib/drop');
 const { writePrivateFile, mkdirPrivate } = require('./lib/private-fs');
 const { resolveMode } = require('./lib/mode-dispatch');
 const { resolvePaths } = require('./lib/paths');
@@ -369,7 +369,7 @@ function modeFreeze() {
 // DROP verifies identity itself, so this never submits anything: it prints what to do,
 // and keeps the date the person did it (lib/drop.js).
 function modeDrop() {
-  const { runDrop, todayDay, californiaDomains, DROP_URL } = require('./lib/drop');
+  const { runDrop, todayDay, DROP_URL } = require('./lib/drop');
   const { persons } = loadConfigOrExit();
   const state = loadState();
 
@@ -382,7 +382,7 @@ function modeDrop() {
       persons,
       state,
       options: { done: ARGS.done, clear: ARGS.clear, on: ARGS.on, person: ARGS.person },
-      registryCount: californiaDomains(loadRegistryHostsSafe()).size,
+      registryCount: loadCaBrokerCountSafe(),
       today: todayDay(),
       utcToday: todayDay(new Date(), 0),
     });
@@ -502,7 +502,7 @@ function modeScore() {
   // A recorded DROP request is shown beside the score, never inside it (lib/exposure.js).
   let dropCovered = 0;
   try {
-    dropCovered = require('./lib/drop').dropCoveredCount({ persons: getPersonsFromConfig(readConfigQuietly()), state, registryHosts: loadRegistryHostsSafe() });
+    dropCovered = require('./lib/drop').dropCoveredCount({ persons: getPersonsFromConfig(readConfigQuietly()), state, registryCount: loadCaBrokerCountSafe() });
   } catch (_) { /* no readable config: the score does not need one */ }
   const summary = computeExposureScore({ state, brokers, dropCovered, ...loadPersistedSignals() });
 
