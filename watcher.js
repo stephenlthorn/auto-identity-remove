@@ -44,7 +44,8 @@ const { resolvePaths } = require('./lib/paths');
 const { openJournal, journalPathFor, countResults } = require('./lib/journal');
 const { startHeartbeat, defaultHeartbeatPath, outcomeFromResults } = require('./lib/heartbeat');
 const { OFFLINE_HINT } = require('./lib/outage');
-const { applyFoundOnly, hasAnyScan } = require('./lib/scan');
+const { applyFoundOnly, hasUsableScan, foundOnlyEmailPlan } = require('./lib/scan');
+const { scanReportLines, foundOnlyOverview } = require('./lib/scan-report');
 const { scanSettings } = require('./lib/scan-config');
 const { applyRetention } = require('./lib/retention');
 const { isPlaceholderKey, detectAndSolveCaptcha } = require('./lib/captcha');
@@ -1274,30 +1275,14 @@ async function runScanMode(contexts, { brokers, persons, state, config }) {
   await contexts.close();
 
   const label = (e) => (persons.length > 1 && e.person ? `${e.broker} (${personName(e.person)})` : e.broker);
-  const cannotSearch = new Set(result.unsearchable.map(e => e.broker));
   console.log('\n' + '='.repeat(54));
   console.log('Scan results - ' + new Date().toLocaleString());
   console.log('='.repeat(54));
-  console.log(`  found          : ${result.found.length}`);
-  console.log(`  not found      : ${result.not_found.length}`);
-  console.log(`  could not tell : ${result.unknown.length}`);
-  console.log(`  cannot search  : ${cannotSearch.size} broker(s) (and the generic brokers, which have no search page)`);
-  if (result.found.length > 0) {
-    console.log('\nWhere you were found:');
-    for (const e of result.found) console.log(`  - ${label(e)}: ${e.listingUrl}${e.screenshot ? `\n      screenshot: ${e.screenshot}` : ''}`);
-  }
-  if (result.not_found.length > 0) {
-    console.log('\nWhere you were not found:');
-    console.log('  ' + result.not_found.map(label).join(', '));
-  }
-  if (result.unknown.length > 0) {
-    console.log('\nCould not tell (not the same as not listed):');
-    for (const e of result.unknown) console.log(`  - ${label(e)}: ${e.reason}`);
-  }
+  for (const line of scanReportLines(result, { label, interactive: Boolean(process.stdout.isTTY), statePath: STATE_PATH })) console.log(line);
   console.log(DRY_RUN ? '\nDry run: results not saved.' : `\nSaved to ${STATE_PATH}. Next: aidr run --found-only`);
   console.log('='.repeat(54) + '\n');
   // A scan that learned nothing at all (everything could not be told) should not look like a clean one.
-  const searched = result.found.length + result.not_found.length + result.unknown.length;
+  const searched = result.found.length + result.not_found.length + result.unvalidated.length + result.unknown.length;
   if (searched > 0 && result.unknown.length === searched) process.exitCode = 2;
 }
 
@@ -1467,11 +1452,12 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
 
   const contextFor = makeContextProvider(contexts);
 
-  // --found-only: the email opt-outs and the generic pass cannot be searched, so they
-  // follow scan.unknown as a whole (the explicit brokers are judged one by one below).
+  // --found-only: the generic pass cannot be searched, so it follows scan.unknown as a whole
+  // (the explicit brokers are judged one by one below, and an email opt-out follows the
+  // searchable entry for the same company when there is one: see foundOnlyEmailPlan).
   const skipUnsearchablePasses = FOUND_ONLY && scanSettings(config).unknown === 'skip';
   if (skipUnsearchablePasses) {
-    console.log('\n--found-only: the email opt-outs and the generic brokers cannot be searched, so scan.unknown "skip" leaves them out of this run (set it to "submit" to include them).');
+    console.log('\n--found-only: the generic brokers (and the email opt-outs with no searchable entry for the same company) cannot be searched, so scan.unknown "skip" leaves them out of this run (set it to "submit" to include them).');
   }
 
   for (const [index, person] of persons.entries()) {
@@ -1508,9 +1494,20 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
     // it once per person in this loop multiplied real sends by persons.length.
     // dryRun: --dry-run must not send real opt-out emails either.
     console.log('── Email opt-outs ─────────────────────────────────────────');
-    if (!skipUnsearchablePasses) {
-      await sendOptOutEmails(brokers, config, undefined, { submissionEmailFor: (p) => submissionEmails.get(p), onlyPerson: person, dryRun: DRY_RUN, include });
+    // --found-only: each email opt-out follows the scan's decision for the same company's
+    // searchable entry (judged on ALL of this person's searchable entries, whatever --only
+    // narrows), so the Spokeo email does not go out while the Spokeo form is skipped (S7).
+    let emailInclude = include;
+    if (FOUND_ONLY) {
+      const siblings = applyFoundOnly({
+        brokers: personBrokers.filter(b => b.method !== 'email' && brokerAppliesToPerson(b, person)),
+        person, personCount: persons.length, persons, personIndex: index, state, config, now: new Date(),
+      }).decisions;
+      const emailPlan = foundOnlyEmailPlan({ emailBrokers: personBrokers.filter(b => b.method === 'email' && include(b.name)), decisions: siblings, config });
+      for (const { broker, reason } of emailPlan.skipped) logResult(broker.name, 'skipped', reason);
+      emailInclude = (name) => include(name) && emailPlan.send.has(name);
     }
+    await sendOptOutEmails(brokers, config, undefined, { submissionEmailFor: (p) => submissionEmails.get(p), onlyPerson: person, dryRun: DRY_RUN, include: emailInclude });
 
     let sorted = personBrokers
       .filter(b => b.method !== 'email' && include(b.name) && brokerAppliesToPerson(b, person))
@@ -1539,6 +1536,9 @@ async function runSubmissions(contexts, { brokers, persons, state, config, guard
       const plan = applyFoundOnly({ brokers: sorted, person, personCount: persons.length, persons, personIndex: index, state, config, now: new Date() });
       foundOnlySkips = plan.skipped;
       sorted = plan.submit;
+      // What the scan gave this run to go by, said before the pass: a full run must not be
+      // able to pass for a filtered one without a word (S2).
+      for (const line of foundOnlyOverview({ plan, config, name: persons.length > 1 ? personName(person) : '' })) console.log(line);
     }
 
     if (ONLY_ARG || SKIP_ARG || RETRY_FAILED || CAPTCHAS || FOUND_ONLY) {
@@ -1902,10 +1902,12 @@ async function dispatch() {
   if (!DRY_RUN) exitOnUnreadableState();
   const state = loadState();
 
-  // --found-only judges each broker by the latest scan. With no scan at all that would
-  // be every broker "never scanned", so say how to get one instead of starting.
-  if (FOUND_ONLY && !hasAnyScan(state)) {
-    console.error('Error: --found-only needs a scan to go by, and none has been recorded yet. Run `aidr scan` first.');
+  // --found-only judges each broker by the latest scan. With no usable result for anyone (none
+  // recorded, or every one too old, could not tell, or made for other details) that would be
+  // every broker "never scanned" and a full run dressed up as a filtered one, so say how to get
+  // one instead of starting.
+  if (FOUND_ONLY && !hasUsableScan({ brokersFor: (p) => require('./brokers').forPerson(p), persons, state, config, now: new Date() })) {
+    console.error('Error: --found-only has no usable scan result to go by (none recorded, or every one is older than scan.maxAgeDays, could not tell, or was made for different details). Run `aidr scan` first.');
     process.exit(1);
   }
 

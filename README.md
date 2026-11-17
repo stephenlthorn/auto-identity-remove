@@ -890,8 +890,11 @@ aidr run --found-only           # submit only where the scan found you
 `aidr scan` searches each broker that has a search step (a `searchUrl` and a
 `listingPattern`, whatever its opt-out method), for each person, in that person's own
 browser profile. **It submits nothing and sends no email.** It prints where you were
-found (with the listing URL), where you were not, where it could not tell (with the
-reason), and how many brokers cannot be searched. `--only` and `--skip` apply. It exits 2
+found, where you were not, where it could not tell (with the reason), and how many brokers
+cannot be searched. A listing address carries your name in its path, and output is often
+captured to a log, so on an interactive terminal it prints the full URL and anywhere else (cron,
+launchd, docker, a redirect) only the host, with one line saying the full URLs are in
+`state.json`. `--only` and `--skip` apply. It exits 2
 when it could not tell anywhere (every search failed, for instance offline), so a scheduled
 scan that learned nothing does not look like a clean one.
 
@@ -901,24 +904,52 @@ The latest result for each person and broker is saved in `state.json` under `sca
 | Result | Meaning |
 |--------|---------|
 | `found` | The search page showed a listing. The URL is kept and the search page is screenshotted into the snapshots directory (private permissions, and removed by `aidr purge` like the others) |
-| `not_found` | The search page loaded and showed no listing |
+| `not_found` | The search page loaded and showed no listing. `aidr scan` files it under "Where you were not found" only for a broker whose search step was validated live (`searchCheckedAt` in `brokers.js`); for the others it prints "No listing seen, but this site's search is not validated", because a site whose result links stopped matching would give the same empty answer on a normal results page |
 | `unknown` | **Could not tell**: a bot wall, a failed navigation, a non-2xx answer, a browser that would not start. This is never recorded as `not_found` |
+
+Each record also carries `sh`, a one-way hash of the exact search address that was
+searched (never the address itself: it holds your name). `--found-only` trusts a record only
+when its hash is your current search at that broker, so fixing a wrong state or a full name
+in `config.json` makes every older result count as never scanned instead of leaving the old
+"not listed" in force for 30 days. A record from an older version has no hash and counts the
+same way. A search whose details are blank (no full name, no state) is not made: it is
+recorded as could not tell, with the missing detail named, never as not found.
 
 `aidr run --found-only` runs the normal opt-out pass, narrowed by the scan:
 
 - A broker the latest scan says is `found` is submitted. One it says is `not_found` is
-  skipped, and the run log says why ("not listed (scan of 2026-11-17)").
-- A broker whose scan is `unknown`, older than `scan.maxAgeDays`, missing, or that
-  cannot be searched at all follows `scan.unknown`: `submit` (the default) or `skip`. A
-  skip is logged with its reason.
-- The email opt-outs and the ~490 generic brokers cannot be searched, so they follow
-  `scan.unknown` as a whole. With `skip` the run says in one line that they were skipped
+  skipped, and the run log says why ("not listed (scan of 2026-11-17)"), but only when that
+  broker's search step was validated live. A `found` from any searchable broker is used.
+- A listing seen inside `scan.maxAgeDays` is not forgotten because a LATER scan could not tell
+  (a bot wall) or came back empty from a search that is not validated: the broker is still
+  treated as found. Only a later `not_found` from a validated search overrides a sighting.
+- A scan dated more than a day in the future (a wrong clock) is unusable and says so.
+- A broker whose scan is `unknown`, older than `scan.maxAgeDays`, missing (or made for
+  different details), that cannot be searched at all, or whose empty result comes from a
+  search step that was never validated follows `scan.unknown`: `submit` (the default) or
+  `skip`. A skip is logged with its reason.
+- An email opt-out follows the decision for a searchable entry of the same company (same
+  registrable domain as the address's domain or the entry's pages, else the name before
+  " (email)"): the Spokeo email is not sent while the Spokeo form is skipped as not listed.
+  With several such entries any submit wins. Email entries with no searchable entry for their
+  company (Hiya, Eyecon, Pipl) and the ~490 generic brokers cannot be searched, so they follow
+  `scan.unknown`. With `skip` the run says in one line that the generic brokers were left out
   and why; with `submit` they run as before.
-- If no scan has ever been recorded, `--found-only` refuses to start and tells you to
-  run `aidr scan` first.
+- Before the opt-out pass it prints one line per person: how many brokers the scan says you
+  are listed at (submitted), how many it says you are not (skipped), and why every other
+  broker is being submitted or skipped (scan too old, could not tell, never scanned, search not
+  validated, cannot be searched). A person with no usable result is told so, and told to run
+  `aidr scan` again.
+- If NO person has a usable result (none recorded, or every one is too old, could not tell, or
+  was made for different details), `--found-only` refuses to start and tells you to run
+  `aidr scan` first: otherwise it would be a full run that only looks filtered.
 - It combines with `--only`, `--skip` and `--retry-failed` (each narrows the list
-  further), `--dry-run` and `--pollute`. It is refused with `--resume` (a checkpoint is a
-  position in the full list) and `--captchas` (which picks its own brokers). Like any
+  further) and `--dry-run`. It is refused with `--resume` (a checkpoint is a
+  position in the full list), `--captchas` (which picks its own brokers) and `--pollute`
+  (noise goes to every broker that accepts it, whatever the scan found), and with every other
+  mode (each is its own command, not the opt-out run it narrows). `--scan` and `--verify`
+  search and submit nothing, so they refuse `--pollute`, `--resume`, `--solve-captchas`,
+  `--snapshot` and `--fields` instead of ignoring them. Like any
   filtered run it marks its log as partial and leaves the resume checkpoint alone.
 
 ```json
@@ -934,9 +965,19 @@ submitting. That sighting counts as evidence for `aidr verify` but does not coun
 scan for `--found-only`.
 
 **Evidence-backed removal.** A removal is verified only when a listing was seen before
-(by a scan, a run's own search or an earlier verify) and is gone after. If `aidr verify`
+(by a scan, a run's own search or an earlier verify) and is gone after. For a broker whose
+opt-out starts with the search (method `search-form`, such as Spokeo) a recorded submission is
+itself a sighting, because the run only submits after its own search found a listing: state
+from before scans existed still counts. A broker that merely has a search step but submits
+without looking (USPhonebook) does not get that credit. If `aidr verify`
 finds an empty search page and no listing was ever seen, it reports `never seen`, which
 is not counted as a removal in the exposure score, the monthly report or the complaints.
+
+A sighting that is NEWER than a "found nothing" check wins: if `aidr verify` saw an empty page on
+day 8 and `aidr scan` found the listing on day 18, the score counts it as listed, the report
+lists it as listed (not under "Never seen"), and `aidr verify` searches it again instead of
+skipping it as already found absent. A scan that finds a listing for someone with no opt-out
+history yet also counts as listed in the score.
 
 ### Continuous SERP monitoring (`--serp-watch`)
 

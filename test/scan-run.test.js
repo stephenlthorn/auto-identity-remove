@@ -12,6 +12,9 @@ const searchBroker = (name, extra = {}) => ({
   method: 'search-form',
   searchUrl: `https://${name.toLowerCase()}.example/search`,
   listingPattern: /listing/i,
+  // These tests are about how a scan works; whether an empty answer may drive a skip
+  // (searchCheckedAt) is covered in scan-unvalidated.test.js.
+  searchCheckedAt: '2026-11-17',
   ...extra,
 });
 const directWithSearch = (name) => ({ ...searchBroker(name), method: 'direct-form', optOutUrl: `https://${name.toLowerCase()}.example/optout` });
@@ -33,17 +36,29 @@ function makeContext(log = []) {
 
 const unverifiable = (message) => Object.assign(new Error(message), { code: 'UNVERIFIABLE' });
 
-test('found: the listing url and a screenshot are recorded, and nothing is submitted', async () => {
+// Shaped like a real people-search listing, which carries the person's name and city in its path.
+const REAL_SHAPED = 'https://alpha.example/Jane-Sample/Austin-TX/Jane-Sample-p123456789';
+
+test('found: the listing url and a screenshot are recorded, and nothing is submitted or printed', async () => {
   const state = { optOuts: {} };
   const shots = [];
-  const result = await runScan(makeContext(), [searchBroker('Alpha')], [JANE], {
-    state,
-    findUrl: async () => 'https://alpha.example/listing/1',
-    snapshot: async (page, name) => { shots.push(name); return '/tmp/private/alpha.png'; },
-  });
-  assert.deepEqual(result.found.map(e => [e.broker, e.listingUrl]), [['Alpha', 'https://alpha.example/listing/1']]);
+  const printed = [];
+  const originals = { log: console.log, warn: console.warn, error: console.error };
+  for (const k of Object.keys(originals)) console[k] = (...args) => printed.push(args.join(' '));
+  let result;
+  try {
+    result = await runScan(makeContext(), [searchBroker('Alpha')], [JANE], {
+      state,
+      findUrl: async () => REAL_SHAPED,
+      snapshot: async (page, name) => { shots.push(name); return '/tmp/private/alpha.png'; },
+    });
+  } finally {
+    Object.assign(console, originals);
+  }
+  assert.deepEqual(result.found.map(e => [e.broker, e.listingUrl]), [['Alpha', REAL_SHAPED]]);
   assert.equal(state.scans.Alpha.outcome, 'found');
-  assert.equal(state.scans.Alpha.listingUrl, 'https://alpha.example/listing/1');
+  assert.equal(state.scans.Alpha.listingUrl, REAL_SHAPED, 'the full address is kept in state, where a later run needs it');
+  assert.equal(printed.filter(l => /Jane-Sample|Austin-TX/.test(l)).length, 0, 'runScan itself prints no listing path');
   assert.equal(state.scans.Alpha.screenshot, '/tmp/private/alpha.png');
   assert.equal(shots.length, 1);
   assert.deepEqual(state.optOuts, {}, 'the opt-out history is untouched');

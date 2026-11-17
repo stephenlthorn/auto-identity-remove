@@ -150,7 +150,8 @@ automation) and will not start without one. The server binds `127.0.0.1` by
 default (loopback only); set `AIDR_HOST=0.0.0.0` if you need LAN access and use a
 TLS-terminating reverse proxy. `GET /api/state` and `GET /api/logs/:name` reduce
 URLs to their host and never return the relay alias cache, like the History
-routes. `/api/health` is
+routes; a scan record's listing URL is cut to its host too and its screenshot path is
+dropped. `/api/health` is
 intentionally unauthenticated and returns only `{ ok: true }` (no path or
 version disclosure).
 

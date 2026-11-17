@@ -3,6 +3,12 @@
  * nothing was removed. No reader may count it as a removal, and none may count it as
  * "still listed" or "submitted but unverified" either (the score would carry 10 points
  * for a listing that never existed).
+ *
+ * Only states `aidr verify` and `aidr scan` can really write are used here. verify writes
+ * verifiedAbsentAt only when NO sighting exists (hasSeenListing is false), and a
+ * verifiedStillListedAt is itself a sighting, so "an absent check at or after a still-listed
+ * stamp" can never occur: that case used to be tested and was unreachable (S4). What CAN
+ * happen is a sighting arriving AFTER the absent check, from a later verify or a scan.
  */
 
 'use strict';
@@ -31,8 +37,12 @@ test('exposure: a submitted-and-never-verified entry is still counted (unchanged
 });
 
 test('exposure: a later sighting after an absent check makes it listed again', () => {
+  // verify on day 8 saw an empty page; a second verify, later, found the listing
   assert.equal(isStillListed({ lastSuccess: daysBefore(20), verifiedAbsentAt: daysBefore(15), verifiedStillListedAt: daysBefore(2) }), true);
-  assert.equal(isStillListed({ lastSuccess: daysBefore(20), verifiedStillListedAt: daysBefore(15), verifiedAbsentAt: daysBefore(2) }), false);
+  // ... or `aidr scan` did
+  const scan = { outcome: 'found', lastFoundAt: daysBefore(2) };
+  assert.equal(isStillListed({ lastSuccess: daysBefore(20), verifiedAbsentAt: daysBefore(15) }, scan), true);
+  assert.equal(isStillListed({ lastSuccess: daysBefore(20), verifiedAbsentAt: daysBefore(15) }, { ...scan, lastFoundAt: daysBefore(17) }), false);
 });
 
 // ── report ───────────────────────────────────────────────────────────────────
@@ -65,9 +75,9 @@ test('complaints: a never_seen entry is never a complaint', () => {
   assert.deepEqual(out, []);
 });
 
-test('complaints: an absent check at or after the still-listed stamp cancels that evidence', () => {
+test('complaints: a still-listed stamp after an earlier absent check is evidence, as before', () => {
+  // verify on day 20 saw nothing, verify on day 75 found the listing: reachable
   const base = { lastSuccess: daysBefore(80), verifiedStillListedAt: daysBefore(5) };
   assert.equal(findOverdue({ optOuts: { Alpha: base } }, { now: NOW }).length, 1);
-  assert.deepEqual(findOverdue({ optOuts: { Alpha: { ...base, verifiedAbsentAt: daysBefore(2) } } }, { now: NOW }), []);
-  assert.equal(findOverdue({ optOuts: { Alpha: { ...base, verifiedAbsentAt: daysBefore(30) } } }, { now: NOW }).length, 1);
+  assert.equal(findOverdue({ optOuts: { Alpha: { ...base, verifiedAbsentAt: daysBefore(60) } } }, { now: NOW }).length, 1);
 });

@@ -16,6 +16,7 @@ const fs = require('node:fs');
 
 const { createSandbox, runWatcher, runnableConfig } = require('./helpers/watcher-sandbox');
 const brokers = require('../brokers');
+const { personFingerprint, searchHash } = require('../lib/identity');
 
 const day = 86400000;
 const daysAgo = (n) => new Date(Date.now() - n * day).toISOString();
@@ -25,6 +26,8 @@ const oneAda = (extra = {}) => runnableConfig({ persons: [ADA], ...extra });
 
 const withoutQuery = (url) => String(url).replace(/[?#].*$/, '');
 const adaBroker = (name) => brokers.forPerson(ADA).find(b => b.name === name);
+// A scan is trusted only for the search it was made with, so fixtures carry that search's hash (S1).
+const shOf = (name) => searchHash(adaBroker(name).searchUrl);
 
 async function inSandbox(options, fn) {
   const sandbox = createSandbox(options);
@@ -103,7 +106,7 @@ function withSearchAnswers(sandbox, listed) {
       if (/(^|\\/)forms$/.test(request) && loaded && loaded.findListingUrl && !loaded.__answers) {
         loaded.__answers = true;
         const listed = new Set((process.env.AIDR_TEST_LISTED || '').split(',').filter(Boolean));
-        loaded.findListingUrl = async (page, broker) => (listed.has(broker.name) ? 'https://listing.example/' + broker.name : null);
+        loaded.findListingUrl = async (page, broker) => (listed.has(broker.name) ? 'https://listing.example/Ada-Lovelace/Austin-TX/' + broker.name + '-p123456789' : null);
       }
       return loaded;
     };
@@ -118,13 +121,19 @@ test('scan then run --found-only: found is submitted, not found is skipped, and 
     const scan = await runWatcher(sandbox, ['--scan'], answers);
     assert.equal(scan.code, 0, scan.stderr);
     assert.match(scan.stdout, /found          : 1/);
-    assert.match(scan.stdout, /not found      : 5/);
-    assert.match(scan.stdout, /Where you were found:\n\s+- Spokeo: https:\/\/listing\.example\/Spokeo/);
-    assert.match(scan.stdout, /Where you were not found:\n\s+.*USPhonebook/);
+    assert.match(scan.stdout, /not found      : 1/, 'only USPhonebook has a search step validated live');
+    assert.match(scan.stdout, /not validated  : 4/);
+    // The sandbox's stdout is a pipe, not a terminal: the listing address holds the person's name,
+    // so only its host is printed (S11) and the full address is kept in the state file.
+    assert.match(scan.stdout, /Where you were found:\n\s+- Spokeo: listing\.example\n/);
+    assert.match(scan.stdout, /full listing URLs are in .*state\.json/);
+    assert.doesNotMatch(scan.stdout, /Ada-Lovelace|Austin-TX|p123456789/, 'no part of a listing path reaches stdout');
+    assert.match(scan.stdout, /Where you were not found:\n\s+USPhonebook\n/);
+    assert.match(scan.stdout, /search is not validated:\n\s+.*Nuwber/);
     assert.deepEqual(gotos(sandbox), [], 'a scan opens no opt-out page (the search was answered by the preload)');
     const scans = sandbox.readState().scans;
     assert.equal(scans.Spokeo.outcome, 'found');
-    assert.equal(scans.Spokeo.listingUrl, 'https://listing.example/Spokeo');
+    assert.equal(scans.Spokeo.listingUrl, 'https://listing.example/Ada-Lovelace/Austin-TX/Spokeo-p123456789');
     assert.equal(scans.USPhonebook.outcome, 'not_found');
 
     const run = await runWatcher(sandbox, ['--found-only', '--only', 'Spokeo,USPhonebook'], answers);
@@ -136,21 +145,26 @@ test('scan then run --found-only: found is submitted, not found is skipped, and 
   });
 });
 
-test('verify: an empty search is "never seen" with no sighting and "verified_clear" with one', async () => {
+test('verify: an empty search is "never seen" with no sighting and "verified_clear" with one (a scan, or a search-form submission)', async () => {
+  // Spokeo is a search-form broker: its run searched before it submitted, so its lastSuccess is a
+  // sighting even with no scan record (state from before 2.2). USPhonebook submits without looking and
+  // has no scan: never seen. Nuwber has a scan that saw a listing.
   const state = { optOuts: {
     Spokeo: { lastSuccess: daysAgo(10), lastAttempt: daysAgo(10) },
     USPhonebook: { lastSuccess: daysAgo(10), lastAttempt: daysAgo(10) },
-  }, scans: { USPhonebook: { at: daysAgo(20), outcome: 'found', lastFoundAt: daysAgo(20), listingUrl: 'https://listing.example/USPhonebook' } } };
+    Nuwber: { lastSuccess: daysAgo(10), lastAttempt: daysAgo(10) },
+  }, scans: { Nuwber: { at: daysAgo(20), outcome: 'found', lastFoundAt: daysAgo(20), listingUrl: 'https://listing.example/Nuwber', sh: shOf('Nuwber') } } };
   await inSandbox({ config: oneAda(), state }, async (sandbox) => {
     const r = await runWatcher(sandbox, ['--verify'], withSearchAnswers(sandbox, []));
     assert.equal(r.code, 0, r.stderr);
-    assert.match(r.stdout, /verified_clear : 1/);
+    assert.match(r.stdout, /verified_clear : 2/);
     assert.match(r.stdout, /never_seen     : 1/);
-    assert.match(r.stdout, /Never seen \(nothing there now[^\n]*\n\s+- Spokeo/);
+    assert.match(r.stdout, /Never seen \(nothing there now[^\n]*\n\s+- USPhonebook/);
     const after = sandbox.readState().optOuts;
-    assert.ok(after.USPhonebook.verifiedDeletedAt, 'seen before, gone now: a removal');
-    assert.ok(after.Spokeo.verifiedAbsentAt, 'never seen: recorded apart');
-    assert.equal(after.Spokeo.verifiedDeletedAt, undefined);
+    assert.ok(after.Spokeo.verifiedDeletedAt, 'a search-form submission was itself a sighting');
+    assert.ok(after.Nuwber.verifiedDeletedAt, 'seen by a scan, gone now: a removal');
+    assert.ok(after.USPhonebook.verifiedAbsentAt, 'never seen: recorded apart');
+    assert.equal(after.USPhonebook.verifiedDeletedAt, undefined);
   });
 });
 
@@ -174,10 +188,41 @@ test('found-only: a sighting made by an ordinary run is not a scan, so it still 
   });
 });
 
+test('found-only: with only stale or could-not-tell results it refuses, and opens no browser (S2)', async () => {
+  // Scanned on day 0, run on day 31 with the default config used to be a full run whose only
+  // line was "Filter applied - N broker(s) will run".
+  const state = { optOuts: {}, scans: {
+    Spokeo: { at: daysAgo(31), outcome: 'found', listingUrl: 'https://www.spokeo.com/x', fp: personFingerprint(ADA), sh: shOf('Spokeo') },
+    USPhonebook: { at: daysAgo(1), outcome: 'unknown', reason: 'search failed: bot wall', fp: personFingerprint(ADA), sh: shOf('USPhonebook') },
+  } };
+  await inSandbox({ config: oneAda(), state }, async (sandbox) => {
+    const r = await runWatcher(sandbox, ['--found-only']);
+    assert.equal(r.code, 1);
+    assert.match(r.stderr, /no usable scan result/);
+    assert.match(r.stderr, /Run `aidr scan` first/);
+    assert.deepEqual(sandbox.fakeEvents().filter(e => e.event === 'launch'), []);
+  });
+});
+
+test('found-only: says per person what the scan gave it to go by, and when one person has nothing usable (S2)', async () => {
+  const ALAN = runnableConfig().persons[1];
+  const state = { optOuts: {}, scans: {
+    'USPhonebook|Ada Lovelace': { at: daysAgo(2), outcome: 'not_found', fp: personFingerprint(ADA), sh: shOf('USPhonebook') },
+  } };
+  await inSandbox({ config: runnableConfig({ persons: [ADA, ALAN] }), state }, async (sandbox) => {
+    const r = await runWatcher(sandbox, ['--found-only', '--only', 'USPhonebook']);
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(r.stdout, /--found-only for Ada Lovelace: 0 listed \(submitted\), 1 not listed \(skipped\)\./);
+    assert.match(r.stdout, /--found-only for Alan Turing: 0 listed \(submitted\), 0 not listed \(skipped\)\./);
+    assert.match(r.stdout, /Alan Turing has no usable scan result[^\n]*run `aidr scan` again/);
+    assert.doesNotMatch(r.stdout, /Ada Lovelace has no usable scan result/);
+  });
+});
+
 test('found-only: found is submitted, not_found is skipped with its reason, an unscanned broker follows scan.unknown', async () => {
   const state = { optOuts: {}, scans: {
-    Spokeo: { at: daysAgo(2), outcome: 'found', listingUrl: 'https://www.spokeo.com/Ada-Lovelace', fp: require('../lib/identity').personFingerprint(ADA) },
-    USPhonebook: { at: '2026-11-10T08:00:00.000Z', outcome: 'not_found', fp: require('../lib/identity').personFingerprint(ADA) },
+    Spokeo: { at: daysAgo(2), outcome: 'found', listingUrl: 'https://www.spokeo.com/Ada-Lovelace', fp: personFingerprint(ADA), sh: shOf('Spokeo') },
+    USPhonebook: { at: '2026-11-10T08:00:00.000Z', outcome: 'not_found', fp: personFingerprint(ADA), sh: shOf('USPhonebook') },
   } };
   // not_found is only fresh relative to now: pin the scan inside the default 30 days.
   state.scans.USPhonebook.at = daysAgo(3);
@@ -202,18 +247,18 @@ test('found-only: found is submitted, not_found is skipped with its reason, an u
 });
 
 test('found-only: with scan.unknown "submit" (the default) an unscanned broker still runs', async () => {
-  const state = { optOuts: {}, scans: { Spokeo: { at: daysAgo(2), outcome: 'not_found', fp: require('../lib/identity').personFingerprint(ADA) } } };
+  const state = { optOuts: {}, scans: { USPhonebook: { at: daysAgo(2), outcome: 'not_found', fp: personFingerprint(ADA), sh: shOf('USPhonebook') } } };
   await inSandbox({ config: oneAda(), state }, async (sandbox) => {
-    const r = await runWatcher(sandbox, ['--found-only', '--only', 'Spokeo,Nuwber']);
+    const r = await runWatcher(sandbox, ['--found-only', '--only', 'USPhonebook,Nuwber']);
     assert.equal(r.code, 0, r.stderr);
     const opened = gotos(sandbox);
-    assert.ok(!opened.some(u => u.includes('spokeo.com')));
+    assert.ok(!opened.some(u => u.includes('usphonebook.com')));
     assert.ok(opened.some(u => u.includes('nuwber.com')));
   });
 });
 
 test('found-only with scan.unknown "skip": the email and generic passes are skipped, in one line', async () => {
-  const state = { optOuts: {}, scans: { Spokeo: { at: daysAgo(2), outcome: 'found', listingUrl: 'https://www.spokeo.com/x', fp: require('../lib/identity').personFingerprint(ADA) } } };
+  const state = { optOuts: {}, scans: { Spokeo: { at: daysAgo(2), outcome: 'found', listingUrl: 'https://www.spokeo.com/x', fp: personFingerprint(ADA), sh: shOf('Spokeo') } } };
   await inSandbox({ config: oneAda({ scan: { unknown: 'skip' } }), state }, async (sandbox) => {
     const r = await runWatcher(sandbox, ['--found-only']);
     assert.equal(r.code, 0, r.stderr);
@@ -223,20 +268,27 @@ test('found-only with scan.unknown "skip": the email and generic passes are skip
   });
 });
 
-test('found-only with scan.unknown "submit": the generic pass runs as today', async () => {
-  const state = { optOuts: {}, scans: { Spokeo: { at: daysAgo(2), outcome: 'not_found', fp: require('../lib/identity').personFingerprint(ADA) } } };
+test('found-only with scan.unknown "submit": the generic pass runs, and says nothing about leaving it out', async () => {
+  const state = { optOuts: {}, scans: { Spokeo: { at: daysAgo(2), outcome: 'found', listingUrl: 'https://www.spokeo.com/x', fp: personFingerprint(ADA), sh: shOf('Spokeo') } } };
   await inSandbox({ config: oneAda(), state }, async (sandbox) => {
-    const r = await runWatcher(sandbox, ['--found-only', '--only', 'Spokeo'], { timeoutMs: 90000 });
-    assert.equal(r.code, 0, r.stderr);
+    // No --only: --only Spokeo would exclude the generic pass anyway and prove nothing.
+    const r = await runWatcher(sandbox, ['--found-only'], { timeoutMs: 120000 });
+    // Every broker errors against the fake browser, which makes the exit code 1 by design.
+    assert.equal(r.timedOut, false);
+    assert.doesNotMatch(r.stderr, /Fatal/);
     assert.doesNotMatch(r.stdout, /cannot be searched, so scan\.unknown/);
+    assert.ok(sandbox.fakeEvents().filter(e => e.event === 'dns').length > 0, 'the generic pass looked hosts up');
   });
 });
 
-test('found-only is refused with --resume and --captchas', async () => {
+test('found-only is refused with --resume, and refused with --captchas, each on its own', async () => {
   await inSandbox({ config: oneAda() }, async (sandbox) => {
-    const r = await runWatcher(sandbox, ['--found-only', '--resume']);
-    assert.notEqual(r.code, 0);
-    assert.match(r.stderr, /--found-only cannot be combined with --resume/);
+    for (const flag of ['--resume', '--captchas']) {
+      const r = await runWatcher(sandbox, ['--found-only', flag]);
+      assert.notEqual(r.code, 0, flag);
+      assert.match(r.stderr, new RegExp(`--found-only cannot be combined with ${flag}`), flag);
+      assert.deepEqual(sandbox.fakeEvents().filter(e => e.event === 'launch'), [], `${flag}: nothing started`);
+    }
   });
 });
 
