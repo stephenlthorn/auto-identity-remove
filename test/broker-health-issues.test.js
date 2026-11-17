@@ -57,11 +57,24 @@ describe('opening an issue', () => {
   });
 
   test('the issue body names the page and the weekly job, and never page content', () => {
+    const PAGE = 'PAGE-CONTENT-SENTINEL <script>alert(1)</script> @everyone';
     const [a] = planIssueActions({
-      openIssues: [], results: { Spokeo: drifted(['a']) }, urls: { Spokeo: 'https://www.spokeo.com/optout' },
+      openIssues: [],
+      results: { Spokeo: drifted(['a'], { detail: `1 of 2 selectors match nothing visible: a (${PAGE})`, pageText: PAGE }) },
+      urls: { Spokeo: 'https://www.spokeo.com/optout' },
     });
     assert.match(a.body, /https:\/\/www\.spokeo\.com\/optout/);
     assert.match(a.body, /two weekly checks in a row/);
+    assert.equal(a.body.includes('PAGE-CONTENT-SENTINEL'), false, 'the result detail (which can echo the page) is not copied into the issue');
+    assert.equal(a.body.includes('<script>'), false);
+    const [c] = planIssueActions({
+      openIssues: [issue('Spokeo', ['zzz'])], results: { Spokeo: drifted(['a'], { detail: PAGE }) },
+    });
+    assert.equal(c.type, 'comment');
+    assert.equal(c.body.includes('PAGE-CONTENT-SENTINEL'), false);
+    const [d] = planIssueActions({ openIssues: [issue('Spokeo', ['a'])], results: { Spokeo: res('ok', { detail: PAGE }) } });
+    assert.equal(d.type, 'close');
+    assert.equal(d.comment.includes('PAGE-CONTENT-SENTINEL'), false);
   });
 
   test('one issue per drifted broker, in a stable order', () => {

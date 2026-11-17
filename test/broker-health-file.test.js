@@ -84,10 +84,46 @@ describe('the placeholder person', () => {
     assert.equal(PLACEHOLDER_PERSON.email.endsWith('@example.com'), true);
   });
 
-  test('no broker URL to load contains anything but placeholder or no values', () => {
-    for (const b of explicitBrokers(brokers)) {
-      assert.doesNotMatch(String(b.optOutUrl || ''), /undefined/, b.name);
-    }
+  // The property: the list the check loads is built for the placeholder person and nobody else, so
+  // every URL carries either the placeholder's values or nothing. Proven two ways: the list is
+  // built with exactly PLACEHOLDER_PERSON, and a different (sentinel) person's values never reach
+  // a URL that is built from the placeholder.
+  const SENTINEL_PERSON = Object.freeze({
+    firstName: 'Zqfirst', lastName: 'Zqlast', fullName: 'Zqfirst Zqlast', email: 'zq.sentinel@zq.invalid', phone: '9990001111',
+    country: 'US', city: 'Zqcity', state: 'ZQ', zip: '99999',
+  });
+  const personValues = (person) => Object.values(person).map((v) => encodeURIComponent(v));
+
+  test('the check builds the list for the placeholder person and no other', () => {
+    let asked = null;
+    explicitBrokers({ forPerson: (person) => { asked = person; return []; } });
+    assert.deepEqual(asked, PLACEHOLDER_PERSON);
+  });
+
+  test('no broker URL to load carries a value that is not the placeholder', () => {
+    const forPlaceholder = brokers.forPerson(PLACEHOLDER_PERSON);
+    const forSentinel = brokers.forPerson(SENTINEL_PERSON);
+    assert.equal(forPlaceholder.length, forSentinel.length);
+    let personDependent = 0;
+    forPlaceholder.forEach((b, i) => {
+      const url = String(b.optOutUrl || '');
+      assert.doesNotMatch(url, /undefined|null|NaN|\[object|\$\{/, `${b.name}: an unfilled template reached the URL`);
+      for (const v of personValues(SENTINEL_PERSON)) assert.equal(url.includes(v), false, `${b.name} leaked ${v}`);
+      const sentinelUrl = String(forSentinel[i].optOutUrl || '');
+      if (sentinelUrl !== url) {
+        personDependent += 1;
+        // The only difference between the two URLs is the person's values: swap the sentinel's for the placeholder's and they match.
+        let back = sentinelUrl;
+        for (const key of Object.keys(PLACEHOLDER_PERSON)) back = back.split(encodeURIComponent(SENTINEL_PERSON[key])).join(encodeURIComponent(PLACEHOLDER_PERSON[key]));
+        assert.equal(back, url, `${b.name}: the URL depends on something other than the person's fields`);
+      }
+    });
+    assert.ok(personDependent > 0, 'at least one broker URL embeds the person, or this test proves nothing');
+  });
+
+  test('the broker list the check loads has no search URL to visit: only optOutUrl is ever used', () => {
+    const source = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'lib', 'broker-health.js'), 'utf8');
+    assert.doesNotMatch(source.replace(/\/\*[^]*?\*\//g, '').replace(/\/\/.*$/gm, ''), /searchUrl/);
   });
 });
 

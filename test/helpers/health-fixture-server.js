@@ -20,7 +20,16 @@ const FORM = `
     <button type="submit">Remove</button>
   </form>`;
 
-const page = (body, title = 'Opt out') => `<!doctype html><html><head><title>${title}</title></head><body>${body}</body></html>`;
+// Every fixture page records the events a person (or a script acting as one) would cause, in
+// the capture phase on window, so a test can read window.__events afterwards and assert that
+// the health check caused none. A click, a keystroke or a submit that sends no request would
+// leave nothing in the server's request log; here it is still seen.
+const EVENT_TYPES = ['input', 'beforeinput', 'change', 'click', 'mousedown', 'mouseup', 'pointerdown', 'keydown', 'keypress', 'keyup', 'submit', 'focusin'];
+const RECORDER = `<script>window.__events = []; ${JSON.stringify(EVENT_TYPES)}.forEach(function (type) {
+  window.addEventListener(type, function (e) { window.__events.push(type + ' ' + ((e.target && (e.target.name || e.target.tagName)) || '')); }, true);
+});</script>`;
+
+const page = (body, title = 'Opt out') => `<!doctype html><html><head><title>${title}</title>${RECORDER}</head><body>${body}</body></html>`;
 
 const hiddenForm = (emailInput) => page(FORM.replace('<input name="email" type="email">', emailInput));
 const hiddenSubmit = (style) => page(FORM.replace('<button type="submit">Remove</button>', `<button type="submit" ${style}>Remove</button>`));
@@ -103,4 +112,4 @@ function findChromium() {
   return candidates.find((p) => p && fs.existsSync(p)) || null;
 }
 
-module.exports = { startFixtureServer, findChromium };
+module.exports = { startFixtureServer, findChromium, EVENT_TYPES };
