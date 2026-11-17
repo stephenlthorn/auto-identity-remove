@@ -165,10 +165,11 @@ test('isCoveredByDrop is false when any condition is missing', () => {
   assert.equal(covered({ host: '' }), false);
 });
 
-test('drop.alsoSubmit: true turns coverage off, any other value does not', () => {
+test('drop.alsoSubmit: true turns coverage off, and so does an invalid drop block', () => {
   assert.equal(covered({ config: { drop: { alsoSubmit: true } } }), false);
   assert.equal(covered({ config: { drop: { alsoSubmit: false } } }), true);
-  assert.equal(covered({ config: { drop: { alsoSubmit: 'true' } } }), true, 'only the boolean true counts');
+  assert.equal(covered({ config: { drop: { alsoSubmit: 'true' } } }), false, 'a mistyped value turns skipping off: submitting is the safe direction (D6)');
+  assert.equal(covered({ config: { drop: 'yes' } }), false, 'a drop block that is not an object turns skipping off too');
 });
 
 test('coverageReason names the date; makeCoveredByDrop works on generic rows by url', () => {
@@ -366,4 +367,13 @@ test('brokerAppliesToPerson: a californiaOnly entry is for California residents 
   assert.equal(drop.brokerAppliesToPerson({ name: 'CalPrivacy DROP', californiaOnly: true }, JANE), true);
   assert.equal(drop.brokerAppliesToPerson({ name: 'CalPrivacy DROP', californiaOnly: true }, BOB), false);
   assert.equal(drop.brokerAppliesToPerson({ name: 'Spokeo' }, BOB), true);
+});
+
+test('an invalid drop block disables skipping and the run notes carry the config warning once (D6)', () => {
+  const config = { drop: { alsoSubmit: 'true' } };
+  assert.equal(drop.makeCoveredByDrop({ person: JANE, state: STATE_WITH_DROP, config, registryHosts: REGISTRY }), null);
+  const lines = drop.dropRunNotes({ persons: [JANE, BOB], state: STATE_WITH_DROP, config, registryHosts: REGISTRY });
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /drop\.alsoSubmit must be true or false/);
+  assert.match(lines[0], /every broker is submitted/);
 });

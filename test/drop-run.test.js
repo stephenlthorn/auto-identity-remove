@@ -202,3 +202,15 @@ test('aidr complaints drafts a DROP complaint only when verification found a lis
     assert.deepEqual(complaintFiles(ageOnly), []);
   } finally { evidence.cleanup(); ageOnly.cleanup(); }
 });
+
+test('a mistyped drop.alsoSubmit submits the covered row and the run says why, once (D6)', async () => {
+  const sandbox = createSandbox({ config: config([person()], { drop: { alsoSubmit: 'true' } }), state: { optOuts: {}, drop: { 'Jane Sample': { submittedAt: '2026-09-01' } } } });
+  try {
+    writeRegistry(sandbox, { [ROW.host]: ['CA'] });
+    const r = await runOnlyRow(sandbox);
+    assert.equal(r.code, 0, r.stdout + r.stderr);
+    assert.equal(lookedUp(sandbox), true, 'the row was visited, not skipped');
+    assert.doesNotMatch(r.stdout, /covered by DROP/);
+    assert.equal(r.stdout.split('\n').filter(l => /drop\.alsoSubmit must be true or false/.test(l)).length, 1, r.stdout);
+  } finally { sandbox.cleanup(); }
+});
